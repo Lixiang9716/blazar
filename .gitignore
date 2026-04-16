@@ -1,3 +1,6 @@
 /target
 
 .worktrees/
+graphify-out/
+src/graphify-out/
+.graphify_*
