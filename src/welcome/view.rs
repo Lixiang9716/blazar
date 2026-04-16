@@ -20,7 +20,7 @@ pub fn render_scene(state: WelcomeState) -> String {
         "> ".to_string(),
     ];
 
-    join_columns(&sprite, &right)
+    join_columns(sprite, &right)
 }
 
 fn status_copy(mode: PresenceMode) -> &'static str {

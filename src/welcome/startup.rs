@@ -19,3 +19,9 @@ impl WelcomeController {
         render_scene(self.state)
     }
 }
+
+impl Default for WelcomeController {
+    fn default() -> Self {
+        Self::new()
+    }
+}

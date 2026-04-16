@@ -52,3 +52,9 @@ impl WelcomeState {
         }
     }
 }
+
+impl Default for WelcomeState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
