@@ -34,6 +34,19 @@ fn run_session_writes_greeting_then_listening_frames() {
 }
 
 #[test]
+fn run_session_keeps_idle_frame_on_eof() {
+    let mut input = io::Cursor::new("");
+    let mut output = Vec::new();
+
+    run_session(&mut input, &mut output).expect("session render should succeed");
+
+    let transcript = String::from_utf8(output).expect("session output should be utf-8");
+    assert!(transcript.contains("A rainbow helper just spotted you"));
+    assert!(transcript.contains("Waiting with a sprinkle of stardust"));
+    assert!(!transcript.contains("Listening with twinkly focus"));
+}
+
+#[test]
 fn run_session_propagates_input_errors() {
     let mut input = BrokenReader;
     let mut output = Vec::new();
