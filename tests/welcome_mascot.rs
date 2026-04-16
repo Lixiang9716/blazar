@@ -1,4 +1,4 @@
-use blazar::welcome::mascot::{render_pose, MascotPose};
+use blazar::welcome::mascot::{MascotPose, render_pose};
 
 #[test]
 fn on_watch_pose_has_assistant_cues() {
@@ -21,6 +21,11 @@ fn all_mascot_poses_share_the_same_height() {
 
     let expected_height = poses[0].len();
     for (i, pose) in poses.iter().enumerate() {
-        assert_eq!(pose.len(), expected_height, "pose at index {} has unexpected height", i);
+        assert_eq!(
+            pose.len(),
+            expected_height,
+            "pose at index {} has unexpected height",
+            i
+        );
     }
 }
