@@ -28,7 +28,7 @@ impl WelcomeState {
         let elapsed = now_ms.saturating_sub(self.entered_at_ms);
 
         match (self.mode, has_input, elapsed) {
-            (_, true, _) if self.mode != PresenceMode::TypingFocus => Self {
+            (_, true, _) => Self {
                 mode: PresenceMode::TypingFocus,
                 entered_at_ms: now_ms,
             },
