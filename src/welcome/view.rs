@@ -1,4 +1,4 @@
-use crate::welcome::mascot::{render_pose, MascotPose};
+use crate::welcome::mascot::{MascotPose, render_pose};
 use crate::welcome::state::{PresenceMode, WelcomeState};
 use crate::welcome::theme::{MASCOT_ALIAS_ZH, MASCOT_NAME};
 
@@ -46,7 +46,10 @@ fn join_columns(left: &[&str], right: &[String]) -> String {
     for index in 0..rows {
         let left_line = left.get(index).copied().unwrap_or("");
         let right_line = right.get(index).map(String::as_str).unwrap_or("");
-        lines.push(format!("{left_line:<width$}{right_line}", width = left_width));
+        lines.push(format!(
+            "{left_line:<width$}{right_line}",
+            width = left_width
+        ));
     }
 
     lines.join("\n")
