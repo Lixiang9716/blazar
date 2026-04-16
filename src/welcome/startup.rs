@@ -1,7 +1,11 @@
 use std::io::{self, BufRead, Write};
+use std::thread;
+use std::time::Duration;
 
 use crate::welcome::state::WelcomeState;
 use crate::welcome::view::render_scene;
+
+const IDLE_AFTER_MS: u64 = 1_200;
 
 pub struct WelcomeController {
     state: WelcomeState,
@@ -24,10 +28,16 @@ pub fn run_session<R: BufRead, W: Write>(input: &mut R, output: &mut W) -> io::R
     let mut welcome = WelcomeController::new();
     writeln!(output, "{}", welcome.frame(0, ""))?;
 
+    thread::sleep(Duration::from_millis(IDLE_AFTER_MS));
+    writeln!(output, "{}", welcome.frame(IDLE_AFTER_MS, ""))?;
+
     let mut line = String::new();
     input.read_line(&mut line)?;
 
-    writeln!(output, "{}", welcome.frame(1_500, &line))?;
+    if !line.trim().is_empty() {
+        writeln!(output, "{}", welcome.frame(IDLE_AFTER_MS, &line))?;
+    }
+
     Ok(())
 }
 

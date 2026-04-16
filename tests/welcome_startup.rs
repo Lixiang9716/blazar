@@ -22,15 +22,25 @@ fn controller_switches_to_listening_when_input_arrives() {
 }
 
 #[test]
-fn run_session_writes_greeting_then_listening_frames() {
+fn run_session_shows_idle_before_listening() {
     let mut input = io::Cursor::new("status report\n");
     let mut output = Vec::new();
 
     run_session(&mut input, &mut output).expect("session render should succeed");
 
     let transcript = String::from_utf8(output).expect("session output should be utf-8");
-    assert!(transcript.contains("A rainbow helper just spotted you"));
-    assert!(transcript.contains("Listening with twinkly focus"));
+    let greeting = transcript
+        .find("A rainbow helper just spotted you")
+        .expect("session should start with greeting");
+    let idle = transcript
+        .find("Waiting with a sprinkle of stardust")
+        .expect("session should show the idle waiting frame");
+    let listening = transcript
+        .find("Listening with twinkly focus")
+        .expect("session should end in the listening frame");
+
+    assert!(greeting < idle);
+    assert!(idle < listening);
 }
 
 #[test]
