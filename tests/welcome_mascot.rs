@@ -12,8 +12,15 @@ fn on_watch_pose_has_assistant_cues() {
 
 #[test]
 fn all_mascot_poses_share_the_same_height() {
-    let on_watch = render_pose(MascotPose::OnWatch);
-    let typing = render_pose(MascotPose::TypingFocus);
+    let poses = [
+        render_pose(MascotPose::OnWatch),
+        render_pose(MascotPose::TurningToUser),
+        render_pose(MascotPose::IdleMonitor),
+        render_pose(MascotPose::TypingFocus),
+    ];
 
-    assert_eq!(on_watch.len(), typing.len());
+    let expected_height = poses[0].len();
+    for (i, pose) in poses.iter().enumerate() {
+        assert_eq!(pose.len(), expected_height, "pose at index {} has unexpected height", i);
+    }
 }
