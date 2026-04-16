@@ -1,4 +1,4 @@
-use blazar::welcome::theme::{MascotPalette, MASCOT_ALIAS_ZH, MASCOT_NAME, MASCOT_PALETTE};
+use blazar::welcome::theme::{MASCOT_ALIAS_ZH, MASCOT_NAME, MASCOT_PALETTE, MascotPalette};
 
 #[test]
 fn mascot_palette_matches_approved_design() {
