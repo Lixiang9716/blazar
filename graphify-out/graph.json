@@ -1,0 +1,38 @@
+{
+  "directed": false,
+  "multigraph": false,
+  "graph": {},
+  "nodes": [
+    {
+      "label": "main.rs",
+      "file_type": "code",
+      "source_file": "src/main.rs",
+      "source_location": "L1",
+      "id": "main",
+      "community": 0
+    },
+    {
+      "label": "main()",
+      "file_type": "code",
+      "source_file": "src/main.rs",
+      "source_location": "L1",
+      "id": "main_main",
+      "community": 0
+    }
+  ],
+  "links": [
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/main.rs",
+      "source_location": "L1",
+      "weight": 1.0,
+      "_src": "main",
+      "_tgt": "main_main",
+      "source": "main",
+      "target": "main_main",
+      "confidence_score": 1.0
+    }
+  ],
+  "hyperedges": []
+}
