@@ -41,7 +41,12 @@ fn soft_colorize(line: &str, index: usize) -> String {
 }
 
 fn join_columns(left: &[&str], right: &[String]) -> String {
-    let left_width = left.iter().map(|line| line.chars().count()).max().unwrap_or(0) + 4;
+    let left_width = left
+        .iter()
+        .map(|line| line.chars().count())
+        .max()
+        .unwrap_or(0)
+        + 4;
 
     let rows = left.len().max(right.len());
     let mut lines = Vec::with_capacity(rows);

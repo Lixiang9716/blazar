@@ -1,6 +1,4 @@
-use blazar::welcome::theme::{
-    paint, MascotPalette, MASCOT_ALIAS_ZH, MASCOT_NAME, MASCOT_PALETTE,
-};
+use blazar::welcome::theme::{MASCOT_ALIAS_ZH, MASCOT_NAME, MASCOT_PALETTE, MascotPalette, paint};
 
 #[test]
 fn unicorn_palette_matches_approved_design() {

@@ -1,4 +1,4 @@
-use blazar::welcome::mascot::{render_pose, MascotPose};
+use blazar::welcome::mascot::{MascotPose, render_pose};
 
 #[test]
 fn greeting_pose_has_unicorn_cues() {

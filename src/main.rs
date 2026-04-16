@@ -1,14 +1,10 @@
-use blazar::welcome::startup::WelcomeController;
 use std::io;
 
-fn main() {
-    let mut welcome = WelcomeController::new();
-    println!("{}", welcome.frame(0, ""));
+fn main() -> io::Result<()> {
+    let stdin = io::stdin();
+    let stdout = io::stdout();
+    let mut input = stdin.lock();
+    let mut output = stdout.lock();
 
-    let mut input = String::new();
-    io::stdin()
-        .read_line(&mut input)
-        .expect("stdin read should succeed");
-
-    println!("{}", welcome.frame(1_500, &input));
+    blazar::welcome::startup::run_session(&mut input, &mut output)
 }

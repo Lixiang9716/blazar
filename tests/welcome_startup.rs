@@ -1,4 +1,5 @@
-use blazar::welcome::startup::WelcomeController;
+use blazar::welcome::startup::{WelcomeController, run_session};
+use std::io::{self, BufRead, Read};
 
 #[test]
 fn controller_starts_with_a_greeting_then_settles_idle() {
@@ -18,4 +19,41 @@ fn controller_switches_to_listening_when_input_arrives() {
     let scene = controller.frame(200, "status report");
     assert!(scene.contains("Listening with twinkly focus"));
     assert!(scene.contains("Star Sugar Guidepony / 星糖导航马"));
+}
+
+#[test]
+fn run_session_writes_greeting_then_listening_frames() {
+    let mut input = io::Cursor::new("status report\n");
+    let mut output = Vec::new();
+
+    run_session(&mut input, &mut output).expect("session render should succeed");
+
+    let transcript = String::from_utf8(output).expect("session output should be utf-8");
+    assert!(transcript.contains("A rainbow helper just spotted you"));
+    assert!(transcript.contains("Listening with twinkly focus"));
+}
+
+#[test]
+fn run_session_propagates_input_errors() {
+    let mut input = BrokenReader;
+    let mut output = Vec::new();
+
+    let error = run_session(&mut input, &mut output).expect_err("read failure should bubble up");
+    assert_eq!(error.kind(), io::ErrorKind::Other);
+}
+
+struct BrokenReader;
+
+impl Read for BrokenReader {
+    fn read(&mut self, _buf: &mut [u8]) -> io::Result<usize> {
+        Err(io::Error::other("broken reader"))
+    }
+}
+
+impl BufRead for BrokenReader {
+    fn fill_buf(&mut self) -> io::Result<&[u8]> {
+        Err(io::Error::other("broken reader"))
+    }
+
+    fn consume(&mut self, _amt: usize) {}
 }
