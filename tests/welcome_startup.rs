@@ -44,6 +44,23 @@ fn run_session_shows_idle_before_listening() {
 }
 
 #[test]
+fn run_session_advances_idle_mascot_before_listening() {
+    let mut input = io::Cursor::new("status report\n");
+    let mut output = Vec::new();
+
+    run_session(&mut input, &mut output).expect("session render should succeed");
+
+    let transcript = String::from_utf8(output).expect("session output should be utf-8");
+    let idle_scenes = split_scenes(&transcript)
+        .into_iter()
+        .filter(|scene| scene.contains("Waiting with a sprinkle of stardust"))
+        .collect::<Vec<_>>();
+
+    assert!(idle_scenes.len() >= 2, "session should render idle more than once");
+    assert_ne!(idle_scenes[0], idle_scenes[1]);
+}
+
+#[test]
 fn run_session_keeps_idle_frame_on_eof() {
     let mut input = io::Cursor::new("");
     let mut output = Vec::new();
@@ -63,6 +80,25 @@ fn run_session_propagates_input_errors() {
 
     let error = run_session(&mut input, &mut output).expect_err("read failure should bubble up");
     assert_eq!(error.kind(), io::ErrorKind::Other);
+}
+
+fn split_scenes(transcript: &str) -> Vec<String> {
+    let mut scenes = Vec::new();
+    let mut current = Vec::new();
+
+    for line in transcript.lines() {
+        if line.contains("BLAZAR") && !current.is_empty() {
+            scenes.push(current.join("\n"));
+            current.clear();
+        }
+        current.push(line.to_string());
+    }
+
+    if !current.is_empty() {
+        scenes.push(current.join("\n"));
+    }
+
+    scenes
 }
 
 struct BrokenReader;
