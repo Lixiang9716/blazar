@@ -2,7 +2,7 @@ use blazar::welcome::mascot::render_mascot;
 use blazar::welcome::state::WelcomeState;
 
 #[test]
-fn slime_idle_mascot_renders_as_ansi_multiline_sprite() {
+fn welcome_mascot_renders_slime_idle_as_ansi_multiline_sprite() {
     let mascot = render_mascot(WelcomeState::new(), 0);
 
     assert!(mascot.contains('\n'));
@@ -10,7 +10,7 @@ fn slime_idle_mascot_renders_as_ansi_multiline_sprite() {
 }
 
 #[test]
-fn slime_idle_animation_advances_with_elapsed_time() {
+fn welcome_mascot_animation_advances_with_elapsed_time() {
     let first = render_mascot(WelcomeState::new(), 0);
     let later = render_mascot(WelcomeState::new(), 260);
 
