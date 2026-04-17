@@ -143,9 +143,14 @@ impl SpriteAnimation {
     }
 
     pub fn tick(&mut self) {
-        if self.last_tick.elapsed() >= self.frame_time {
-            self.current = (self.current + 1) % self.frames.len();
-            self.last_tick = Instant::now();
+        let now = Instant::now();
+        let elapsed = now.duration_since(self.last_tick);
+        let intervals = elapsed.as_nanos() / self.frame_time.as_nanos();
+
+        if intervals > 0 {
+            self.current = (self.current + intervals as usize) % self.frames.len();
+            let remainder = elapsed.as_nanos() % self.frame_time.as_nanos();
+            self.last_tick = now - Duration::from_nanos(remainder as u64);
         }
     }
 
@@ -252,6 +257,12 @@ fn pixel_pair_to_cell(top: Rgba<u8>, bottom: Rgba<u8>) -> TerminalCell {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
+
+    fn animation_with_frame_time() -> SpriteAnimation {
+        SpriteAnimation::from_png_bytes(include_bytes!("../../assets/spirit/slime/slime_idle.png"), 4, 2)
+            .expect("slime idle sprite sheet should decode into frames")
+    }
 
     #[test]
     fn transparent_pair_becomes_space() {
@@ -269,5 +280,54 @@ mod tests {
         assert_eq!(cell.glyph, '█');
         assert_eq!(cell.fg, Some(Rgb(1, 2, 3)));
         assert_eq!(cell.bg, None);
+    }
+
+    #[test]
+    fn tick_does_not_advance_before_one_interval() {
+        let mut animation = animation_with_frame_time();
+        let current = animation.current;
+        animation.last_tick = Instant::now();
+
+        animation.tick();
+
+        assert_eq!(animation.current, current);
+    }
+
+    #[test]
+    fn tick_advances_after_one_interval() {
+        let mut animation = animation_with_frame_time();
+        animation.current = 0;
+        animation.last_tick = Instant::now() - animation.frame_time;
+
+        animation.tick();
+
+        assert_eq!(animation.current, 1);
+    }
+
+    #[test]
+    fn tick_catches_up_over_multiple_intervals() {
+        let mut animation = animation_with_frame_time();
+        animation.current = 0;
+        animation.last_tick = Instant::now() - animation.frame_time * 2 - Duration::from_millis(200);
+
+        animation.tick();
+
+        assert_eq!(animation.current, 2);
+
+        let current = animation.current;
+        animation.tick();
+
+        assert_eq!(animation.current, current);
+    }
+
+    #[test]
+    fn tick_wraps_around_frame_sequence() {
+        let mut animation = animation_with_frame_time();
+        animation.current = animation.len() - 1;
+        animation.last_tick = Instant::now() - animation.frame_time;
+
+        animation.tick();
+
+        assert_eq!(animation.current, 0);
     }
 }
