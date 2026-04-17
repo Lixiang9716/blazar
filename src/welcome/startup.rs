@@ -20,7 +20,7 @@ impl WelcomeController {
 
     pub fn frame(&mut self, now_ms: u64, input: &str) -> String {
         self.state = self.state.tick(now_ms, !input.trim().is_empty());
-        render_scene(self.state)
+        render_scene(self.state, now_ms)
     }
 }
 

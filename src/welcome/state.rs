@@ -46,6 +46,16 @@ impl WelcomeState {
             _ => self,
         }
     }
+
+    pub fn animation_frame_index(
+        self,
+        now_ms: u64,
+        frame_count: usize,
+        frame_interval_ms: u64,
+    ) -> usize {
+        let elapsed = now_ms.saturating_sub(self.entered_at_ms);
+        ((elapsed / frame_interval_ms) as usize) % frame_count
+    }
 }
 
 impl Default for WelcomeState {

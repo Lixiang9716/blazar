@@ -1,13 +1,17 @@
-use crate::welcome::mascot::{MascotPose, render_pose};
+use crate::welcome::mascot::render_mascot;
 use crate::welcome::state::{PresenceMode, WelcomeState};
 use crate::welcome::theme::{MASCOT_ALIAS_ZH, MASCOT_NAME, MASCOT_PALETTE, paint};
 
-pub fn render_scene(state: WelcomeState) -> String {
-    let pose = match state.mode() {
-        PresenceMode::Greeting => MascotPose::Greeting,
-        PresenceMode::IdleSparkle => MascotPose::IdleSparkle,
-        PresenceMode::Listening => MascotPose::Listening,
-    };
+pub fn render_scene(state: WelcomeState, now_ms: u64) -> String {
+    let left = render_mascot(state, now_ms)
+        .lines()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    let left_raw_width = left
+        .iter()
+        .map(|line| strip_ansi(line).chars().count())
+        .max()
+        .unwrap_or(0);
 
     let right = vec![
         paint("BLAZAR", MASCOT_PALETTE.blue_ansi),
@@ -18,7 +22,7 @@ pub fn render_scene(state: WelcomeState) -> String {
         "> ".to_string(),
     ];
 
-    join_columns(render_pose(pose), &right)
+    join_columns(&left, left_raw_width + 4, &right)
 }
 
 fn status_copy(mode: PresenceMode) -> &'static str {
@@ -29,34 +33,36 @@ fn status_copy(mode: PresenceMode) -> &'static str {
     }
 }
 
-fn soft_colorize(line: &str, index: usize) -> String {
-    let color = match index % 4 {
-        0 => MASCOT_PALETTE.horn_ansi,
-        1 => MASCOT_PALETTE.pink_ansi,
-        2 => MASCOT_PALETTE.mint_ansi,
-        _ => MASCOT_PALETTE.blue_ansi,
-    };
-
-    paint(line, color)
-}
-
-fn join_columns(left: &[&str], right: &[String]) -> String {
-    let left_width = left
-        .iter()
-        .map(|line| line.chars().count())
-        .max()
-        .unwrap_or(0)
-        + 4;
-
+fn join_columns(left: &[String], left_width: usize, right: &[String]) -> String {
     let rows = left.len().max(right.len());
     let mut lines = Vec::with_capacity(rows);
 
     for index in 0..rows {
-        let left_line = left.get(index).copied().unwrap_or("");
+        let left_line = left.get(index).map(String::as_str).unwrap_or("");
         let right_line = right.get(index).map(String::as_str).unwrap_or("");
-        let padded = format!("{left_line:<width$}", width = left_width);
-        lines.push(format!("{}{}", soft_colorize(&padded, index), right_line));
+        let left_visible_width = strip_ansi(left_line).chars().count();
+        let padding = " ".repeat(left_width.saturating_sub(left_visible_width));
+        lines.push(format!("{left_line}{padding}{right_line}"));
     }
 
     lines.join("\n")
+}
+
+fn strip_ansi(line: &str) -> String {
+    let mut out = String::new();
+    let mut chars = line.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        if ch == '\u{1b}' && chars.next_if_eq(&'[').is_some() {
+            for next in chars.by_ref() {
+                if next == 'm' {
+                    break;
+                }
+            }
+        } else {
+            out.push(ch);
+        }
+    }
+
+    out
 }

@@ -1,23 +1,18 @@
-use blazar::welcome::mascot::{MascotPose, render_pose};
+use blazar::welcome::mascot::render_mascot;
+use blazar::welcome::state::WelcomeState;
 
 #[test]
-fn greeting_pose_has_unicorn_cues() {
-    let frame = render_pose(MascotPose::Greeting).join("\n");
+fn slime_idle_mascot_renders_as_ansi_multiline_sprite() {
+    let mascot = render_mascot(WelcomeState::new(), 0);
 
-    assert!(frame.contains("/|"), "horn missing");
-    assert!(frame.contains("~~"), "mane missing");
-    assert!(frame.contains("ᵔᴗᵔ"), "cute face missing");
-    assert!(frame.contains("✦"), "sparkle missing");
+    assert!(mascot.contains('\n'));
+    assert!(mascot.contains("\u{1b}[38;2;"));
 }
 
 #[test]
-fn all_unicorn_poses_share_the_same_height() {
-    let poses = [
-        render_pose(MascotPose::Greeting),
-        render_pose(MascotPose::IdleSparkle),
-        render_pose(MascotPose::Listening),
-    ];
+fn slime_idle_animation_advances_with_elapsed_time() {
+    let first = render_mascot(WelcomeState::new(), 0);
+    let later = render_mascot(WelcomeState::new(), 260);
 
-    let expected = poses[0].len();
-    assert!(poses.iter().all(|pose| pose.len() == expected));
+    assert_ne!(first, later);
 }

@@ -1,10 +1,9 @@
 use blazar::welcome::state::WelcomeState;
-use blazar::welcome::theme::MASCOT_PALETTE;
 use blazar::welcome::view::render_scene;
 
 #[test]
 fn welcome_scene_contains_brand_copy_and_prompt() {
-    let scene = render_scene(WelcomeState::new());
+    let scene = render_scene(WelcomeState::new(), 0);
 
     assert!(scene.contains("BLAZAR"));
     assert!(scene.contains("Star Sugar Guidepony / 星糖导航马"));
@@ -13,10 +12,9 @@ fn welcome_scene_contains_brand_copy_and_prompt() {
 }
 
 #[test]
-fn listening_scene_uses_focus_copy_and_pastel_colors() {
-    let state = WelcomeState::new().tick(100, true);
-    let scene = render_scene(state);
+fn welcome_scene_keeps_sprite_and_copy_columns_together() {
+    let scene = render_scene(WelcomeState::new(), 0);
 
-    assert!(scene.contains("Listening with twinkly focus"));
-    assert!(scene.contains(MASCOT_PALETTE.pink_ansi));
+    assert!(scene.lines().count() >= 6);
+    assert!(scene.contains("> "));
 }
