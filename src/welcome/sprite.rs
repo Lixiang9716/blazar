@@ -129,7 +129,7 @@ impl SpriteAnimation {
         Ok(Self {
             frames,
             current: 0,
-            frame_time: Duration::from_millis(1000 / u64::from(fps)),
+            frame_time: Duration::from_nanos(1_000_000_000 / u64::from(fps)),
             last_tick: Instant::now(),
         })
     }
@@ -329,5 +329,14 @@ mod tests {
         animation.tick();
 
         assert_eq!(animation.current, 0);
+    }
+
+    #[test]
+    fn high_fps_uses_sub_millisecond_frame_time() {
+        let animation = SpriteAnimation::from_png_bytes(include_bytes!("../../assets/spirit/slime/slime_idle.png"), 4, 2000)
+            .expect("slime idle sprite sheet should decode into frames");
+
+        assert_eq!(animation.frame_time, Duration::from_nanos(500_000));
+        assert!(animation.frame_time > Duration::ZERO);
     }
 }
