@@ -16,3 +16,14 @@ fn welcome_mascot_animation_advances_with_elapsed_time() {
 
     assert_ne!(first, later);
 }
+
+#[test]
+fn welcome_mascot_listening_animation_keeps_advancing_while_typing() {
+    let listening = WelcomeState::new().tick(100, true);
+    let continued_typing = listening.tick(260, true);
+
+    let expected = render_mascot(listening, 260);
+    let actual = render_mascot(continued_typing, 260);
+
+    assert_eq!(actual, expected);
+}
