@@ -20,6 +20,7 @@ impl Frontend for WebFrontend {
             title,
             description,
             header_lines: _,
+            header_animation: _,
             ui_ast,
             layout,
             initial_data,

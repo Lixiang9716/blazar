@@ -1,7 +1,7 @@
 use crate::config;
-use ratatui::text::Line;
 use schemaui::prelude::*;
 use serde_json::Value;
+use std::time::Duration;
 
 fn build_schema() -> Result<Value, config::ConfigError> {
     config::load_app_schema()
@@ -12,17 +12,23 @@ type AppResult<T> = Result<T, Box<dyn std::error::Error>>;
 struct SchemaUiLaunch {
     schema: Value,
     title: String,
-    header_lines: Vec<Line<'static>>,
+    header_animation_frames: Vec<Vec<ratatui::text::Line<'static>>>,
+    header_frame_interval: Duration,
+    ui_options: UiOptions,
 }
 
 fn prepare_schema_ui(schema: Value) -> Result<SchemaUiLaunch, config::ConfigError> {
     let title = config::schema_title(&schema)?.to_owned();
-    let header_lines = crate::welcome::mascot::schema_ui_header_lines();
+    let header_animation_frames = crate::welcome::mascot::schema_ui_header_animation_frames();
+    let header_frame_interval = crate::welcome::mascot::schema_ui_header_animation_frame_interval();
+    let ui_options = UiOptions::default().with_tick_rate(header_frame_interval);
 
     Ok(SchemaUiLaunch {
         schema,
         title,
-        header_lines,
+        header_animation_frames,
+        header_frame_interval,
+        ui_options,
     })
 }
 
@@ -30,8 +36,8 @@ fn run_schema_ui(schema: Value) -> AppResult<Value> {
     let launch = prepare_schema_ui(schema)?;
     let value = SchemaUI::new(launch.schema)
         .with_title(&launch.title)
-        .with_header_lines(launch.header_lines)
-        .with_options(UiOptions::default())
+        .with_header_animation(launch.header_animation_frames, launch.header_frame_interval)
+        .with_options(launch.ui_options)
         .run()?;
 
     Ok(value)
@@ -71,9 +77,10 @@ mod tests {
     use serde_json::json;
     use std::cell::RefCell;
     use std::path::PathBuf;
+    use std::time::Duration;
 
     #[test]
-    fn prepare_schema_ui_sets_title_and_mascot_header() {
+    fn prepare_schema_ui_sets_title_and_mascot_idle_animation() {
         let schema = json!({
             "title": "Blazar",
             "type": "object",
@@ -85,9 +92,11 @@ mod tests {
         assert_eq!(launch.schema, schema);
         assert_eq!(launch.title, "Blazar");
         assert_eq!(
-            launch.header_lines,
-            crate::welcome::mascot::schema_ui_header_lines()
+            launch.header_animation_frames,
+            crate::welcome::mascot::schema_ui_header_animation_frames()
         );
+        assert_eq!(launch.header_frame_interval, Duration::from_millis(125));
+        assert_eq!(launch.ui_options.tick_rate, launch.header_frame_interval);
     }
 
     #[test]

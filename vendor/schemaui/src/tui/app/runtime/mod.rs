@@ -9,7 +9,11 @@ use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 use jsonschema::Validator;
 use ratatui::{layout::Rect, text::Line};
 use serde_json::Value;
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::HashMap,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use super::{
     input::{AppCommand, CommandDispatch, InputRouter},
@@ -48,6 +52,7 @@ pub(crate) struct App {
     options: UiOptions,
     session_title: Option<String>,
     header_lines: Option<Vec<Line<'static>>>,
+    header_animation: Option<HeaderAnimation>,
     status: StatusLine,
     global_errors: Vec<String>,
     validation_errors: usize,
@@ -68,6 +73,53 @@ struct HelpOverlayState {
     viewport: Rect,
     shortcut_offset: usize,
     error_offset: usize,
+}
+
+struct HeaderAnimation {
+    frames: Vec<Vec<Line<'static>>>,
+    frame_interval: Duration,
+    frame_index: usize,
+    carry: Duration,
+}
+
+impl HeaderAnimation {
+    fn new(frames: Vec<Vec<Line<'static>>>, frame_interval: Duration) -> Option<Self> {
+        if frames.is_empty() {
+            return None;
+        }
+
+        Some(Self {
+            frames,
+            frame_interval,
+            frame_index: 0,
+            carry: Duration::ZERO,
+        })
+    }
+
+    fn current_frame(&self) -> &[Line<'static>] {
+        &self.frames[self.frame_index]
+    }
+
+    fn advance(&mut self, delta: Duration) -> bool {
+        if self.frames.len() < 2 || self.frame_interval.is_zero() {
+            return false;
+        }
+
+        let interval_ns = self.frame_interval.as_nanos();
+        let total_ns = self.carry.as_nanos() + delta.as_nanos();
+        let steps = (total_ns / interval_ns) as usize;
+
+        if steps == 0 {
+            self.carry += delta;
+            return false;
+        }
+
+        let remainder_ns = total_ns % interval_ns;
+        self.carry =
+            Duration::from_nanos(u64::try_from(remainder_ns).expect("header animation remainder"));
+        self.frame_index = (self.frame_index + steps) % self.frames.len();
+        true
+    }
 }
 
 #[cfg(test)]
@@ -502,6 +554,7 @@ impl App {
             options,
             session_title: None,
             header_lines: None,
+            header_animation: None,
             status: StatusLine::new(),
             global_errors: Vec::new(),
             validation_errors: 0,
@@ -522,12 +575,39 @@ impl App {
     }
 
     pub fn set_header_lines(&mut self, header_lines: Option<Vec<Line<'static>>>) {
+        self.header_animation = None;
         self.header_lines = header_lines;
+    }
+
+    pub fn set_header_animation(
+        &mut self,
+        frames: Vec<Vec<Line<'static>>>,
+        frame_interval: Duration,
+    ) {
+        self.header_animation = HeaderAnimation::new(frames, frame_interval);
+        self.header_lines = self
+            .header_animation
+            .as_ref()
+            .map(|animation| animation.current_frame().to_vec());
+    }
+
+    fn advance_header_animation(&mut self, delta: Duration) {
+        let Some(animation) = self.header_animation.as_mut() else {
+            return;
+        };
+
+        if animation.advance(delta) {
+            self.header_lines = Some(animation.current_frame().to_vec());
+        }
     }
 
     pub fn run(&mut self) -> Result<Value> {
         let mut terminal = TerminalGuard::new()?;
+        let mut last_animation_tick = Instant::now();
         while !self.should_quit {
+            let now = Instant::now();
+            self.advance_header_animation(now.duration_since(last_animation_tick));
+            last_animation_tick = now;
             terminal.autoresize()?;
             terminal.draw(|frame| self.draw(frame))?;
             if !event::poll(self.options.tick_rate)? {
@@ -878,7 +958,9 @@ mod tests {
         ui_ast::build_ui_ast,
     };
     use jsonschema::validator_for;
+    use ratatui::text::Line;
     use serde_json::json;
+    use std::time::Duration;
 
     fn app_with_single_field() -> App {
         let schema = json!({
@@ -921,5 +1003,21 @@ mod tests {
             app.result.is_some(),
             "Ctrl+Q should validate and produce a result for a valid form"
         );
+    }
+
+    #[test]
+    fn header_animation_cycles_frames_on_tick() {
+        let mut app = app_with_single_field();
+        let frames = vec![vec![Line::from("frame 0")], vec![Line::from("frame 1")]];
+
+        app.set_header_animation(frames.clone(), Duration::from_millis(100));
+
+        assert_eq!(app.header_lines.as_deref(), Some(frames[0].as_slice()));
+
+        app.advance_header_animation(Duration::from_millis(100));
+        assert_eq!(app.header_lines.as_deref(), Some(frames[1].as_slice()));
+
+        app.advance_header_animation(Duration::from_millis(100));
+        assert_eq!(app.header_lines.as_deref(), Some(frames[0].as_slice()));
     }
 }

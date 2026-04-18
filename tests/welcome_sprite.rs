@@ -1,4 +1,7 @@
-use blazar::welcome::{mascot::schema_ui_header_lines, sprite::SpriteAnimation};
+use blazar::welcome::{
+    mascot::{schema_ui_header_animation_frames, schema_ui_header_lines},
+    sprite::SpriteAnimation,
+};
 use ratatui::text::Line;
 
 const SLIME_IDLE_PNG: &[u8] = include_bytes!("../assets/spirit/slime/slime_idle.png");
@@ -36,4 +39,18 @@ fn schema_ui_header_lines_match_the_first_slime_frame() {
         schema_ui_header_lines(),
         animation.frame_by_index(0).to_ratatui_lines()
     );
+}
+
+#[test]
+fn schema_ui_header_animation_frames_export_all_idle_frames() {
+    let animation = SpriteAnimation::from_png_bytes(SLIME_IDLE_PNG, 4, 8)
+        .expect("slime idle sprite sheet should decode into frames");
+
+    let frames = schema_ui_header_animation_frames();
+
+    assert_eq!(frames.len(), 4);
+    assert_eq!(frames[0], animation.frame_by_index(0).to_ratatui_lines());
+    assert_eq!(frames[1], animation.frame_by_index(1).to_ratatui_lines());
+    assert_eq!(frames[2], animation.frame_by_index(2).to_ratatui_lines());
+    assert_eq!(frames[3], animation.frame_by_index(3).to_ratatui_lines());
 }

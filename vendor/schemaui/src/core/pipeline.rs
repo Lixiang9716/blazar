@@ -1,9 +1,9 @@
 use anyhow::Result;
-use ratatui::text::Line;
 use jsonschema::validator_for;
+use ratatui::text::Line;
 use serde_json::{Map, Value};
 
-use crate::core::frontend::{Frontend, FrontendContext};
+use crate::core::frontend::{Frontend, FrontendContext, HeaderAnimationSpec};
 use crate::core::io::input::schema_with_defaults;
 use crate::core::ui_ast::{UiAst, UiAstBundle, build_ui_ast_bundle};
 use crate::schema::metadata::root_schema_header;
@@ -27,6 +27,7 @@ pub struct SchemaPipeline {
     schema: Value,
     title: Option<String>,
     header_lines: Option<Vec<Line<'static>>>,
+    header_animation: Option<HeaderAnimationSpec>,
     defaults: Option<Value>,
     ui_ast_source: UiAstSource,
 }
@@ -37,6 +38,7 @@ impl SchemaPipeline {
             schema,
             title: None,
             header_lines: None,
+            header_animation: None,
             defaults: None,
             ui_ast_source: UiAstSource::Runtime,
         }
@@ -49,6 +51,11 @@ impl SchemaPipeline {
 
     pub fn with_header_lines(mut self, header_lines: Option<Vec<Line<'static>>>) -> Self {
         self.header_lines = header_lines;
+        self
+    }
+
+    pub fn with_header_animation(mut self, header_animation: Option<HeaderAnimationSpec>) -> Self {
+        self.header_animation = header_animation;
         self
     }
 
@@ -82,6 +89,7 @@ impl SchemaPipeline {
             schema,
             title,
             header_lines,
+            header_animation,
             defaults,
             ui_ast_source,
         } = self;
@@ -101,6 +109,7 @@ impl SchemaPipeline {
             title: title.or(schema_title),
             description: schema_description,
             header_lines,
+            header_animation,
             ui_ast,
             layout,
             initial_data: data,

@@ -3,6 +3,7 @@ use ratatui::text::Line;
 use serde_json::Value;
 use std::{borrow::Cow, sync::Arc, time::Duration};
 
+use crate::core::frontend::HeaderAnimationSpec;
 use crate::core::pipeline::SchemaPipeline;
 use crate::io::{
     self, DocumentFormat,
@@ -23,6 +24,7 @@ pub struct SchemaUI {
     schema: Value,
     title: Option<String>,
     header_lines: Option<Vec<Line<'static>>>,
+    header_animation: Option<HeaderAnimationSpec>,
     options: UiOptions,
     output: Option<OutputOptions>,
     initial_data: Option<Value>,
@@ -38,6 +40,7 @@ impl SchemaUI {
             schema,
             title: None,
             header_lines: None,
+            header_animation: None,
             options: UiOptions::default(),
             output: None,
             initial_data: None,
@@ -106,6 +109,19 @@ impl SchemaUI {
 
     pub fn with_header_lines(mut self, header_lines: Vec<Line<'static>>) -> Self {
         self.header_lines = Some(header_lines);
+        self
+    }
+
+    pub fn with_header_animation(
+        mut self,
+        frames: Vec<Vec<Line<'static>>>,
+        frame_interval: Duration,
+    ) -> Self {
+        self.header_animation = HeaderAnimationSpec {
+            frames,
+            frame_interval,
+        }
+        .into();
         self
     }
 
@@ -271,6 +287,7 @@ impl SchemaUI {
             schema,
             title,
             header_lines,
+            header_animation,
             options: _,
             output,
             initial_data,
@@ -284,6 +301,7 @@ impl SchemaUI {
         let pipeline = SchemaPipeline::new(schema)
             .with_title(title)
             .with_header_lines(header_lines)
+            .with_header_animation(header_animation)
             .with_defaults(initial_data)
             .with_prepared_ui_ast(ui_ast)
             .with_prepared_ui_bundle(ui_bundle);

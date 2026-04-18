@@ -1,4 +1,5 @@
 use std::sync::OnceLock;
+use std::time::Duration;
 
 use ratatui::text::Line;
 
@@ -19,6 +20,17 @@ pub fn render_mascot(state: WelcomeState, now_ms: u64) -> String {
 
 pub fn schema_ui_header_lines() -> Vec<Line<'static>> {
     slime_idle_animation().frame_by_index(0).to_ratatui_lines()
+}
+
+pub fn schema_ui_header_animation_frames() -> Vec<Vec<Line<'static>>> {
+    let animation = slime_idle_animation();
+    (0..animation.len())
+        .map(|index| animation.frame_by_index(index).to_ratatui_lines())
+        .collect()
+}
+
+pub fn schema_ui_header_animation_frame_interval() -> Duration {
+    Duration::from_millis(SLIME_IDLE_FRAME_MS)
 }
 
 fn slime_idle_animation() -> &'static SpriteAnimation {

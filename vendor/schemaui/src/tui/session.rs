@@ -38,6 +38,7 @@ impl Frontend for TuiFrontend {
             title,
             description: _,
             header_lines,
+            header_animation,
             ui_ast,
             layout,
             initial_data: _,
@@ -53,7 +54,11 @@ impl Frontend for TuiFrontend {
 
         let mut app = App::new(form_state, validator, options);
         app.set_session_title(title);
-        app.set_header_lines(header_lines);
+        if let Some(animation) = header_animation {
+            app.set_header_animation(animation.frames, animation.frame_interval);
+        } else {
+            app.set_header_lines(header_lines);
+        }
         let result = app.run()?;
         Ok(result)
     }
