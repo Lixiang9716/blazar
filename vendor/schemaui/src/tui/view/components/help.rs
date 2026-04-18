@@ -53,8 +53,7 @@ pub(crate) fn help_overlay_error_message_capacity(area: Rect) -> usize {
     error_message_column_capacity(error_area)
 }
 
-pub fn render_help_overlay(frame: &mut Frame<'_>, help: HelpOverlayRender<'_>) {
-    let area = frame.area();
+pub fn render_help_overlay(frame: &mut Frame<'_>, area: Rect, help: HelpOverlayRender<'_>) {
     frame.render_widget(Clear, area);
 
     let block = Block::default().title("Help").borders(Borders::ALL).style(

@@ -1,6 +1,6 @@
 use ratatui::{
     Frame,
-    layout::{Constraint, Direction, Layout},
+    layout::{Constraint, Direction, Layout, Rect},
     text::Line,
     widgets::Paragraph,
 };
@@ -110,6 +110,12 @@ pub fn draw(
         0
     };
     let footer_index = body_index + 1;
+    let content_area = Rect {
+        x: frame.area().x,
+        y: chunks[body_index].y,
+        width: frame.area().width,
+        height: frame.area().bottom().saturating_sub(chunks[body_index].y),
+    };
 
     let cursor_enabled = ctx.popup.is_none() && ctx.composite_overlay.is_none();
     render_body(frame, chunks[body_index], form_state, cursor_enabled);
@@ -127,6 +133,6 @@ pub fn draw(
     }
 
     if let Some(help) = ctx.help_overlay {
-        render_help_overlay(frame, help);
+        render_help_overlay(frame, content_area, help);
     }
 }
