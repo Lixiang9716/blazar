@@ -4,8 +4,10 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-crossterm = "0.28"
+crossterm = "0.29"
 image = "0.25"
-ratatui = "0.29"
-ratatui-textarea = "0.9"
+ratatui-core = "0.1"
+ratatui-widgets = "0.3"
+ratatui-crossterm = "0.1"
+ratatui-textarea = { version = "0.9", features = ["crossterm"] }
 serde_json = "1"
