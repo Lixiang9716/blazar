@@ -7,7 +7,7 @@ use crate::tui::view::{
 use anyhow::{Result, anyhow};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 use jsonschema::Validator;
-use ratatui::layout::Rect;
+use ratatui::{layout::Rect, text::Line};
 use serde_json::Value;
 use std::{collections::HashMap, sync::Arc};
 
@@ -47,6 +47,7 @@ pub(crate) struct App {
     validator: Validator,
     options: UiOptions,
     session_title: Option<String>,
+    header_lines: Option<Vec<Line<'static>>>,
     status: StatusLine,
     global_errors: Vec<String>,
     validation_errors: usize,
@@ -485,6 +486,7 @@ impl App {
             validator,
             options,
             session_title: None,
+            header_lines: None,
             status: StatusLine::new(),
             global_errors: Vec::new(),
             validation_errors: 0,
@@ -502,6 +504,10 @@ impl App {
 
     pub fn set_session_title(&mut self, title: Option<String>) {
         self.session_title = title;
+    }
+
+    pub fn set_header_lines(&mut self, header_lines: Option<Vec<Line<'static>>>) {
+        self.header_lines = header_lines;
     }
 
     pub fn run(&mut self) -> Result<Value> {
@@ -579,6 +585,7 @@ impl App {
                     global_errors: &self.global_errors,
                     focus_label,
                     session_title: self.session_title.as_deref(),
+                    header_lines: self.header_lines.as_deref(),
                     popup: self.popup.as_ref().map(|popup| popup.state.as_render()),
                     composite_overlay: Some(overlay_meta),
                     help_overlay: help_overlay_render,
@@ -604,6 +611,7 @@ impl App {
                 global_errors: &self.global_errors,
                 focus_label,
                 session_title: self.session_title.as_deref(),
+                header_lines: self.header_lines.as_deref(),
                 popup: self.popup.as_ref().map(|popup| popup.state.as_render()),
                 composite_overlay: None,
                 help_overlay: help_overlay_render,

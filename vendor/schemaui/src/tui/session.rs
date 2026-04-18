@@ -37,7 +37,7 @@ impl Frontend for TuiFrontend {
         let FrontendContext {
             title,
             description: _,
-            header_lines: _,
+            header_lines,
             ui_ast,
             layout,
             initial_data: _,
@@ -53,6 +53,7 @@ impl Frontend for TuiFrontend {
 
         let mut app = App::new(form_state, validator, options);
         app.set_session_title(title);
+        app.set_header_lines(header_lines);
         let result = app.run()?;
         Ok(result)
     }

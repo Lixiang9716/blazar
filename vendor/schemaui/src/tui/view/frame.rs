@@ -1,6 +1,8 @@
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout},
+    text::Line,
+    widgets::{Paragraph, Wrap},
 };
 
 use crate::tui::state::FormState;
@@ -17,6 +19,7 @@ pub struct UiContext<'a> {
     pub global_errors: &'a [String],
     pub focus_label: Option<String>,
     pub session_title: Option<&'a str>,
+    pub header_lines: Option<&'a [Line<'static>]>,
     pub popup: Option<PopupRender<'a>>,
     pub composite_overlay: Option<CompositeOverlay>,
     pub help_overlay: Option<HelpOverlayRender<'a>>,
@@ -79,14 +82,38 @@ pub fn draw(
     overlay_form: Option<&mut FormState>,
     ctx: UiContext<'_>,
 ) {
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(7), Constraint::Length(4)])
-        .split(frame.area());
+    let header_height = ctx
+        .header_lines
+        .map(|lines| lines.len().max(1) as u16)
+        .unwrap_or(0);
+    let chunks = if header_height > 0 {
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(header_height),
+                Constraint::Min(7),
+                Constraint::Length(4),
+            ])
+            .split(frame.area())
+    } else {
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(7), Constraint::Length(4)])
+            .split(frame.area())
+    };
+
+    let body_index = if let Some(header_lines) = ctx.header_lines {
+        let header = Paragraph::new(header_lines.to_vec()).wrap(Wrap { trim: false });
+        frame.render_widget(header, chunks[0]);
+        1
+    } else {
+        0
+    };
+    let footer_index = body_index + 1;
 
     let cursor_enabled = ctx.popup.is_none() && ctx.composite_overlay.is_none();
-    render_body(frame, chunks[0], form_state, cursor_enabled);
-    render_footer(frame, chunks[1], &ctx);
+    render_body(frame, chunks[body_index], form_state, cursor_enabled);
+    render_footer(frame, chunks[footer_index], &ctx);
 
     // When both an overlay and a popup are present, render the overlay first
     // and the popup last so that the popup always appears on top. Drawing the
