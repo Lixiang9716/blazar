@@ -1,25 +1,35 @@
+use std::fs;
 use std::sync::OnceLock;
 
+use crate::config::{self, MascotConfig};
 use crate::welcome::sprite::SpriteAnimation;
 use crate::welcome::state::WelcomeState;
 
-const SLIME_IDLE_PNG: &[u8] = include_bytes!("../../assets/spirit/slime/slime_idle.png");
-const SLIME_IDLE_FRAMES: u32 = 4;
-const SLIME_IDLE_FPS: u16 = 8;
-const SLIME_IDLE_FRAME_MS: u64 = 1_000 / SLIME_IDLE_FPS as u64;
-
 pub fn render_mascot(state: WelcomeState, now_ms: u64) -> String {
+    let config = slime_idle_config();
     let animation = slime_idle_animation();
-    let frame_index = state.animation_frame_index(now_ms, animation.len(), SLIME_IDLE_FRAME_MS);
+    let frame_index =
+        state.animation_frame_index(now_ms, animation.len(), config.frame_interval_ms());
 
     animation.frame_by_index(frame_index).to_ansi_string()
+}
+
+fn slime_idle_config() -> &'static MascotConfig {
+    static CONFIG: OnceLock<MascotConfig> = OnceLock::new();
+
+    CONFIG.get_or_init(|| {
+        config::load_mascot_config().expect("bundled mascot config should load from config/app.json")
+    })
 }
 
 fn slime_idle_animation() -> &'static SpriteAnimation {
     static ANIMATION: OnceLock<SpriteAnimation> = OnceLock::new();
 
     ANIMATION.get_or_init(|| {
-        SpriteAnimation::from_png_bytes(SLIME_IDLE_PNG, SLIME_IDLE_FRAMES, SLIME_IDLE_FPS)
+        let config = slime_idle_config();
+        let png = fs::read(&config.asset_path).expect("slime idle sprite should be readable");
+
+        SpriteAnimation::from_png_bytes(&png, config.frame_count, config.fps)
             .expect("slime idle sprite should decode")
     })
 }

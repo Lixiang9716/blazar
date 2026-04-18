@@ -2,6 +2,11 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Blazar Mission Console",
   "description": "Capture the task, context, and execution preferences for a Blazar session.",
+  "mascot": {
+    "assetPath": "assets/spirit/slime/slime_idle.png",
+    "frameCount": 4,
+    "fps": 8
+  },
   "type": "object",
   "properties": {
     "task": {

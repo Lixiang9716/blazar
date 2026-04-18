@@ -1,4 +1,4 @@
-use blazar::config::{APP_SCHEMA_PATH, load_app_schema, load_app_schema_from_path};
+use blazar::config::{APP_SCHEMA_PATH, load_app_schema, load_app_schema_from_path, load_mascot_config};
 use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -55,6 +55,16 @@ fn config_loader_reads_schema_from_json_file() {
     );
 
     fs::remove_dir_all(&dir).expect("temp dir should be removed");
+}
+
+#[test]
+fn mascot_config_centralizes_slime_idle_settings() {
+    let mascot = load_mascot_config().expect("bundled mascot config should load");
+
+    assert_eq!(mascot.asset_path, "assets/spirit/slime/slime_idle.png");
+    assert_eq!(mascot.frame_count, 4);
+    assert_eq!(mascot.fps, 8);
+    assert_eq!(mascot.frame_interval_ms(), 125);
 }
 
 fn unique_temp_dir() -> PathBuf {

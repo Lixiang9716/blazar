@@ -10,6 +10,80 @@ pub fn load_app_schema() -> Result<Value, ConfigError> {
     load_app_schema_from_path(APP_SCHEMA_PATH)
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MascotConfig {
+    pub asset_path: String,
+    pub frame_count: u32,
+    pub fps: u16,
+}
+
+impl MascotConfig {
+    pub fn frame_interval_ms(&self) -> u64 {
+        1_000 / u64::from(self.fps)
+    }
+}
+
+pub fn load_mascot_config() -> Result<MascotConfig, ConfigError> {
+    load_mascot_config_from_path(APP_SCHEMA_PATH)
+}
+
+pub fn load_mascot_config_from_path(path: impl AsRef<Path>) -> Result<MascotConfig, ConfigError> {
+    let path = path.as_ref();
+    let schema = load_app_schema_from_path(path)?;
+
+    let asset_path = schema["mascot"]["assetPath"]
+        .as_str()
+        .ok_or_else(|| ConfigError::InvalidSchema {
+            path: path.to_path_buf(),
+            message: "mascot.assetPath must be a string",
+        })?
+        .to_owned();
+    let frame_count = schema["mascot"]["frameCount"]
+        .as_u64()
+        .ok_or_else(|| ConfigError::InvalidSchema {
+            path: path.to_path_buf(),
+            message: "mascot.frameCount must be a positive integer",
+        })
+        .and_then(|value| {
+            u32::try_from(value).map_err(|_| ConfigError::InvalidSchema {
+                path: path.to_path_buf(),
+                message: "mascot.frameCount must fit within u32",
+            })
+        })?;
+    let fps = schema["mascot"]["fps"]
+        .as_u64()
+        .ok_or_else(|| ConfigError::InvalidSchema {
+            path: path.to_path_buf(),
+            message: "mascot.fps must be a positive integer",
+        })
+        .and_then(|value| {
+            u16::try_from(value).map_err(|_| ConfigError::InvalidSchema {
+                path: path.to_path_buf(),
+                message: "mascot.fps must fit within u16",
+            })
+        })?;
+
+    if frame_count == 0 {
+        return Err(ConfigError::InvalidSchema {
+            path: path.to_path_buf(),
+            message: "mascot.frameCount must be greater than 0",
+        });
+    }
+
+    if fps == 0 {
+        return Err(ConfigError::InvalidSchema {
+            path: path.to_path_buf(),
+            message: "mascot.fps must be greater than 0",
+        });
+    }
+
+    Ok(MascotConfig {
+        asset_path,
+        frame_count,
+        fps,
+    })
+}
+
 pub fn load_app_schema_from_path(path: impl AsRef<Path>) -> Result<Value, ConfigError> {
     let path = path.as_ref();
     let contents = fs::read_to_string(path).map_err(|source| ConfigError::Read {
