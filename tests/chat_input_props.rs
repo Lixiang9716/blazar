@@ -22,10 +22,7 @@ proptest! {
 
 #[test]
 fn enter_maps_to_submit() {
-    let action = InputAction::from_key_event(KeyEvent::new(
-        KeyCode::Enter,
-        KeyModifiers::NONE,
-    ));
+    let action = InputAction::from_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
     assert_eq!(action, InputAction::Submit);
 }

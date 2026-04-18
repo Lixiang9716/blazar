@@ -152,6 +152,10 @@ impl SpriteAnimation {
         self.frames.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.frames.is_empty()
+    }
+
     pub fn frame_by_index(&self, index: usize) -> &TerminalFrame {
         &self.frames[index % self.frames.len()]
     }

@@ -112,11 +112,11 @@ pub fn run_terminal_chat(
         terminal.draw(|frame| render_frame(frame, &app, tick_ms))?;
 
         // Handle events with timeout
-        if event::poll(Duration::from_millis(100))? {
-            if let Event::Key(key) = event::read()? {
-                let action = InputAction::from_key_event(key);
-                app.handle_action(action);
-            }
+        if event::poll(Duration::from_millis(100))?
+            && let Event::Key(key) = event::read()?
+        {
+            let action = InputAction::from_key_event(key);
+            app.handle_action(action);
         }
 
         // Check quit
