@@ -17,6 +17,10 @@ use std::{
 };
 
 use image::{Rgba, RgbaImage};
+use ratatui_core::{
+    style::{Color, Style},
+    text::{Line, Span},
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Rgb(pub u8, pub u8, pub u8);
@@ -60,6 +64,46 @@ impl TerminalFrame {
         }
 
         out
+    }
+
+    pub fn to_plain_string(&self) -> String {
+        let mut out = String::new();
+
+        for (row_index, row) in self.rows.iter().enumerate() {
+            for cell in row {
+                out.push(cell.glyph);
+            }
+
+            if row_index + 1 != self.rows.len() {
+                out.push('\n');
+            }
+        }
+
+        out
+    }
+
+    pub fn to_styled_lines(&self) -> Vec<Line<'static>> {
+        self.rows
+            .iter()
+            .map(|row| {
+                let spans = row
+                    .iter()
+                    .map(|cell| {
+                        let mut style = Style::default();
+                        if let Some(Rgb(r, g, b)) = cell.fg {
+                            style = style.fg(Color::Rgb(r, g, b));
+                        }
+                        if let Some(Rgb(r, g, b)) = cell.bg {
+                            style = style.bg(Color::Rgb(r, g, b));
+                        }
+
+                        Span::styled(cell.glyph.to_string(), style)
+                    })
+                    .collect::<Vec<_>>();
+
+                Line::from(spans)
+            })
+            .collect()
     }
 }
 

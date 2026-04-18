@@ -1,7 +1,7 @@
 use crate::chat::app::ChatApp;
 use crate::chat::model::Author;
 use crate::chat::theme::build_theme;
-use crate::welcome::mascot::render_mascot;
+use crate::welcome::mascot::{render_mascot_lines, render_mascot_plain};
 use crate::welcome::state::WelcomeState;
 use ratatui_core::{
     layout::{Constraint, Direction, Layout, Rect},
@@ -20,7 +20,7 @@ pub fn render_to_lines_for_test(app: &ChatApp, width: u16, height: u16) -> Vec<S
     
     // Render mascot in idle state
     let tick_ms = 1_200;
-    let mascot = render_mascot(WelcomeState::new().tick(tick_ms, false), tick_ms);
+    let mascot = render_mascot_plain(WelcomeState::new().tick(tick_ms, false), tick_ms);
     
     let mut lines = vec![
         "Spirit / 星糖导航马".to_owned(),
@@ -59,7 +59,7 @@ pub fn render_frame(frame: &mut Frame, app: &ChatApp, tick_ms: u64) {
 
 fn render_spirit_pane(frame: &mut Frame, area: Rect, tick_ms: u64, theme: &crate::chat::theme::ChatTheme) {
     let state = WelcomeState::new().tick(tick_ms, false);
-    let mascot = render_mascot(state, tick_ms);
+    let mascot_lines = render_mascot_lines(state, tick_ms);
 
     let title_line = Line::from(vec![
         Span::styled("Spirit / ", Style::default().fg(Color::Cyan)),
@@ -69,10 +69,7 @@ fn render_spirit_pane(frame: &mut Frame, area: Rect, tick_ms: u64, theme: &crate
     let status = "Waiting with a sprinkle of stardust";
 
     let mut text_lines = vec![title_line, Line::from(status), Line::from("")];
-    
-    for line in mascot.lines() {
-        text_lines.push(Line::from(line.to_string()));
-    }
+    text_lines.extend(mascot_lines);
 
     let block = Block::default()
         .borders(Borders::ALL)

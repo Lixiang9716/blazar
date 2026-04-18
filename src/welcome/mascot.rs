@@ -4,6 +4,7 @@ use std::sync::OnceLock;
 use crate::config::{self, MascotConfig};
 use crate::welcome::sprite::SpriteAnimation;
 use crate::welcome::state::WelcomeState;
+use ratatui_core::text::Line;
 
 pub fn render_mascot(state: WelcomeState, now_ms: u64) -> String {
     let config = slime_idle_config();
@@ -12,6 +13,24 @@ pub fn render_mascot(state: WelcomeState, now_ms: u64) -> String {
         state.animation_frame_index(now_ms, animation.len(), config.frame_interval_ms());
 
     animation.frame_by_index(frame_index).to_ansi_string()
+}
+
+pub fn render_mascot_plain(state: WelcomeState, now_ms: u64) -> String {
+    let config = slime_idle_config();
+    let animation = slime_idle_animation();
+    let frame_index =
+        state.animation_frame_index(now_ms, animation.len(), config.frame_interval_ms());
+
+    animation.frame_by_index(frame_index).to_plain_string()
+}
+
+pub fn render_mascot_lines(state: WelcomeState, now_ms: u64) -> Vec<Line<'static>> {
+    let config = slime_idle_config();
+    let animation = slime_idle_animation();
+    let frame_index =
+        state.animation_frame_index(now_ms, animation.len(), config.frame_interval_ms());
+
+    animation.frame_by_index(frame_index).to_styled_lines()
 }
 
 fn slime_idle_config() -> &'static MascotConfig {
