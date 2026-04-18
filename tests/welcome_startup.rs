@@ -1,4 +1,4 @@
-use blazar::welcome::startup::{WelcomeController, run_session};
+use blazar::welcome::startup::{run_preview, run_session, WelcomeController};
 use std::io::{self, BufRead, Read};
 
 #[test]
@@ -80,6 +80,18 @@ fn run_session_propagates_input_errors() {
 
     let error = run_session(&mut input, &mut output).expect_err("read failure should bubble up");
     assert_eq!(error.kind(), io::ErrorKind::Other);
+}
+
+#[test]
+fn run_preview_renders_welcome_without_waiting_for_input() {
+    let mut output = Vec::new();
+
+    run_preview(&mut output).expect("preview should render successfully");
+
+    let transcript = String::from_utf8(output).expect("preview output should be utf-8");
+    assert!(transcript.contains("A rainbow helper just spotted you"));
+    assert!(transcript.contains("Waiting with a sprinkle of stardust"));
+    assert!(!transcript.contains("Listening with twinkly focus"));
 }
 
 fn split_scenes(transcript: &str) -> Vec<String> {

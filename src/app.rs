@@ -9,13 +9,11 @@ fn build_schema() -> Result<Value, config::ConfigError> {
 
 type AppResult<T> = Result<T, Box<dyn std::error::Error>>;
 
-fn run_welcome_session() -> io::Result<()> {
-    let stdin = io::stdin();
+fn run_welcome_preview() -> io::Result<()> {
     let stdout = io::stdout();
-    let mut input = stdin.lock();
     let mut output = stdout.lock();
 
-    crate::welcome::startup::run_session(&mut input, &mut output)
+    crate::welcome::startup::run_preview(&mut output)
 }
 
 fn run_schema_ui(schema: Value) -> AppResult<Value> {
@@ -57,7 +55,7 @@ where
 }
 
 pub fn run() -> AppResult<()> {
-    run_app(run_welcome_session, build_schema, run_schema_ui, |json| {
+    run_app(run_welcome_preview, build_schema, run_schema_ui, |json| {
         println!("{json}");
         Ok(())
     })

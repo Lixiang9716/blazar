@@ -53,6 +53,18 @@ pub fn run_session<R: BufRead, W: Write>(input: &mut R, output: &mut W) -> io::R
     Ok(())
 }
 
+pub fn run_preview<W: Write>(output: &mut W) -> io::Result<()> {
+    let mut welcome = WelcomeController::new();
+    writeln!(output, "{}", welcome.frame(0, ""))?;
+    writeln!(output, "{}", welcome.frame(IDLE_AFTER_MS, ""))?;
+    writeln!(
+        output,
+        "{}",
+        welcome.frame(IDLE_AFTER_MS + ANIMATION_SAMPLE_MS, "")
+    )?;
+    Ok(())
+}
+
 impl Default for WelcomeController {
     fn default() -> Self {
         Self::new()
