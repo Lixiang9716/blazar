@@ -1,4 +1,4 @@
-use blazar::welcome::sprite::SpriteAnimation;
+use blazar::welcome::{mascot::schema_ui_header_lines, sprite::SpriteAnimation};
 use ratatui::text::Line;
 
 const SLIME_IDLE_PNG: &[u8] = include_bytes!("../assets/spirit/slime/slime_idle.png");
@@ -25,4 +25,15 @@ fn slime_idle_frame_exports_as_ratatui_lines() {
     let lines: Vec<Line<'static>> = animation.frame_by_index(0).to_ratatui_lines();
 
     assert!(lines.len() > 1);
+}
+
+#[test]
+fn schema_ui_header_lines_match_the_first_slime_frame() {
+    let animation = SpriteAnimation::from_png_bytes(SLIME_IDLE_PNG, 4, 8)
+        .expect("slime idle sprite sheet should decode into frames");
+
+    assert_eq!(
+        schema_ui_header_lines(),
+        animation.frame_by_index(0).to_ratatui_lines()
+    );
 }

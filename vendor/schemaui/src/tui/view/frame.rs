@@ -2,7 +2,7 @@ use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout},
     text::Line,
-    widgets::{Paragraph, Wrap},
+    widgets::Paragraph,
 };
 
 use crate::tui::state::FormState;
@@ -103,7 +103,7 @@ pub fn draw(
     };
 
     let body_index = if let Some(header_lines) = ctx.header_lines {
-        let header = Paragraph::new(header_lines.to_vec()).wrap(Wrap { trim: false });
+        let header = Paragraph::new(header_lines.to_vec());
         frame.render_widget(header, chunks[0]);
         1
     } else {

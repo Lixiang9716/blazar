@@ -1,5 +1,7 @@
 use std::sync::OnceLock;
 
+use ratatui::text::Line;
+
 use crate::welcome::sprite::SpriteAnimation;
 use crate::welcome::state::WelcomeState;
 
@@ -13,6 +15,10 @@ pub fn render_mascot(state: WelcomeState, now_ms: u64) -> String {
     let frame_index = state.animation_frame_index(now_ms, animation.len(), SLIME_IDLE_FRAME_MS);
 
     animation.frame_by_index(frame_index).to_ansi_string()
+}
+
+pub fn schema_ui_header_lines() -> Vec<Line<'static>> {
+    slime_idle_animation().frame_by_index(0).to_ratatui_lines()
 }
 
 fn slime_idle_animation() -> &'static SpriteAnimation {

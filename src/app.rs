@@ -1,7 +1,7 @@
 use crate::config;
+use ratatui::text::Line;
 use schemaui::prelude::*;
 use serde_json::Value;
-use std::io;
 
 fn build_schema() -> Result<Value, config::ConfigError> {
     config::load_app_schema()
@@ -9,53 +9,56 @@ fn build_schema() -> Result<Value, config::ConfigError> {
 
 type AppResult<T> = Result<T, Box<dyn std::error::Error>>;
 
-fn run_welcome_preview() -> io::Result<()> {
-    let stdout = io::stdout();
-    let mut output = stdout.lock();
+struct SchemaUiLaunch {
+    schema: Value,
+    title: String,
+    header_lines: Vec<Line<'static>>,
+}
 
-    crate::welcome::startup::run_preview(&mut output)
+fn prepare_schema_ui(schema: Value) -> Result<SchemaUiLaunch, config::ConfigError> {
+    let title = config::schema_title(&schema)?.to_owned();
+    let header_lines = crate::welcome::mascot::schema_ui_header_lines();
+
+    Ok(SchemaUiLaunch {
+        schema,
+        title,
+        header_lines,
+    })
 }
 
 fn run_schema_ui(schema: Value) -> AppResult<Value> {
-    let title = config::schema_title(&schema)?.to_owned();
-    let value = SchemaUI::new(schema)
-        .with_title(&title)
+    let launch = prepare_schema_ui(schema)?;
+    let value = SchemaUI::new(launch.schema)
+        .with_title(&launch.title)
+        .with_header_lines(launch.header_lines)
         .with_options(UiOptions::default())
         .run()?;
 
     Ok(value)
 }
 
-fn run_flow<W, B, S>(run_welcome: W, build_schema: B, run_schema: S) -> AppResult<Value>
+fn run_flow<B, S>(build_schema: B, run_schema: S) -> AppResult<Value>
 where
-    W: FnOnce() -> std::io::Result<()>,
     B: FnOnce() -> Result<Value, config::ConfigError>,
     S: FnOnce(Value) -> AppResult<Value>,
 {
-    run_welcome()?;
     let schema = build_schema()?;
     run_schema(schema)
 }
 
-fn run_app<W, B, S, P>(
-    run_welcome: W,
-    build_schema: B,
-    run_schema: S,
-    print_json: P,
-) -> AppResult<()>
+fn run_app<B, S, P>(build_schema: B, run_schema: S, print_json: P) -> AppResult<()>
 where
-    W: FnOnce() -> io::Result<()>,
     B: FnOnce() -> Result<Value, config::ConfigError>,
     S: FnOnce(Value) -> AppResult<Value>,
     P: FnOnce(String) -> AppResult<()>,
 {
-    let value = run_flow(run_welcome, build_schema, run_schema)?;
+    let value = run_flow(build_schema, run_schema)?;
     let json = serde_json::to_string_pretty(&value)?;
     print_json(json)
 }
 
 pub fn run() -> AppResult<()> {
-    run_app(run_welcome_preview, build_schema, run_schema_ui, |json| {
+    run_app(build_schema, run_schema_ui, |json| {
         println!("{json}");
         Ok(())
     })
@@ -63,20 +66,35 @@ pub fn run() -> AppResult<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_schema, run_app, run_flow};
+    use super::{build_schema, prepare_schema_ui, run_app, run_flow};
+    use crate::config;
     use serde_json::json;
     use std::cell::RefCell;
-    use std::io;
+    use std::path::PathBuf;
 
     #[test]
-    fn run_flow_runs_welcome_before_schema_ui() {
+    fn prepare_schema_ui_sets_title_and_mascot_header() {
+        let schema = json!({
+            "title": "Blazar",
+            "type": "object",
+            "properties": {}
+        });
+
+        let launch = prepare_schema_ui(schema.clone()).expect("schema ui launch should build");
+
+        assert_eq!(launch.schema, schema);
+        assert_eq!(launch.title, "Blazar");
+        assert_eq!(
+            launch.header_lines,
+            crate::welcome::mascot::schema_ui_header_lines()
+        );
+    }
+
+    #[test]
+    fn run_flow_runs_schema_before_schema_ui() {
         let calls = RefCell::new(Vec::new());
 
         let value = run_flow(
-            || {
-                calls.borrow_mut().push("welcome");
-                Ok(())
-            },
             || {
                 calls.borrow_mut().push("schema");
                 Ok(json!({
@@ -94,28 +112,27 @@ mod tests {
         .expect("startup flow should succeed");
 
         assert_eq!(value["request"], "ok");
-        assert_eq!(*calls.borrow(), vec!["welcome", "schema", "ui"]);
+        assert_eq!(*calls.borrow(), vec!["schema", "ui"]);
     }
 
     #[test]
-    fn run_flow_bubbles_welcome_errors_without_loading_schema() {
+    fn run_flow_bubbles_schema_errors_without_running_ui() {
         let calls = RefCell::new(Vec::new());
 
         let error = run_flow(
             || {
-                calls.borrow_mut().push("welcome");
-                Err(io::Error::new(io::ErrorKind::Other, "welcome failed"))
-            },
-            || {
                 calls.borrow_mut().push("schema");
-                build_schema()
+                Err(config::ConfigError::InvalidSchema {
+                    path: PathBuf::from(config::APP_SCHEMA_PATH),
+                    message: "schema title must be a string",
+                })
             },
-            |_schema| unreachable!("schema ui should not run after welcome failure"),
+            |_schema| unreachable!("schema ui should not run after schema load failure"),
         )
-        .expect_err("welcome failure should bubble up");
+        .expect_err("schema failure should bubble up");
 
-        assert!(error.to_string().contains("welcome failed"));
-        assert_eq!(*calls.borrow(), vec!["welcome"]);
+        assert!(error.to_string().contains("schema title must be a string"));
+        assert_eq!(*calls.borrow(), vec!["schema"]);
     }
 
     #[test]
@@ -142,10 +159,9 @@ mod tests {
 
         run_app(
             || {
-                calls.borrow_mut().push("welcome");
-                Ok(())
+                calls.borrow_mut().push("schema");
+                Ok(json!({"title": "Blazar", "type": "object", "properties": {}}))
             },
-            || Ok(json!({"title": "Blazar", "type": "object", "properties": {}})),
             |_schema| {
                 calls.borrow_mut().push("ui");
                 Ok(json!({"delivery": {"format": "text"}}))
@@ -159,7 +175,7 @@ mod tests {
         .expect("startup flow should succeed");
 
         assert!(printed.borrow().contains("\"delivery\""));
-        assert_eq!(*calls.borrow(), vec!["welcome", "ui", "print"]);
+        assert_eq!(*calls.borrow(), vec!["schema", "ui", "print"]);
     }
 
     fn schema_property_names() -> Vec<String> {
