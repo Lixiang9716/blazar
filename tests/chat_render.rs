@@ -17,3 +17,12 @@ fn chat_view_renders_spirit_pane_and_message_pane() {
             .any(|line| line.contains("Tell me what you'd like to explore"))
     );
 }
+
+#[test]
+fn spirit_pane_shows_the_mascot_and_status_copy() {
+    let app = ChatApp::new_for_test("/home/lx/blazar");
+    let lines = render_to_lines_for_test(&app, 100, 30);
+
+    assert!(lines.iter().any(|line| line.contains("Waiting with a sprinkle of stardust")));
+    assert!(lines.iter().any(|line| line.contains("▀") || line.contains("▄") || line.contains("█")));
+}
