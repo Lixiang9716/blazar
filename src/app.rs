@@ -1,25 +1,32 @@
 use crate::config;
 use schemaui::prelude::*;
 use serde_json::Value;
-
-pub fn run() -> Result<(), Box<dyn std::error::Error>> {
-    let schema = build_schema()?;
-    let title = config::schema_title(&schema)?.to_owned();
-    let value = SchemaUI::new(schema)
-        .with_title(&title)
-        .with_options(UiOptions::default())
-        .run()?;
-
-    println!("{}", serde_json::to_string_pretty(&value)?);
-
-    Ok(())
-}
+use std::io;
 
 fn build_schema() -> Result<Value, config::ConfigError> {
     config::load_app_schema()
 }
 
 type AppResult<T> = Result<T, Box<dyn std::error::Error>>;
+
+fn run_welcome_session() -> io::Result<()> {
+    let stdin = io::stdin();
+    let stdout = io::stdout();
+    let mut input = stdin.lock();
+    let mut output = stdout.lock();
+
+    crate::welcome::startup::run_session(&mut input, &mut output)
+}
+
+fn run_schema_ui(schema: Value) -> AppResult<Value> {
+    let title = config::schema_title(&schema)?.to_owned();
+    let value = SchemaUI::new(schema)
+        .with_title(&title)
+        .with_options(UiOptions::default())
+        .run()?;
+
+    Ok(value)
+}
 
 fn run_flow<W, B, S>(run_welcome: W, build_schema: B, run_schema: S) -> AppResult<Value>
 where
@@ -32,9 +39,33 @@ where
     run_schema(schema)
 }
 
+fn run_app<W, B, S, P>(
+    run_welcome: W,
+    build_schema: B,
+    run_schema: S,
+    print_json: P,
+) -> AppResult<()>
+where
+    W: FnOnce() -> io::Result<()>,
+    B: FnOnce() -> Result<Value, config::ConfigError>,
+    S: FnOnce(Value) -> AppResult<Value>,
+    P: FnOnce(String) -> AppResult<()>,
+{
+    let value = run_flow(run_welcome, build_schema, run_schema)?;
+    let json = serde_json::to_string_pretty(&value)?;
+    print_json(json)
+}
+
+pub fn run() -> AppResult<()> {
+    run_app(run_welcome_session, build_schema, run_schema_ui, |json| {
+        println!("{json}");
+        Ok(())
+    })
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{build_schema, run_flow};
+    use super::{build_schema, run_app, run_flow};
     use serde_json::json;
     use std::cell::RefCell;
     use std::io;
@@ -104,6 +135,33 @@ mod tests {
         let properties = schema_property_names();
 
         assert_eq!(properties, ["delivery", "task", "workspace"]);
+    }
+
+    #[test]
+    fn run_app_prints_serialized_value_after_startup_flow() {
+        let calls = RefCell::new(Vec::new());
+        let printed = RefCell::new(String::new());
+
+        run_app(
+            || {
+                calls.borrow_mut().push("welcome");
+                Ok(())
+            },
+            || Ok(json!({"title": "Blazar", "type": "object", "properties": {}})),
+            |_schema| {
+                calls.borrow_mut().push("ui");
+                Ok(json!({"delivery": {"format": "text"}}))
+            },
+            |json: String| {
+                calls.borrow_mut().push("print");
+                printed.borrow_mut().push_str(&json);
+                Ok(())
+            },
+        )
+        .expect("startup flow should succeed");
+
+        assert!(printed.borrow().contains("\"delivery\""));
+        assert_eq!(*calls.borrow(), vec!["welcome", "ui", "print"]);
     }
 
     fn schema_property_names() -> Vec<String> {
