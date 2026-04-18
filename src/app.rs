@@ -13,6 +13,8 @@ pub fn runtime_name_for_test() -> &'static str {
     "spirit-chat-tui"
 }
 
+// Legacy prompt-flow implementation retained for migration reference
+#[allow(dead_code)]
 #[derive(Debug)]
 enum PromptError {
     Io(io::Error),
@@ -58,6 +60,7 @@ impl From<io::Error> for PromptError {
     }
 }
 
+#[allow(dead_code)]
 fn run_prompt_flow<R: BufRead, W: Write>(
     schema: Value,
     input: &mut R,
@@ -67,6 +70,7 @@ fn run_prompt_flow<R: BufRead, W: Write>(
     collect_submission(&schema, input, output).map_err(Into::into)
 }
 
+#[allow(dead_code)]
 fn collect_submission<R: BufRead, W: Write>(
     schema: &Value,
     input: &mut R,
@@ -178,11 +182,13 @@ fn collect_submission<R: BufRead, W: Write>(
     }))
 }
 
+#[allow(dead_code)]
 fn write_section_header<W: Write>(output: &mut W, title: &str) -> io::Result<()> {
     writeln!(output, "{title}")?;
     writeln!(output, "{}", "-".repeat(title.chars().count()))
 }
 
+#[allow(dead_code)]
 fn prompt_string<R: BufRead, W: Write>(
     input: &mut R,
     output: &mut W,
@@ -198,6 +204,7 @@ fn prompt_string<R: BufRead, W: Write>(
     })
 }
 
+#[allow(dead_code)]
 fn prompt_enum<R: BufRead, W: Write>(
     input: &mut R,
     output: &mut W,
@@ -228,6 +235,7 @@ fn prompt_enum<R: BufRead, W: Write>(
     }
 }
 
+#[allow(dead_code)]
 fn prompt_bool<R: BufRead, W: Write>(
     input: &mut R,
     output: &mut W,
@@ -251,6 +259,7 @@ fn prompt_bool<R: BufRead, W: Write>(
     }
 }
 
+#[allow(dead_code)]
 fn read_prompt<R: BufRead, W: Write>(
     input: &mut R,
     output: &mut W,
@@ -268,6 +277,7 @@ fn read_prompt<R: BufRead, W: Write>(
     Ok(line.trim().to_owned())
 }
 
+#[allow(dead_code)]
 fn string_at(schema: &Value, pointer: &'static str) -> Result<String, PromptError> {
     schema
         .pointer(pointer)
@@ -279,6 +289,7 @@ fn string_at(schema: &Value, pointer: &'static str) -> Result<String, PromptErro
         })
 }
 
+#[allow(dead_code)]
 fn bool_at(schema: &Value, pointer: &'static str) -> Result<bool, PromptError> {
     schema
         .pointer(pointer)
@@ -289,6 +300,7 @@ fn bool_at(schema: &Value, pointer: &'static str) -> Result<bool, PromptError> {
         })
 }
 
+#[allow(dead_code)]
 fn string_list_at(schema: &Value, pointer: &'static str) -> Result<Vec<String>, PromptError> {
     schema
         .pointer(pointer)
@@ -310,6 +322,7 @@ fn string_list_at(schema: &Value, pointer: &'static str) -> Result<Vec<String>, 
         .collect()
 }
 
+#[allow(dead_code)]
 fn run_app_with_io<R: BufRead, W: Write>(input: &mut R, output: &mut W) -> AppResult<()> {
     let schema = build_schema()?;
     let value = run_prompt_flow(schema, input, output)?;
