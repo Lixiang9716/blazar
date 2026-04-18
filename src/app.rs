@@ -1,7 +1,6 @@
 use crate::config;
-use schemaui::prelude::*;
 use serde_json::Value;
-use std::time::Duration;
+use std::io::{self, BufRead, Write};
 
 fn build_schema() -> Result<Value, config::ConfigError> {
     config::load_app_schema()
@@ -9,139 +8,372 @@ fn build_schema() -> Result<Value, config::ConfigError> {
 
 type AppResult<T> = Result<T, Box<dyn std::error::Error>>;
 
-struct SchemaUiLaunch {
-    schema: Value,
-    title: String,
-    header_animation_frames: Vec<Vec<ratatui::text::Line<'static>>>,
-    header_frame_interval: Duration,
-    ui_options: UiOptions,
+#[derive(Debug)]
+enum PromptError {
+    Io(io::Error),
+    InvalidSchema {
+        pointer: &'static str,
+        expected: &'static str,
+    },
+    InvalidEnumDefault {
+        pointer: &'static str,
+        default: String,
+    },
 }
 
-fn prepare_schema_ui(schema: Value) -> Result<SchemaUiLaunch, config::ConfigError> {
-    let title = config::schema_title(&schema)?.to_owned();
-    let header_animation_frames = crate::welcome::mascot::schema_ui_header_animation_frames();
-    let header_frame_interval = crate::welcome::mascot::schema_ui_header_animation_frame_interval();
-    let ui_options = UiOptions::default().with_tick_rate(header_frame_interval);
+impl std::fmt::Display for PromptError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Io(error) => write!(f, "{error}"),
+            Self::InvalidSchema { pointer, expected } => {
+                write!(f, "invalid schema at {pointer}: expected {expected}")
+            }
+            Self::InvalidEnumDefault { pointer, default } => {
+                write!(f, "invalid schema at {pointer}: default {default:?} is not in enum")
+            }
+        }
+    }
+}
 
-    Ok(SchemaUiLaunch {
-        schema,
-        title,
-        header_animation_frames,
-        header_frame_interval,
-        ui_options,
+impl std::error::Error for PromptError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io(error) => Some(error),
+            Self::InvalidSchema { .. } | Self::InvalidEnumDefault { .. } => None,
+        }
+    }
+}
+
+impl From<io::Error> for PromptError {
+    fn from(value: io::Error) -> Self {
+        Self::Io(value)
+    }
+}
+
+fn run_prompt_flow<R: BufRead, W: Write>(
+    schema: Value,
+    input: &mut R,
+    output: &mut W,
+) -> AppResult<Value> {
+    crate::welcome::startup::run_preview(output)?;
+    collect_submission(&schema, input, output).map_err(Into::into)
+}
+
+fn collect_submission<R: BufRead, W: Write>(
+    schema: &Value,
+    input: &mut R,
+    output: &mut W,
+) -> Result<Value, PromptError> {
+    writeln!(output)?;
+    writeln!(output, "{}\n", string_at(schema, "/title")?)?;
+    writeln!(output, "Press Enter to accept defaults.\n")?;
+
+    let task_title = string_at(schema, "/properties/task/title")?;
+    let workspace_title = string_at(schema, "/properties/workspace/title")?;
+    let delivery_title = string_at(schema, "/properties/delivery/title")?;
+
+    write_section_header(output, &task_title)?;
+    let request = prompt_string(
+        input,
+        output,
+        &string_at(schema, "/properties/task/properties/request/title")?,
+        &string_at(schema, "/properties/task/properties/request/default")?,
+    )?;
+    let goal = prompt_string(
+        input,
+        output,
+        &string_at(schema, "/properties/task/properties/goal/title")?,
+        &string_at(schema, "/properties/task/properties/goal/default")?,
+    )?;
+    let priority = prompt_enum(
+        input,
+        output,
+        &string_at(schema, "/properties/task/properties/priority/title")?,
+        &string_at(schema, "/properties/task/properties/priority/default")?,
+        &string_list_at(schema, "/properties/task/properties/priority/enum")?,
+        "/properties/task/properties/priority/default",
+    )?;
+
+    write_section_header(output, &workspace_title)?;
+    let repo_path = prompt_string(
+        input,
+        output,
+        &string_at(schema, "/properties/workspace/properties/repoPath/title")?,
+        &string_at(schema, "/properties/workspace/properties/repoPath/default")?,
+    )?;
+    let platform = prompt_string(
+        input,
+        output,
+        &string_at(schema, "/properties/workspace/properties/platform/title")?,
+        &string_at(schema, "/properties/workspace/properties/platform/default")?,
+    )?;
+    let interactive = prompt_bool(
+        input,
+        output,
+        &string_at(schema, "/properties/workspace/properties/interactive/title")?,
+        bool_at(schema, "/properties/workspace/properties/interactive/default")?,
+    )?;
+
+    write_section_header(output, &delivery_title)?;
+    let response_style = prompt_enum(
+        input,
+        output,
+        &string_at(schema, "/properties/delivery/properties/responseStyle/title")?,
+        &string_at(schema, "/properties/delivery/properties/responseStyle/default")?,
+        &string_list_at(schema, "/properties/delivery/properties/responseStyle/enum")?,
+        "/properties/delivery/properties/responseStyle/default",
+    )?;
+    let run_validation = prompt_bool(
+        input,
+        output,
+        &string_at(schema, "/properties/delivery/properties/runValidation/title")?,
+        bool_at(schema, "/properties/delivery/properties/runValidation/default")?,
+    )?;
+    let notes = prompt_string(
+        input,
+        output,
+        &string_at(schema, "/properties/delivery/properties/notes/title")?,
+        &string_at(schema, "/properties/delivery/properties/notes/default")?,
+    )?;
+
+    Ok(serde_json::json!({
+        "task": {
+            "request": request,
+            "goal": goal,
+            "priority": priority,
+        },
+        "workspace": {
+            "repoPath": repo_path,
+            "platform": platform,
+            "interactive": interactive,
+        },
+        "delivery": {
+            "responseStyle": response_style,
+            "runValidation": run_validation,
+            "notes": notes,
+        }
+    }))
+}
+
+fn write_section_header<W: Write>(output: &mut W, title: &str) -> io::Result<()> {
+    writeln!(output, "{title}")?;
+    writeln!(output, "{}", "-".repeat(title.chars().count()))
+}
+
+fn prompt_string<R: BufRead, W: Write>(
+    input: &mut R,
+    output: &mut W,
+    label: &str,
+    default: &str,
+) -> Result<String, PromptError> {
+    let prompt = format!("{label} [{default}]: ");
+    let response = read_prompt(input, output, &prompt)?;
+    Ok(if response.is_empty() {
+        default.to_owned()
+    } else {
+        response
     })
 }
 
-fn run_schema_ui(schema: Value) -> AppResult<Value> {
-    let launch = prepare_schema_ui(schema)?;
-    let value = SchemaUI::new(launch.schema)
-        .with_title(&launch.title)
-        .with_header_animation(launch.header_animation_frames, launch.header_frame_interval)
-        .with_options(launch.ui_options)
-        .run()?;
+fn prompt_enum<R: BufRead, W: Write>(
+    input: &mut R,
+    output: &mut W,
+    label: &str,
+    default: &str,
+    choices: &[String],
+    default_pointer: &'static str,
+) -> Result<String, PromptError> {
+    if !choices.iter().any(|choice| choice == default) {
+        return Err(PromptError::InvalidEnumDefault {
+            pointer: default_pointer,
+            default: default.to_owned(),
+        });
+    }
 
-    Ok(value)
+    let prompt = format!("{label} ({}) [{default}]: ", choices.join("/"));
+
+    loop {
+        let response = read_prompt(input, output, &prompt)?;
+        if response.is_empty() {
+            return Ok(default.to_owned());
+        }
+        if choices.iter().any(|choice| choice == &response) {
+            return Ok(response);
+        }
+
+        writeln!(output, "Please choose one of: {}", choices.join(", "))?;
+    }
 }
 
-fn run_flow<B, S>(build_schema: B, run_schema: S) -> AppResult<Value>
-where
-    B: FnOnce() -> Result<Value, config::ConfigError>,
-    S: FnOnce(Value) -> AppResult<Value>,
-{
+fn prompt_bool<R: BufRead, W: Write>(
+    input: &mut R,
+    output: &mut W,
+    label: &str,
+    default: bool,
+) -> Result<bool, PromptError> {
+    let hint = if default { "Y/n" } else { "y/N" };
+    let prompt = format!("{label} [{hint}]: ");
+
+    loop {
+        let response = read_prompt(input, output, &prompt)?;
+        if response.is_empty() {
+            return Ok(default);
+        }
+
+        match response.to_ascii_lowercase().as_str() {
+            "y" | "yes" | "true" | "1" => return Ok(true),
+            "n" | "no" | "false" | "0" => return Ok(false),
+            _ => writeln!(output, "Please answer yes or no.")?,
+        }
+    }
+}
+
+fn read_prompt<R: BufRead, W: Write>(
+    input: &mut R,
+    output: &mut W,
+    prompt: &str,
+) -> Result<String, PromptError> {
+    write!(output, "{prompt}")?;
+    output.flush()?;
+
+    let mut line = String::new();
+    let bytes_read = input.read_line(&mut line)?;
+    if bytes_read == 0 {
+        return Ok(String::new());
+    }
+
+    Ok(line.trim().to_owned())
+}
+
+fn string_at(schema: &Value, pointer: &'static str) -> Result<String, PromptError> {
+    schema
+        .pointer(pointer)
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+        .ok_or(PromptError::InvalidSchema {
+            pointer,
+            expected: "string",
+        })
+}
+
+fn bool_at(schema: &Value, pointer: &'static str) -> Result<bool, PromptError> {
+    schema
+        .pointer(pointer)
+        .and_then(Value::as_bool)
+        .ok_or(PromptError::InvalidSchema {
+            pointer,
+            expected: "boolean",
+        })
+}
+
+fn string_list_at(schema: &Value, pointer: &'static str) -> Result<Vec<String>, PromptError> {
+    schema
+        .pointer(pointer)
+        .and_then(Value::as_array)
+        .ok_or(PromptError::InvalidSchema {
+            pointer,
+            expected: "array of strings",
+        })?
+        .iter()
+        .map(|value| {
+            value
+                .as_str()
+                .map(str::to_owned)
+                .ok_or(PromptError::InvalidSchema {
+                    pointer,
+                    expected: "array of strings",
+                })
+        })
+        .collect()
+}
+
+fn run_app_with_io<R: BufRead, W: Write>(input: &mut R, output: &mut W) -> AppResult<()> {
     let schema = build_schema()?;
-    run_schema(schema)
-}
-
-fn run_app<B, S, P>(build_schema: B, run_schema: S, print_json: P) -> AppResult<()>
-where
-    B: FnOnce() -> Result<Value, config::ConfigError>,
-    S: FnOnce(Value) -> AppResult<Value>,
-    P: FnOnce(String) -> AppResult<()>,
-{
-    let value = run_flow(build_schema, run_schema)?;
-    let json = serde_json::to_string_pretty(&value)?;
-    print_json(json)
+    let value = run_prompt_flow(schema, input, output)?;
+    writeln!(output)?;
+    serde_json::to_writer_pretty(&mut *output, &value)?;
+    writeln!(output)?;
+    Ok(())
 }
 
 pub fn run() -> AppResult<()> {
-    run_app(build_schema, run_schema_ui, |json| {
-        println!("{json}");
-        Ok(())
-    })
+    let stdin = io::stdin();
+    let stdout = io::stdout();
+    let mut input = stdin.lock();
+    let mut output = stdout.lock();
+    run_app_with_io(&mut input, &mut output)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{build_schema, prepare_schema_ui, run_app, run_flow};
-    use crate::config;
+    use super::{build_schema, collect_submission, run_app_with_io, run_prompt_flow};
     use serde_json::json;
-    use std::cell::RefCell;
-    use std::path::PathBuf;
-    use std::time::Duration;
 
     #[test]
-    fn prepare_schema_ui_sets_title_and_mascot_idle_animation() {
-        let schema = json!({
-            "title": "Blazar",
-            "type": "object",
-            "properties": {}
-        });
+    fn collect_submission_uses_defaults_for_blank_answers() {
+        let schema = build_schema().expect("schema should load from config/app.json");
+        let mut input = std::io::Cursor::new("\n\n\n\n\n\n\n\n\n");
+        let mut output = Vec::new();
 
-        let launch = prepare_schema_ui(schema.clone()).expect("schema ui launch should build");
+        let submission =
+            collect_submission(&schema, &mut input, &mut output).expect("defaults should submit");
 
-        assert_eq!(launch.schema, schema);
-        assert_eq!(launch.title, "Blazar");
         assert_eq!(
-            launch.header_animation_frames,
-            crate::welcome::mascot::schema_ui_header_animation_frames()
+            submission,
+            json!({
+                "task": {
+                    "request": "Design a polished terminal workflow",
+                    "goal": "Ship a clear, validated TUI experience",
+                    "priority": "normal"
+                },
+                "workspace": {
+                    "repoPath": "/home/lx/blazar",
+                    "platform": "Linux",
+                    "interactive": true
+                },
+                "delivery": {
+                    "responseStyle": "balanced",
+                    "runValidation": true,
+                    "notes": "Prefer simple, maintainable changes"
+                }
+            })
         );
-        assert_eq!(launch.header_frame_interval, Duration::from_millis(125));
-        assert_eq!(launch.ui_options.tick_rate, launch.header_frame_interval);
     }
 
     #[test]
-    fn run_flow_runs_schema_before_schema_ui() {
-        let calls = RefCell::new(Vec::new());
+    fn collect_submission_reprompts_after_invalid_answers() {
+        let schema = build_schema().expect("schema should load from config/app.json");
+        let mut input = std::io::Cursor::new(
+            "Ship mascot locally\nKeep spirit first\nextreme\nhigh\n/tmp/demo\nmacOS\nmaybe\nno\ndetailed\n0\nCustom notes\n",
+        );
+        let mut output = Vec::new();
 
-        let value = run_flow(
-            || {
-                calls.borrow_mut().push("schema");
-                Ok(json!({
-                    "title": "Blazar",
-                    "type": "object",
-                    "properties": {}
-                }))
-            },
-            |schema| {
-                assert_eq!(schema["title"], "Blazar");
-                calls.borrow_mut().push("ui");
-                Ok(json!({"request": "ok"}))
-            },
-        )
-        .expect("startup flow should succeed");
+        let submission =
+            collect_submission(&schema, &mut input, &mut output).expect("answers should submit");
+        let transcript = String::from_utf8(output).expect("prompt output should be utf-8");
 
-        assert_eq!(value["request"], "ok");
-        assert_eq!(*calls.borrow(), vec!["schema", "ui"]);
+        assert!(transcript.contains("Please choose one of: low, normal, high, urgent"));
+        assert!(transcript.contains("Please answer yes or no."));
+        assert_eq!(submission["task"]["priority"], "high");
+        assert_eq!(submission["workspace"]["interactive"], false);
+        assert_eq!(submission["delivery"]["responseStyle"], "detailed");
+        assert_eq!(submission["delivery"]["runValidation"], false);
     }
 
     #[test]
-    fn run_flow_bubbles_schema_errors_without_running_ui() {
-        let calls = RefCell::new(Vec::new());
+    fn run_prompt_flow_renders_welcome_before_questions() {
+        let schema = build_schema().expect("schema should load from config/app.json");
+        let mut input = std::io::Cursor::new("\n\n\n\n\n\n\n\n\n");
+        let mut output = Vec::new();
 
-        let error = run_flow(
-            || {
-                calls.borrow_mut().push("schema");
-                Err(config::ConfigError::InvalidSchema {
-                    path: PathBuf::from(config::APP_SCHEMA_PATH),
-                    message: "schema title must be a string",
-                })
-            },
-            |_schema| unreachable!("schema ui should not run after schema load failure"),
-        )
-        .expect_err("schema failure should bubble up");
+        let value =
+            run_prompt_flow(schema, &mut input, &mut output).expect("prompt flow should succeed");
+        let transcript = String::from_utf8(output).expect("prompt output should be utf-8");
 
-        assert!(error.to_string().contains("schema title must be a string"));
-        assert_eq!(*calls.borrow(), vec!["schema"]);
+        assert!(transcript.contains("A rainbow helper just spotted you"));
+        assert!(transcript.contains("Waiting with a sprinkle of stardust"));
+        assert!(transcript.contains("Blazar Mission Console"));
+        assert_eq!(value["workspace"]["repoPath"], "/home/lx/blazar");
     }
 
     #[test]
@@ -162,29 +394,15 @@ mod tests {
     }
 
     #[test]
-    fn run_app_prints_serialized_value_after_startup_flow() {
-        let calls = RefCell::new(Vec::new());
-        let printed = RefCell::new(String::new());
+    fn run_app_prints_serialized_value_after_prompt_flow() {
+        let mut input = std::io::Cursor::new("\n\n\n\n\n\n\n\n\n");
+        let mut output = Vec::new();
 
-        run_app(
-            || {
-                calls.borrow_mut().push("schema");
-                Ok(json!({"title": "Blazar", "type": "object", "properties": {}}))
-            },
-            |_schema| {
-                calls.borrow_mut().push("ui");
-                Ok(json!({"delivery": {"format": "text"}}))
-            },
-            |json: String| {
-                calls.borrow_mut().push("print");
-                printed.borrow_mut().push_str(&json);
-                Ok(())
-            },
-        )
-        .expect("startup flow should succeed");
+        run_app_with_io(&mut input, &mut output).expect("app flow should succeed");
 
-        assert!(printed.borrow().contains("\"delivery\""));
-        assert_eq!(*calls.borrow(), vec!["schema", "ui", "print"]);
+        let transcript = String::from_utf8(output).expect("app output should be utf-8");
+        assert!(transcript.contains("\"delivery\""));
+        assert!(transcript.contains("\"responseStyle\": \"balanced\""));
     }
 
     fn schema_property_names() -> Vec<String> {

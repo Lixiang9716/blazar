@@ -1,13 +1,12 @@
 //! ```rust
 //! use blazar::welcome::sprite::SpriteAnimation;
-//! use ratatui::widgets::Paragraph;
 //!
 //! let animation = SpriteAnimation::from_png_bytes(
 //!     include_bytes!("../../assets/spirit/slime/slime_idle.png"),
 //!     4,
 //!     8,
 //! )?;
-//! let _widget = Paragraph::new(animation.frame_by_index(0).to_ratatui_lines());
+//! let _frame = animation.frame_by_index(0).to_ansi_string();
 //! # Ok::<(), blazar::welcome::sprite::SpriteError>(())
 //! ```
 
@@ -18,10 +17,6 @@ use std::{
 };
 
 use image::{Rgba, RgbaImage};
-use ratatui::{
-    style::{Color, Style},
-    text::{Line, Span},
-};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Rgb(pub u8, pub u8, pub u8);
@@ -65,31 +60,6 @@ impl TerminalFrame {
         }
 
         out
-    }
-
-    pub fn to_ratatui_lines(&self) -> Vec<Line<'static>> {
-        self.rows
-            .iter()
-            .map(|row| {
-                let spans = row
-                    .iter()
-                    .map(|cell| {
-                        let mut style = Style::default();
-
-                        if let Some(Rgb(r, g, b)) = cell.fg {
-                            style = style.fg(Color::Rgb(r, g, b));
-                        }
-                        if let Some(Rgb(r, g, b)) = cell.bg {
-                            style = style.bg(Color::Rgb(r, g, b));
-                        }
-
-                        Span::styled(cell.glyph.to_string(), style)
-                    })
-                    .collect::<Vec<_>>();
-
-                Line::from(spans)
-            })
-            .collect()
     }
 }
 

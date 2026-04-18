@@ -1,8 +1,4 @@
-use blazar::welcome::{
-    mascot::{schema_ui_header_animation_frames, schema_ui_header_lines},
-    sprite::SpriteAnimation,
-};
-use ratatui::text::Line;
+use blazar::welcome::{mascot::render_mascot, sprite::SpriteAnimation, state::WelcomeState};
 
 const SLIME_IDLE_PNG: &[u8] = include_bytes!("../assets/spirit/slime/slime_idle.png");
 
@@ -21,36 +17,29 @@ fn welcome_sprite_slime_idle_sheet_decodes_into_four_terminal_frames() {
 }
 
 #[test]
-fn slime_idle_frame_exports_as_ratatui_lines() {
+fn slime_idle_frame_exports_as_ansi_string() {
     let animation = SpriteAnimation::from_png_bytes(SLIME_IDLE_PNG, 4, 8)
         .expect("slime idle sprite sheet should decode into frames");
 
-    let lines: Vec<Line<'static>> = animation.frame_by_index(0).to_ratatui_lines();
+    let frame = animation.frame_by_index(0).to_ansi_string();
 
-    assert!(lines.len() > 1);
+    assert!(frame.contains('\n'));
 }
 
 #[test]
-fn schema_ui_header_lines_match_the_first_slime_frame() {
+fn render_mascot_starts_from_the_first_idle_frame() {
     let animation = SpriteAnimation::from_png_bytes(SLIME_IDLE_PNG, 4, 8)
         .expect("slime idle sprite sheet should decode into frames");
 
-    assert_eq!(
-        schema_ui_header_lines(),
-        animation.frame_by_index(0).to_ratatui_lines()
-    );
+    assert_eq!(render_mascot(WelcomeState::new(), 0), animation.frame_by_index(0).to_ansi_string());
 }
 
 #[test]
-fn schema_ui_header_animation_frames_export_all_idle_frames() {
+fn render_mascot_advances_across_idle_frames() {
     let animation = SpriteAnimation::from_png_bytes(SLIME_IDLE_PNG, 4, 8)
         .expect("slime idle sprite sheet should decode into frames");
+    let idle_state = WelcomeState::new().tick(1_200, false);
 
-    let frames = schema_ui_header_animation_frames();
-
-    assert_eq!(frames.len(), 4);
-    assert_eq!(frames[0], animation.frame_by_index(0).to_ratatui_lines());
-    assert_eq!(frames[1], animation.frame_by_index(1).to_ratatui_lines());
-    assert_eq!(frames[2], animation.frame_by_index(2).to_ratatui_lines());
-    assert_eq!(frames[3], animation.frame_by_index(3).to_ratatui_lines());
+    assert_eq!(render_mascot(idle_state, 1_200), animation.frame_by_index(0).to_ansi_string());
+    assert_eq!(render_mascot(idle_state, 1_325), animation.frame_by_index(1).to_ansi_string());
 }
