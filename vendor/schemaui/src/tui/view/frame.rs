@@ -82,10 +82,8 @@ pub fn draw(
     overlay_form: Option<&mut FormState>,
     ctx: UiContext<'_>,
 ) {
-    let header_height = ctx
-        .header_lines
-        .map(|lines| lines.len().max(1) as u16)
-        .unwrap_or(0);
+    let header_lines = ctx.header_lines.filter(|lines| !lines.is_empty());
+    let header_height = header_lines.map(|lines| lines.len() as u16).unwrap_or(0);
     let chunks = if header_height > 0 {
         Layout::default()
             .direction(Direction::Vertical)
@@ -102,7 +100,7 @@ pub fn draw(
             .split(frame.area())
     };
 
-    let body_index = if let Some(header_lines) = ctx.header_lines {
+    let body_index = if let Some(header_lines) = header_lines {
         let header = Paragraph::new(header_lines.to_vec());
         frame.render_widget(header, chunks[0]);
         1

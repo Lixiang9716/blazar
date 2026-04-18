@@ -149,6 +149,28 @@ fn draw_without_header_keeps_body_and_footer_visible() {
 }
 
 #[test]
+fn draw_ignores_empty_header_lines() {
+    let schema = json!({
+        "type": "object",
+        "properties": {
+            "name": {
+                "title": "Name",
+                "type": "string"
+            }
+        }
+    });
+
+    let without_header = render_sample_frame(schema.clone(), None, None);
+    let empty_header: [Line<'static>; 0] = [];
+    let with_empty_header = render_sample_frame(schema, Some(&empty_header), None);
+
+    assert_eq!(
+        with_empty_header, without_header,
+        "empty header lines should behave the same as no header: without={without_header:#?} with_empty={with_empty_header:#?}"
+    );
+}
+
+#[test]
 fn draw_keeps_header_visible_when_help_overlay_is_open() {
     let schema = json!({
         "type": "object",
@@ -232,4 +254,44 @@ fn buffer_lines(buffer: &Buffer, width: u16, height: u16) -> Vec<String> {
 
 fn find_line_index(lines: &[String], needle: &str) -> Option<usize> {
     lines.iter().position(|line| line.contains(needle))
+}
+
+fn render_sample_frame(
+    schema: serde_json::Value,
+    header_lines: Option<&[Line<'static>]>,
+    help_overlay: Option<HelpOverlayRender<'_>>,
+) -> Vec<String> {
+    let ast = build_ui_ast(&schema).expect("ast");
+    let form_schema = form_schema_from_ui_ast(&ast);
+    let layout = build_ui_layout(&ast);
+    let mut form_state = FormState::from_schema(&form_schema);
+    form_state.set_layout_nav(LayoutNavModel::from_uilayout(&layout));
+    assert!(form_state.focus_first_field_with_layout());
+
+    let backend = TestBackend::new(80, 20);
+    let mut terminal = Terminal::new(backend).expect("terminal");
+    terminal
+        .draw(|frame| {
+            draw(
+                frame,
+                &mut form_state,
+                None,
+                UiContext {
+                    status_message: READY_STATUS,
+                    dirty: false,
+                    error_count: 0,
+                    help: Some("Ctrl+S -> validate and save"),
+                    global_errors: &[],
+                    focus_label: None,
+                    session_title: Some("SchemaUI Demo"),
+                    header_lines,
+                    popup: None,
+                    composite_overlay: None,
+                    help_overlay,
+                },
+            );
+        })
+        .expect("frame render succeeds");
+
+    buffer_lines(terminal.backend().buffer(), 80, 20)
 }

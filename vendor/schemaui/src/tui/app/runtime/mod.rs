@@ -89,7 +89,8 @@ impl App {
         let header_height = self
             .header_lines
             .as_ref()
-            .map(|lines| lines.len().max(1) as u16)
+            .filter(|lines| !lines.is_empty())
+            .map(|lines| lines.len() as u16)
             .unwrap_or(0);
         Rect {
             x: viewport.x,
