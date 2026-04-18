@@ -1,0 +1,98 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Blazar Mission Console",
+  "description": "Capture the task, context, and execution preferences for a Blazar session.",
+  "type": "object",
+  "properties": {
+    "task": {
+      "type": "object",
+      "title": "Task",
+      "description": "Describe what you want Blazar to do.",
+      "properties": {
+        "request": {
+          "type": "string",
+          "title": "Request",
+          "description": "The main thing you want the TUI session to accomplish.",
+          "default": "Design a polished terminal workflow"
+        },
+        "goal": {
+          "type": "string",
+          "title": "Goal",
+          "description": "What outcome would count as success?",
+          "default": "Ship a clear, validated TUI experience"
+        },
+        "priority": {
+          "type": "string",
+          "title": "Priority",
+          "enum": [
+            "low",
+            "normal",
+            "high",
+            "urgent"
+          ],
+          "default": "normal"
+        }
+      },
+      "required": [
+        "request"
+      ]
+    },
+    "workspace": {
+      "type": "object",
+      "title": "Workspace",
+      "description": "Capture repo and environment context.",
+      "properties": {
+        "repoPath": {
+          "type": "string",
+          "title": "Repository Path",
+          "default": "/home/lx/blazar"
+        },
+        "platform": {
+          "type": "string",
+          "title": "Platform",
+          "default": "Linux"
+        },
+        "interactive": {
+          "type": "boolean",
+          "title": "Interactive Session",
+          "default": true
+        }
+      },
+      "required": [
+        "repoPath"
+      ]
+    },
+    "delivery": {
+      "type": "object",
+      "title": "Delivery",
+      "description": "Tune how the assistant should produce results.",
+      "properties": {
+        "responseStyle": {
+          "type": "string",
+          "title": "Response Style",
+          "enum": [
+            "brief",
+            "balanced",
+            "detailed"
+          ],
+          "default": "balanced"
+        },
+        "runValidation": {
+          "type": "boolean",
+          "title": "Run Validation",
+          "default": true
+        },
+        "notes": {
+          "type": "string",
+          "title": "Notes",
+          "description": "Optional constraints, preferences, or extra context.",
+          "default": "Prefer simple, maintainable changes"
+        }
+      }
+    }
+  },
+  "required": [
+    "task",
+    "workspace"
+  ]
+}
