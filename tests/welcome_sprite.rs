@@ -31,7 +31,10 @@ fn render_mascot_starts_from_the_first_idle_frame() {
     let animation = SpriteAnimation::from_png_bytes(SLIME_IDLE_PNG, 4, 8)
         .expect("slime idle sprite sheet should decode into frames");
 
-    assert_eq!(render_mascot(WelcomeState::new(), 0), animation.frame_by_index(0).to_ansi_string());
+    assert_eq!(
+        render_mascot(WelcomeState::new(), 0),
+        animation.frame_by_index(0).to_ansi_string()
+    );
 }
 
 #[test]
@@ -40,6 +43,12 @@ fn render_mascot_advances_across_idle_frames() {
         .expect("slime idle sprite sheet should decode into frames");
     let idle_state = WelcomeState::new().tick(1_200, false);
 
-    assert_eq!(render_mascot(idle_state, 1_200), animation.frame_by_index(0).to_ansi_string());
-    assert_eq!(render_mascot(idle_state, 1_325), animation.frame_by_index(1).to_ansi_string());
+    assert_eq!(
+        render_mascot(idle_state, 1_200),
+        animation.frame_by_index(0).to_ansi_string()
+    );
+    assert_eq!(
+        render_mascot(idle_state, 1_325),
+        animation.frame_by_index(1).to_ansi_string()
+    );
 }

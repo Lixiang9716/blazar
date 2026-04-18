@@ -26,6 +26,10 @@ fn composer_submit_moves_text_into_the_timeline() {
     app.set_composer_text("Show me a warm, cozy theme");
     app.submit_composer();
 
-    assert!(app.messages().iter().any(|msg| msg.body.contains("warm, cozy theme")));
+    assert!(
+        app.messages()
+            .iter()
+            .any(|msg| msg.body.contains("warm, cozy theme"))
+    );
     assert_eq!(app.composer_text(), "");
 }

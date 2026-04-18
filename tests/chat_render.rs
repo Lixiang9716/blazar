@@ -24,8 +24,16 @@ fn spirit_pane_shows_the_mascot_and_status_copy() {
     let app = ChatApp::new_for_test("/home/lx/blazar");
     let lines = render_to_lines_for_test(&app, 100, 30);
 
-    assert!(lines.iter().any(|line| line.contains("Waiting with a sprinkle of stardust")));
-    assert!(lines.iter().any(|line| line.contains("▀") || line.contains("▄") || line.contains("█")));
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.contains("Waiting with a sprinkle of stardust"))
+    );
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.contains("▀") || line.contains("▄") || line.contains("█"))
+    );
 }
 
 #[test]

@@ -85,9 +85,9 @@ pub fn run_terminal_chat(
 ) -> Result<(), Box<dyn std::error::Error>> {
     use crate::chat::view::render_frame;
     use crossterm::{
-        event::{self, Event},
-        terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
         ExecutableCommand,
+        event::{self, Event},
+        terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
     };
     use ratatui_core::terminal::Terminal;
     use ratatui_crossterm::CrosstermBackend;

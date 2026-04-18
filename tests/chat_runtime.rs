@@ -10,10 +10,11 @@ fn enter_key_submits_composer_content_and_clears() {
     let action = InputAction::from_key_event(KeyEvent::from(KeyCode::Enter));
     app.handle_action(action);
 
-    assert!(app
-        .messages()
-        .iter()
-        .any(|msg| msg.body.contains("Hello Spirit")));
+    assert!(
+        app.messages()
+            .iter()
+            .any(|msg| msg.body.contains("Hello Spirit"))
+    );
     assert_eq!(app.composer_text(), "");
 }
 
@@ -28,7 +29,8 @@ fn esc_key_requests_quit() {
 #[test]
 fn ctrl_c_requests_quit() {
     let _app = ChatApp::new_for_test("/home/lx/blazar");
-    let action = InputAction::from_key_event(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+    let action =
+        InputAction::from_key_event(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
 
     assert!(matches!(action, InputAction::Quit));
 }

@@ -37,7 +37,8 @@ fn slime_idle_config() -> &'static MascotConfig {
     static CONFIG: OnceLock<MascotConfig> = OnceLock::new();
 
     CONFIG.get_or_init(|| {
-        config::load_mascot_config().expect("bundled mascot config should load from config/app.json")
+        config::load_mascot_config()
+            .expect("bundled mascot config should load from config/app.json")
     })
 }
 
