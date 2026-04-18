@@ -2,11 +2,11 @@ use crate::config;
 use serde_json::Value;
 use std::io::{self, BufRead, Write};
 
-fn build_schema() -> Result<Value, config::ConfigError> {
+pub(crate) fn build_schema() -> Result<Value, config::ConfigError> {
     config::load_app_schema()
 }
 
-type AppResult<T> = Result<T, Box<dyn std::error::Error>>;
+pub(crate) type AppResult<T> = Result<T, Box<dyn std::error::Error>>;
 
 #[derive(Debug)]
 enum PromptError {
