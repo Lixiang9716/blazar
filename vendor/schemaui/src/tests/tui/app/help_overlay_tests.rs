@@ -1,6 +1,6 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use jsonschema::validator_for;
-use ratatui::layout::Rect;
+use ratatui::{layout::Rect, text::Line};
 use serde_json::{Value, json};
 
 use crate::{
@@ -163,6 +163,40 @@ fn help_overlay_error_page_size_tracks_terminal_height() {
     assert!(
         short_page.total_pages > tall_page.total_pages,
         "taller terminal should require fewer pages"
+    );
+}
+
+#[test]
+fn help_overlay_page_capacity_accounts_for_header_height() {
+    let schema = required_string_object(24);
+    let viewport = Rect::new(0, 0, 140, 18);
+
+    let mut no_header_app = build_app(schema.clone());
+    no_header_app
+        .handle_key_for_test(key(KeyCode::Char('s'), KeyModifiers::CONTROL))
+        .expect("trigger validation");
+    no_header_app.toggle_help_overlay_for_test(viewport);
+    let no_header_page = no_header_app
+        .help_overlay_snapshot_for_test(viewport)
+        .expect("no-header help snapshot");
+
+    let mut header_app = build_app(schema);
+    header_app.set_header_lines(Some(vec![Line::from("SchemaUI mascot")]));
+    header_app
+        .handle_key_for_test(key(KeyCode::Char('s'), KeyModifiers::CONTROL))
+        .expect("trigger validation");
+    header_app.toggle_help_overlay_for_test(viewport);
+    let header_page = header_app
+        .help_overlay_snapshot_for_test(viewport)
+        .expect("header help snapshot");
+
+    assert!(
+        header_page.visible_errors < no_header_page.visible_errors,
+        "header should reduce the number of visible help-overlay errors: no header={no_header_page:?}, header={header_page:?}"
+    );
+    assert!(
+        header_page.visible_shortcuts < no_header_page.visible_shortcuts,
+        "header should reduce visible shortcut rows when vertical space shrinks: no header={no_header_page:?}, header={header_page:?}"
     );
 }
 

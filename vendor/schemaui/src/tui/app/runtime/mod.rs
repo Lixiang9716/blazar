@@ -85,6 +85,20 @@ pub(crate) struct HelpOverlaySnapshot {
 }
 
 impl App {
+    fn content_viewport(&self, viewport: Rect) -> Rect {
+        let header_height = self
+            .header_lines
+            .as_ref()
+            .map(|lines| lines.len().max(1) as u16)
+            .unwrap_or(0);
+        Rect {
+            x: viewport.x,
+            y: viewport.y.saturating_add(header_height),
+            width: viewport.width,
+            height: viewport.height.saturating_sub(header_height),
+        }
+    }
+
     fn current_help_text(&self) -> Option<String> {
         if !self.options.show_help {
             return None;
@@ -539,7 +553,7 @@ impl App {
     fn draw(&mut self, frame: &mut ratatui::Frame<'_>) {
         let help = self.current_help_text();
         let form_dirty = self.form_state.is_dirty();
-        self.refresh_help_overlay_pages(frame.area());
+        self.refresh_help_overlay_pages(self.content_viewport(frame.area()));
 
         let help_overlay_render = self.help_overlay.as_ref().and_then(|state| {
             if state.pages.is_empty() {
@@ -800,7 +814,7 @@ impl App {
 
     pub(crate) fn toggle_help_overlay_for_test(&mut self, viewport: Rect) {
         self.toggle_help_overlay();
-        self.refresh_help_overlay_pages(viewport);
+        self.refresh_help_overlay_pages(self.content_viewport(viewport));
     }
 
     pub(crate) fn current_help_text_for_test(&self) -> Option<String> {
@@ -811,8 +825,9 @@ impl App {
         &mut self,
         viewport: Rect,
     ) -> Option<HelpOverlaySnapshot> {
-        self.refresh_help_overlay_pages(viewport);
-        let capacities = view::help_overlay_panel_capacities(viewport);
+        let content_viewport = self.content_viewport(viewport);
+        self.refresh_help_overlay_pages(content_viewport);
+        let capacities = view::help_overlay_panel_capacities(content_viewport);
         let overlay = self.help_overlay.as_ref()?;
         let idx = overlay.page.min(overlay.pages.len().saturating_sub(1));
         let page = overlay.pages.get(idx)?;
