@@ -1,4 +1,5 @@
 use crate::config;
+use crate::chat;
 use serde_json::Value;
 use std::io::{self, BufRead, Write};
 
@@ -7,6 +8,10 @@ pub(crate) fn build_schema() -> Result<Value, config::ConfigError> {
 }
 
 pub(crate) type AppResult<T> = Result<T, Box<dyn std::error::Error>>;
+
+pub fn runtime_name_for_test() -> &'static str {
+    "spirit-chat-tui"
+}
 
 #[derive(Debug)]
 enum PromptError {
@@ -29,7 +34,10 @@ impl std::fmt::Display for PromptError {
                 write!(f, "invalid schema at {pointer}: expected {expected}")
             }
             Self::InvalidEnumDefault { pointer, default } => {
-                write!(f, "invalid schema at {pointer}: default {default:?} is not in enum")
+                write!(
+                    f,
+                    "invalid schema at {pointer}: default {default:?} is not in enum"
+                )
             }
         }
     }
@@ -111,23 +119,38 @@ fn collect_submission<R: BufRead, W: Write>(
         input,
         output,
         &string_at(schema, "/properties/workspace/properties/interactive/title")?,
-        bool_at(schema, "/properties/workspace/properties/interactive/default")?,
+        bool_at(
+            schema,
+            "/properties/workspace/properties/interactive/default",
+        )?,
     )?;
 
     write_section_header(output, &delivery_title)?;
     let response_style = prompt_enum(
         input,
         output,
-        &string_at(schema, "/properties/delivery/properties/responseStyle/title")?,
-        &string_at(schema, "/properties/delivery/properties/responseStyle/default")?,
+        &string_at(
+            schema,
+            "/properties/delivery/properties/responseStyle/title",
+        )?,
+        &string_at(
+            schema,
+            "/properties/delivery/properties/responseStyle/default",
+        )?,
         &string_list_at(schema, "/properties/delivery/properties/responseStyle/enum")?,
         "/properties/delivery/properties/responseStyle/default",
     )?;
     let run_validation = prompt_bool(
         input,
         output,
-        &string_at(schema, "/properties/delivery/properties/runValidation/title")?,
-        bool_at(schema, "/properties/delivery/properties/runValidation/default")?,
+        &string_at(
+            schema,
+            "/properties/delivery/properties/runValidation/title",
+        )?,
+        bool_at(
+            schema,
+            "/properties/delivery/properties/runValidation/default",
+        )?,
     )?;
     let notes = prompt_string(
         input,
@@ -297,11 +320,9 @@ fn run_app_with_io<R: BufRead, W: Write>(input: &mut R, output: &mut W) -> AppRe
 }
 
 pub fn run() -> AppResult<()> {
-    let stdin = io::stdin();
-    let stdout = io::stdout();
-    let mut input = stdin.lock();
-    let mut output = stdout.lock();
-    run_app_with_io(&mut input, &mut output)
+    let schema = build_schema()?;
+    let mascot = config::load_mascot_config()?;
+    chat::app::run_terminal_chat(schema, mascot)
 }
 
 #[cfg(test)]

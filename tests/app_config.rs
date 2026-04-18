@@ -1,4 +1,7 @@
-use blazar::config::{APP_SCHEMA_PATH, load_app_schema, load_app_schema_from_path, load_mascot_config};
+use blazar::app;
+use blazar::config::{
+    APP_SCHEMA_PATH, load_app_schema, load_app_schema_from_path, load_mascot_config,
+};
 use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -65,6 +68,13 @@ fn mascot_config_centralizes_slime_idle_settings() {
     assert_eq!(mascot.frame_count, 4);
     assert_eq!(mascot.fps, 8);
     assert_eq!(mascot.frame_interval_ms(), 125);
+}
+
+#[test]
+fn app_run_uses_the_chat_runtime_entrypoint() {
+    let description = app::runtime_name_for_test();
+
+    assert_eq!(description, "spirit-chat-tui");
 }
 
 fn unique_temp_dir() -> PathBuf {

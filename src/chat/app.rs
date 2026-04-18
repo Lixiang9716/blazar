@@ -1,5 +1,7 @@
 use crate::chat::model::{Author, ChatMessage};
+use crate::config::MascotConfig;
 use ratatui_textarea::TextArea;
+use serde_json::Value;
 
 pub struct ChatApp {
     messages: Vec<ChatMessage>,
@@ -50,4 +52,11 @@ impl ChatApp {
         self.send_message(&text);
         self.composer = TextArea::default();
     }
+}
+
+pub fn run_terminal_chat(
+    _schema: Value,
+    _mascot: MascotConfig,
+) -> Result<(), Box<dyn std::error::Error>> {
+    Ok(())
 }
