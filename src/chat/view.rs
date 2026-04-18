@@ -1,12 +1,14 @@
 use crate::chat::app::ChatApp;
 use crate::chat::model::Author;
 use crate::chat::theme::build_theme;
-use crate::welcome::mascot::{render_mascot_lines, render_mascot_plain};
+use crate::welcome::mascot::render_mascot_lines;
 use crate::welcome::state::WelcomeState;
+use core::cmp;
 use ratatui_core::{
+    backend::TestBackend,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Style},
-    terminal::Frame,
+    terminal::{Frame, Terminal},
     text::{Line, Span},
 };
 use ratatui_widgets::{
@@ -14,33 +16,38 @@ use ratatui_widgets::{
     borders::Borders,
     paragraph::{Paragraph, Wrap},
 };
+use unicode_width::UnicodeWidthStr;
 
 pub fn render_to_lines_for_test(app: &ChatApp, width: u16, height: u16) -> Vec<String> {
-    let _ = (width, height);
-
-    // Render mascot in idle state
-    let tick_ms = 1_200;
-    let mascot = render_mascot_plain(WelcomeState::new().tick(tick_ms, false), tick_ms);
-
-    let mut lines = vec![
-        "Spirit / 星糖导航马".to_owned(),
-        "Waiting with a sprinkle of stardust".to_owned(),
-    ];
-
-    // Add mascot lines
-    for line in mascot.lines() {
-        lines.push(line.to_owned());
+    if width == 0 || height == 0 {
+        return Vec::new();
     }
 
-    // Add message
-    lines.push(app.messages()[0].body.clone());
+    let backend = TestBackend::new(width, height);
+    let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
 
-    let composer_content = app.composer_text();
-    if !composer_content.is_empty() {
-        lines.push(format!("Composer: {}", composer_content));
-    }
+    terminal
+        .draw(|frame| render_frame(frame, app, 1_200))
+        .expect("chat frame should render");
 
-    lines
+    let buffer = terminal.backend().buffer();
+    buffer
+        .content()
+        .chunks(width as usize)
+        .map(|row| {
+            let mut line = String::new();
+            let mut skip = 0;
+
+            for cell in row {
+                if skip == 0 {
+                    line.push_str(cell.symbol());
+                }
+                skip = cmp::max(skip, cell.symbol().width()).saturating_sub(1);
+            }
+
+            line
+        })
+        .collect()
 }
 
 pub fn render_frame(frame: &mut Frame, app: &ChatApp, tick_ms: u64) {

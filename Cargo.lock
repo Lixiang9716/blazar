@@ -168,6 +168,7 @@ dependencies = [
  "ratatui-textarea",
  "ratatui-widgets",
  "serde_json",
+ "unicode-width",
 ]
 
 [[package]]
