@@ -1,0 +1,23 @@
+---
+source: tests/chat_render_snapshot.rs
+expression: "lines.join(\"\\n\")"
+---
+Spirit / 星糖导航马
+Waiting with a sprinkle of stardust
+                                
+                                
+                                
+                                
+            ▄▄▄▄▄▄▄             
+         ▄██▀▀▀▀▀▀▀▀█▄          
+        ████████████▀██         
+       ████████▀█████▀██        
+      ███████████████████       
+      ███████████████████       
+      █▀█████████████████       
+       ▀█▀▀▀▀▀▀▀▀▀▀▀▀▀█▀        
+         ▀▀▀▀▀▀▀▀▀▀▀▀▀          
+                                
+                                
+                                
+Spirit: Tell me what you'd like to explore.

@@ -12,3 +12,7 @@ ratatui-widgets = "0.3"
 ratatui-crossterm = "0.1"
 ratatui-textarea = { version = "0.9", features = ["crossterm"] }
 serde_json = "1"
+
+[dev-dependencies]
+insta = "1"
+proptest = "1"
