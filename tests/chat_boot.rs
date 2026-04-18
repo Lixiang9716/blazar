@@ -18,3 +18,14 @@ fn sending_a_user_message_appends_user_and_spirit_messages() {
     assert!(app.messages()[1].body.contains("Help me design"));
     assert!(app.messages()[2].body.contains("Spirit"));
 }
+
+#[test]
+fn composer_submit_moves_text_into_the_timeline() {
+    let mut app = ChatApp::new_for_test("/home/lx/blazar");
+
+    app.set_composer_text("Show me a warm, cozy theme");
+    app.submit_composer();
+
+    assert!(app.messages().iter().any(|msg| msg.body.contains("warm, cozy theme")));
+    assert_eq!(app.composer_text(), "");
+}

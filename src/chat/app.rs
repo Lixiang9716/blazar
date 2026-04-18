@@ -1,7 +1,9 @@
 use crate::chat::model::{Author, ChatMessage};
+use ratatui_textarea::TextArea;
 
 pub struct ChatApp {
     messages: Vec<ChatMessage>,
+    composer: TextArea<'static>,
 }
 
 impl ChatApp {
@@ -11,6 +13,7 @@ impl ChatApp {
                 author: Author::Spirit,
                 body: "Spirit: Tell me what you'd like to explore.".to_owned(),
             }],
+            composer: TextArea::default(),
         }
     }
 
@@ -32,5 +35,19 @@ impl ChatApp {
             author: Author::Spirit,
             body: format!("Spirit: I hear you — {trimmed}"),
         });
+    }
+
+    pub fn set_composer_text(&mut self, value: &str) {
+        self.composer = TextArea::from([value.to_owned()]);
+    }
+
+    pub fn composer_text(&self) -> String {
+        self.composer.lines().join("\n")
+    }
+
+    pub fn submit_composer(&mut self) {
+        let text = self.composer_text();
+        self.send_message(&text);
+        self.composer = TextArea::default();
     }
 }
