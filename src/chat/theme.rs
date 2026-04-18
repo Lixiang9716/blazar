@@ -12,6 +12,8 @@ pub fn build_theme() -> ChatTheme {
         spirit_border: Style::default().fg(Color::Cyan),
         chat_border: Style::default().fg(Color::Blue),
         spirit_bubble: Style::default().fg(Color::White).bg(Color::Rgb(70, 40, 90)),
-        user_bubble: Style::default().fg(Color::Black).bg(Color::Rgb(120, 210, 255)),
+        user_bubble: Style::default()
+            .fg(Color::Black)
+            .bg(Color::Rgb(120, 210, 255)),
     }
 }
