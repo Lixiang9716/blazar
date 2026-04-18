@@ -2831,12 +2831,10 @@ dependencies = [
 [[package]]
 name = "schemaui"
 version = "0.7.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "906de8223093753a2cb9e6865c0401ae195a418fae959614e16bd63acc2b74c1"
 dependencies = [
  "anyhow",
  "axum",
- "crossterm 0.29.0",
+ "crossterm 0.28.1",
  "include_dir",
  "indexmap 2.14.0",
  "jsonschema",
