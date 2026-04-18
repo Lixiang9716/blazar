@@ -100,7 +100,7 @@ features = [
 optional = true
 
 [dependencies.crossterm]
-version = "0"
+version = "0.29"
 
 [dependencies.include_dir]
 version = "0.7"
