@@ -220,14 +220,9 @@ pub fn render_workspace(frame: &mut Frame, app: &WorkspaceApp, tick_ms: u64) {
         .borders(Borders::ALL)
         .border_style(theme.panel_border)
         .title("Ask Spirit");
+    // compute inner rect using Block::inner before moving the block into render_widget
+    let footer_inner = footer_block.inner(rows[2]);
     frame.render_widget(footer_block, rows[2]);
-    // compute inner rect for the block so the top-left corner remains visible
-    let footer_inner = Rect {
-        x: rows[2].x + 1,
-        y: rows[2].y + 1,
-        width: rows[2].width.saturating_sub(2),
-        height: rows[2].height.saturating_sub(2),
-    };
     // render the actual composer TextArea from the chat app into the footer inner area
     let composer = app.chat().composer();
     frame.render_widget(composer, footer_inner);
