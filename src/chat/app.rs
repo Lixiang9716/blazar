@@ -64,6 +64,10 @@ impl ChatApp {
         match action {
             InputAction::Quit => self.should_quit = true,
             InputAction::Submit => self.submit_composer(),
+            InputAction::CycleFocus
+            | InputAction::SelectChatView
+            | InputAction::SelectGitView
+            | InputAction::SelectSessionsView => {}
             InputAction::Key(key) => {
                 self.composer.input(key);
             }

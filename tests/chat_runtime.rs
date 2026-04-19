@@ -45,9 +45,9 @@ fn digit_shortcuts_switch_workspace_views() {
     let sessions =
         InputAction::from_key_event(KeyEvent::new(KeyCode::Char('3'), KeyModifiers::NONE));
 
-    assert_eq!(chat, InputAction::SelectChatView);
-    assert_eq!(git, InputAction::SelectGitView);
-    assert_eq!(sessions, InputAction::SelectSessionsView);
+    assert!(matches!(chat, InputAction::SelectChatView));
+    assert!(matches!(git, InputAction::SelectGitView));
+    assert!(matches!(sessions, InputAction::SelectSessionsView));
 }
 
 #[test]
