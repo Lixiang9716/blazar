@@ -2,9 +2,11 @@ use blazar::chat::app::ChatApp;
 use blazar::chat::view::{render_frame, render_to_lines_for_test};
 use ratatui_core::{backend::TestBackend, style::Color, terminal::Terminal};
 
+const REPO_ROOT: &str = env!("CARGO_MANIFEST_DIR");
+
 #[test]
 fn chat_view_renders_spirit_pane_and_message_pane() {
-    let app = ChatApp::new_for_test("/home/lx/blazar");
+    let app = ChatApp::new_for_test(REPO_ROOT);
     let lines = render_to_lines_for_test(&app, 100, 30);
 
     assert!(
@@ -21,7 +23,7 @@ fn chat_view_renders_spirit_pane_and_message_pane() {
 
 #[test]
 fn spirit_pane_shows_the_mascot_and_status_copy() {
-    let app = ChatApp::new_for_test("/home/lx/blazar");
+    let app = ChatApp::new_for_test(REPO_ROOT);
     let lines = render_to_lines_for_test(&app, 100, 30);
 
     assert!(
@@ -38,7 +40,7 @@ fn spirit_pane_shows_the_mascot_and_status_copy() {
 
 #[test]
 fn spirit_pane_does_not_emit_raw_ansi_escape_sequences() {
-    let app = ChatApp::new_for_test("/home/lx/blazar");
+    let app = ChatApp::new_for_test(REPO_ROOT);
     let lines = render_to_lines_for_test(&app, 100, 30);
 
     assert!(
@@ -51,7 +53,7 @@ fn spirit_pane_does_not_emit_raw_ansi_escape_sequences() {
 fn spirit_pane_preserves_mascot_colors_in_terminal_buffer() {
     let backend = TestBackend::new(100, 30);
     let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
-    let app = ChatApp::new_for_test("/home/lx/blazar");
+    let app = ChatApp::new_for_test(REPO_ROOT);
 
     terminal
         .draw(|frame| render_frame(frame, &app, 1_200))

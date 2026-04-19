@@ -2,9 +2,11 @@ use blazar::chat::app::ChatApp;
 use blazar::chat::input::InputAction;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+const REPO_ROOT: &str = env!("CARGO_MANIFEST_DIR");
+
 #[test]
 fn enter_key_submits_composer_content_and_clears() {
-    let mut app = ChatApp::new_for_test("/home/lx/blazar");
+    let mut app = ChatApp::new_for_test(REPO_ROOT);
     app.set_composer_text("Hello Spirit");
 
     let action = InputAction::from_key_event(KeyEvent::from(KeyCode::Enter));
@@ -20,7 +22,7 @@ fn enter_key_submits_composer_content_and_clears() {
 
 #[test]
 fn esc_key_requests_quit() {
-    let _app = ChatApp::new_for_test("/home/lx/blazar");
+    let _app = ChatApp::new_for_test(REPO_ROOT);
     let action = InputAction::from_key_event(KeyEvent::from(KeyCode::Esc));
 
     assert!(matches!(action, InputAction::Quit));
@@ -28,7 +30,7 @@ fn esc_key_requests_quit() {
 
 #[test]
 fn ctrl_c_requests_quit() {
-    let _app = ChatApp::new_for_test("/home/lx/blazar");
+    let _app = ChatApp::new_for_test(REPO_ROOT);
     let action =
         InputAction::from_key_event(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
 
@@ -37,7 +39,7 @@ fn ctrl_c_requests_quit() {
 
 #[test]
 fn character_input_is_forwarded_to_composer() {
-    let mut app = ChatApp::new_for_test("/home/lx/blazar");
+    let mut app = ChatApp::new_for_test(REPO_ROOT);
 
     let action = InputAction::from_key_event(KeyEvent::from(KeyCode::Char('a')));
     app.handle_action(action);
@@ -48,7 +50,7 @@ fn character_input_is_forwarded_to_composer() {
 
 #[test]
 fn app_tracks_quit_flag() {
-    let mut app = ChatApp::new_for_test("/home/lx/blazar");
+    let mut app = ChatApp::new_for_test(REPO_ROOT);
     assert!(!app.should_quit());
 
     app.handle_action(InputAction::Quit);

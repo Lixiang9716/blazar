@@ -25,6 +25,6 @@ deps:
     cargo outdated -R
 
 snapshots:
-    cargo test --test chat_render_snapshot
+    cargo nextest run --test chat_render_snapshot
 
 preflight: fmt-check lint test audit

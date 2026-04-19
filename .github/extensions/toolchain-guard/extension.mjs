@@ -4,6 +4,7 @@ const BLOCKED_COMMANDS = new Map([
   ["cargo fmt", "just fmt"],
   ["cargo clippy", "just lint"],
   ["cargo test", "just test"],
+  ["cargo nextest run", "just test"],
   ["cargo llvm-cov", "just cov"],
   ["cargo deny", "just audit"],
 ]);
