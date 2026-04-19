@@ -14,11 +14,11 @@ expression: "lines.join(\"\\n\")"
 │         ▀▀▀▀▀▀▀▀▀▀                                       │
 │                                                          │
 ╰──────────────────────────────────────────────────────────╯
-  ● Tell me what you'd like to explore.                     
                                                             
-                                                            
-───────────────────────────────────────── blazar-dev (local)
+═════════════════════════════════════════ blazar-dev (local)
 › Type @ to mention files, # for issues/PRs, / for commands,
+  or ? for shortcuts                                        
+                                                            
                                                             
                                                             
 v0.1.0 · shift+tab switch mode                        ready

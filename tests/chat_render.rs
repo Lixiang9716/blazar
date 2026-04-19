@@ -82,7 +82,7 @@ fn interactive_send_message_shows_echo_response() {
     let mut app = ChatApp::new_for_test(REPO_ROOT);
 
     // Step 1: initial state — only greeting visible
-    let lines_before = render_to_lines_for_test(&app, 60, 20);
+    let lines_before = render_to_lines_for_test(&app, 80, 35);
     assert!(
         lines_before
             .iter()
@@ -99,7 +99,7 @@ fn interactive_send_message_shows_echo_response() {
         KeyCode::Char('1'),
         KeyModifiers::NONE,
     )));
-    let lines_typing = render_to_lines_for_test(&app, 60, 20);
+    let lines_typing = render_to_lines_for_test(&app, 80, 35);
     assert!(
         lines_typing.iter().any(|l| l.contains('1')),
         "composer should show typed character"
@@ -109,7 +109,7 @@ fn interactive_send_message_shows_echo_response() {
     app.handle_action(InputAction::Submit);
 
     // Step 4: verify the echo response appeared in the rendered output
-    let lines_after = render_to_lines_for_test(&app, 60, 20);
+    let lines_after = render_to_lines_for_test(&app, 80, 35);
     assert!(
         lines_after.iter().any(|l| l.contains("I hear you")),
         "echo response should appear after submit"
