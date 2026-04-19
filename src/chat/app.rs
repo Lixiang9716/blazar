@@ -203,7 +203,7 @@ impl ChatApp {
 
     pub fn handle_action(&mut self, action: InputAction) {
         // When picker is open, route input to it
-        if self.picker.is_visible() {
+        if self.picker.is_open() {
             match action {
                 InputAction::Quit => self.picker.close(),
                 InputAction::Submit => {

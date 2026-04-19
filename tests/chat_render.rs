@@ -83,6 +83,41 @@ fn picker_navigation_reaches_later_commands() {
 }
 
 #[test]
+fn closing_picker_routes_typing_back_to_composer() {
+    use blazar::chat::input::InputAction;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use std::time::Duration;
+
+    let mut app = ChatApp::new_for_test(REPO_ROOT);
+    let animated_overlay = app
+        .picker
+        .overlay_state()
+        .clone()
+        .with_duration(Duration::from_millis(250));
+    *app.picker.overlay_state_mut() = animated_overlay;
+
+    app.handle_action(InputAction::Key(KeyEvent::new(
+        KeyCode::Char('/'),
+        KeyModifiers::NONE,
+    )));
+    app.handle_action(InputAction::Quit);
+    assert!(
+        app.picker.is_visible(),
+        "picker should still render while closing animation runs"
+    );
+
+    app.handle_action(InputAction::Key(KeyEvent::new(
+        KeyCode::Char('x'),
+        KeyModifiers::NONE,
+    )));
+    assert_eq!(
+        app.composer_text(),
+        "x",
+        "input should route to composer while picker is closing"
+    );
+}
+
+#[test]
 fn timeline_does_not_emit_raw_ansi_escape_sequences() {
     let mut app = ChatApp::new_for_test(REPO_ROOT);
     let lines = render_to_lines_for_test(&mut app, 100, 35);

@@ -86,6 +86,10 @@ impl ModalPicker {
         self.overlay_state.is_open() || self.overlay_state.is_animating()
     }
 
+    pub fn is_open(&self) -> bool {
+        self.overlay_state.is_open()
+    }
+
     pub fn overlay_state(&self) -> &OverlayState {
         &self.overlay_state
     }
