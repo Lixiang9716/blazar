@@ -4,6 +4,7 @@ use crate::chat::picker::ModalPicker;
 use crate::config::MascotConfig;
 use ratatui_textarea::TextArea;
 use serde_json::Value;
+use std::cell::Cell;
 use std::time::Instant;
 
 pub struct ChatApp {
@@ -21,6 +22,10 @@ pub struct ChatApp {
     demo_queue: Vec<TimelineEntry>,
     /// When the last demo entry was added (for 1-second pacing).
     demo_last_add: Option<Instant>,
+    /// Last known content height of the timeline (set by renderer).
+    pub timeline_content_height: Cell<u16>,
+    /// Last known visible height of the timeline area (set by renderer).
+    pub timeline_visible_height: Cell<u16>,
 }
 
 impl ChatApp {
@@ -56,6 +61,8 @@ impl ChatApp {
             tick_count: 0,
             demo_queue: Vec::new(),
             demo_last_add: None,
+            timeline_content_height: Cell::new(0),
+            timeline_visible_height: Cell::new(0),
         }
     }
 
@@ -127,6 +134,17 @@ impl ChatApp {
     /// Whether demo playback is currently running.
     pub fn demo_active(&self) -> bool {
         !self.demo_queue.is_empty()
+    }
+
+    /// Convert the u16::MAX auto-scroll sentinel into a real offset
+    /// so that manual scroll adjustments work correctly.
+    fn resolve_scroll_sentinel(&mut self) {
+        if self.scroll_offset == u16::MAX {
+            self.scroll_offset = self
+                .timeline_content_height
+                .get()
+                .saturating_sub(self.timeline_visible_height.get());
+        }
     }
 
     pub fn send_message(&mut self, input: &str) {
@@ -217,9 +235,11 @@ impl ChatApp {
             InputAction::Submit => self.submit_composer(),
             InputAction::ToggleDetails => self.show_details = !self.show_details,
             InputAction::ScrollUp => {
+                self.resolve_scroll_sentinel();
                 self.scroll_offset = self.scroll_offset.saturating_sub(3);
             }
             InputAction::ScrollDown => {
+                self.resolve_scroll_sentinel();
                 self.scroll_offset = self.scroll_offset.saturating_add(3);
             }
             InputAction::Key(key) => {

@@ -190,6 +190,11 @@ fn render_timeline(frame: &mut Frame, area: Rect, app: &ChatApp, theme: &ChatThe
     // Calculate scroll: auto-scroll to bottom
     let content_height = lines.len() as u16;
     let visible_height = area.height;
+
+    // Feed back heights so scroll sentinel can be resolved
+    app.timeline_content_height.set(content_height);
+    app.timeline_visible_height.set(visible_height);
+
     let scroll_offset = if content_height > visible_height {
         let auto_scroll = content_height.saturating_sub(visible_height);
         // Respect manual scroll if set
