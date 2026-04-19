@@ -1,6 +1,7 @@
 use crate::chat::app::ChatApp;
 use crate::chat::git::GitSummary;
 use crate::chat::input::InputAction;
+use crate::chat::session::SessionSummary;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -22,6 +23,7 @@ pub struct WorkspaceApp {
     active_view: WorkspaceView,
     focus: WorkspaceFocus,
     git_summary: GitSummary,
+    session_summary: SessionSummary,
 }
 
 impl WorkspaceApp {
@@ -31,6 +33,7 @@ impl WorkspaceApp {
             active_view: WorkspaceView::Chat,
             focus: WorkspaceFocus::Nav,
             git_summary: GitSummary::default(),
+            session_summary: SessionSummary::default(),
         }
     }
 
@@ -40,6 +43,14 @@ impl WorkspaceApp {
 
     pub fn set_git_summary_for_test(&mut self, summary: GitSummary) {
         self.git_summary = summary;
+    }
+
+    pub fn session_summary(&self) -> &SessionSummary {
+        &self.session_summary
+    }
+
+    pub fn set_session_summary_for_test(&mut self, summary: SessionSummary) {
+        self.session_summary = summary;
     }
 
     pub fn active_view(&self) -> WorkspaceView {

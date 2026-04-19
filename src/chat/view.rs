@@ -1,6 +1,7 @@
 use crate::chat::app::ChatApp;
 use crate::chat::git::GitSummary;
 use crate::chat::model::Author;
+use crate::chat::session::SessionSummary;
 use crate::chat::theme::build_theme;
 use crate::chat::workspace::{WorkspaceApp, WorkspaceView};
 use crate::welcome::mascot::render_mascot_lines;
@@ -202,12 +203,7 @@ pub fn render_workspace(frame: &mut Frame, app: &WorkspaceApp, tick_ms: u64) {
             render_git_panel(frame, cols[1], app.git_summary(), &theme);
         }
         WorkspaceView::Sessions => {
-            let block = Block::default()
-                .borders(Borders::ALL)
-                .border_style(theme.panel_border)
-                .title("Sessions");
-            let paragraph = Paragraph::new(Line::from("View not implemented yet")).block(block);
-            frame.render_widget(paragraph, cols[1]);
+            render_session_panel(frame, cols[1], app.session_summary(), &theme);
         }
     }
 
@@ -331,6 +327,73 @@ fn render_git_panel(
         .borders(Borders::ALL)
         .border_style(theme.panel_border)
         .title("Git");
+
+    let paragraph = Paragraph::new(lines)
+        .block(block)
+        .wrap(Wrap { trim: false });
+
+    frame.render_widget(paragraph, area);
+}
+
+fn render_session_panel(
+    frame: &mut Frame,
+    area: Rect,
+    summary: &SessionSummary,
+    theme: &crate::chat::theme::ChatTheme,
+) {
+    let mut lines: Vec<Line> = vec![];
+
+    if summary.session_label.is_empty() {
+        lines.push(Line::from("No session details available yet"));
+    } else {
+        lines.push(Line::from(vec![
+            Span::styled("Session: ", Style::default()),
+            Span::styled(&summary.session_label, theme.status_text),
+        ]));
+
+        if !summary.cwd.is_empty() {
+            lines.push(Line::from(vec![
+                Span::styled("Repo: ", Style::default()),
+                Span::styled(&summary.cwd, Style::default().fg(Color::Cyan)),
+            ]));
+        }
+
+        if !summary.active_intent.is_empty() {
+            lines.push(Line::from(vec![
+                Span::styled("Intent: ", Style::default()),
+                Span::styled(&summary.active_intent, Style::default().fg(Color::Magenta)),
+            ]));
+        }
+
+        if !summary.plan_status.is_empty() {
+            lines.push(Line::from(vec![
+                Span::styled("Plan: ", Style::default()),
+                Span::styled(&summary.plan_status, Style::default().fg(Color::Green)),
+            ]));
+        }
+
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled("Checkpoints:", Style::default().fg(Color::Cyan))));
+        if summary.checkpoints.is_empty() {
+            lines.push(Line::from("  No checkpoints recorded"));
+        } else {
+            for cp in &summary.checkpoints {
+                lines.push(Line::from(format!("  {cp}")));
+            }
+        }
+
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled("Todos:", Style::default().fg(Color::Cyan))));
+        lines.push(Line::from(format!(
+            "  done: {}  in progress: {}  ready: {}",
+            summary.done_todos, summary.in_progress_todos, summary.ready_todos
+        )));
+    }
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(theme.panel_border)
+        .title("Sessions");
 
     let paragraph = Paragraph::new(lines)
         .block(block)
