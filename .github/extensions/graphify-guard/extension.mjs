@@ -14,6 +14,20 @@ const BLOCKED_TOOLS = new Set([
   "github-mcp-server-get_file_contents",
 ]);
 
+// Bash commands that are safe without reading knowledge base first.
+// These don't search or modify code — they manage git, processes, or infra.
+const SAFE_BASH_PREFIXES = [
+  "git ", "git\t",
+  "ss ", "ps ", "kill ", "ls ", "pwd", "echo ",
+  "cd ", "cat /tmp", "node /tmp",
+  "find ", "head ", "tail ", "wc ",
+  "cargo test", "cargo build", "cargo check", "cargo clippy",
+  "just ", "make ",
+  "npm ", "npx ",
+  "cp ", "mv ", "mkdir ",
+  "curl ", "wget ",
+];
+
 async function pathExists(targetPath) {
   try {
     await access(targetPath);
@@ -303,6 +317,17 @@ const session = await joinSession({
         return {
           additionalContext: buildAdditionalContext(state),
         };
+      }
+
+      // Allow safe bash commands (git, builds, process mgmt) without guard
+      if (input.toolName === "bash" && input.toolArgs?.command) {
+        const cmd = input.toolArgs.command.trimStart();
+        const isSafe = SAFE_BASH_PREFIXES.some((prefix) => cmd.startsWith(prefix));
+        if (isSafe) {
+          return {
+            additionalContext: buildAdditionalContext(state),
+          };
+        }
       }
 
       const needsKnowledgeRead = BLOCKED_TOOLS.has(input.toolName) && !state.reportRead;

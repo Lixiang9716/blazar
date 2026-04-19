@@ -44,31 +44,23 @@ pub struct ChatTheme {
 pub fn build_theme() -> ChatTheme {
     ChatTheme {
         title_bar: Style::default().fg(BASE1).bg(Color::Rgb(45, 45, 80)),
-        title_text: Style::default()
-            .fg(BASE2)
-            .add_modifier(Modifier::BOLD),
+        title_text: Style::default().fg(BASE2).add_modifier(Modifier::BOLD),
         timeline_bg: Style::default().fg(BASE0).bg(BASE03),
         body_text: Style::default().fg(BASE0),
         dim_text: Style::default().fg(BASE01),
-        bold_text: Style::default()
-            .fg(BASE1)
-            .add_modifier(Modifier::BOLD),
+        bold_text: Style::default().fg(BASE1).add_modifier(Modifier::BOLD),
         marker_response: Style::default().fg(YELLOW),
         marker_tool: Style::default().fg(GREEN),
         marker_bash: Style::default().fg(GREEN),
         marker_thinking: Style::default().fg(YELLOW),
-        tool_label: Style::default()
-            .fg(BASE2)
-            .add_modifier(Modifier::BOLD),
+        tool_label: Style::default().fg(BASE2).add_modifier(Modifier::BOLD),
         tool_target: Style::default().fg(CYAN),
         diff_add: Style::default().fg(GREEN),
         diff_del: Style::default().fg(RED),
         code_block: Style::default().fg(BASE0).bg(BASE02),
         input_prompt: Style::default().fg(CYAN),
         input_placeholder: Style::default().fg(BASE01),
-        status_bar: Style::default()
-            .fg(BASE1)
-            .bg(Color::Rgb(40, 40, 75)),
+        status_bar: Style::default().fg(BASE1).bg(Color::Rgb(40, 40, 75)),
         status_right: Style::default().fg(BASE01),
     }
 }

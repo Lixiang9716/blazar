@@ -1,6 +1,6 @@
 use crate::chat::app::ChatApp;
 use crate::chat::model::{Actor, EntryKind, TimelineEntry};
-use crate::chat::theme::{build_theme, ChatTheme};
+use crate::chat::theme::{ChatTheme, build_theme};
 use core::cmp;
 use ratatui_core::{
     backend::TestBackend,
@@ -57,8 +57,7 @@ pub fn render_frame(frame: &mut Frame, app: &ChatApp, _tick_ms: u64) {
     frame.render_widget(bg_block, area);
 
     // Vertical layout: title_bar | timeline | input | status_bar
-    let [title, timeline, input, status] =
-        vertical![==1, >=1, ==3, ==1].areas(area);
+    let [title, timeline, input, status] = vertical![==1, >=1, ==3, ==1].areas(area);
 
     render_title_bar(frame, title, app, &theme);
     render_timeline(frame, timeline, app, &theme);
@@ -66,30 +65,24 @@ pub fn render_frame(frame: &mut Frame, app: &ChatApp, _tick_ms: u64) {
     render_status_bar(frame, status, app, &theme);
 }
 
-fn render_title_bar(
-    frame: &mut Frame,
-    area: Rect,
-    app: &ChatApp,
-    theme: &ChatTheme,
-) {
+fn render_title_bar(frame: &mut Frame, area: Rect, app: &ChatApp, theme: &ChatTheme) {
     let display_path = app.display_path();
     let title_text = format!("blazar — {display_path}");
 
     // Center the title in the bar
     let padding = area.width.saturating_sub(title_text.len() as u16) / 2;
-    let padded = format!("{:>width$}", title_text, width = (padding as usize) + title_text.len());
+    let padded = format!(
+        "{:>width$}",
+        title_text,
+        width = (padding as usize) + title_text.len()
+    );
 
     let line = Line::from(Span::styled(padded, theme.title_text));
     let bar = Paragraph::new(line).style(theme.title_bar);
     frame.render_widget(bar, area);
 }
 
-fn render_timeline(
-    frame: &mut Frame,
-    area: Rect,
-    app: &ChatApp,
-    theme: &ChatTheme,
-) {
+fn render_timeline(frame: &mut Frame, area: Rect, app: &ChatApp, theme: &ChatTheme) {
     let mut lines: Vec<Line> = Vec::new();
 
     for entry in app.timeline() {
@@ -164,10 +157,8 @@ fn render_entry<'a>(entry: &TimelineEntry, theme: &ChatTheme, _width: u16) -> Ve
                             .collect();
 
                         if i == 0 {
-                            let mut first = vec![
-                                Span::raw(MARGIN),
-                                Span::styled("● ", marker_style),
-                            ];
+                            let mut first =
+                                vec![Span::raw(MARGIN), Span::styled("● ", marker_style)];
                             first.extend(owned_spans);
                             lines.push(Line::from(first));
                         } else {
@@ -285,18 +276,13 @@ fn marker_style_for(entry: &TimelineEntry, theme: &ChatTheme) -> Style {
     }
 }
 
-fn render_input(
-    frame: &mut Frame,
-    area: Rect,
-    app: &ChatApp,
-    theme: &ChatTheme,
-) {
+fn render_input(frame: &mut Frame, area: Rect, app: &ChatApp, theme: &ChatTheme) {
     // Render prompt "›" on the left, TextArea takes the rest
     let [prompt_area, composer_area] = horizontal![==2, >=1].areas(area);
 
     // Prompt character
-    let prompt = Paragraph::new(Line::from(Span::styled("› ", theme.input_prompt)))
-        .style(theme.timeline_bg);
+    let prompt =
+        Paragraph::new(Line::from(Span::styled("› ", theme.input_prompt))).style(theme.timeline_bg);
     frame.render_widget(prompt, prompt_area);
 
     // Show placeholder if composer is empty
@@ -313,12 +299,7 @@ fn render_input(
     }
 }
 
-fn render_status_bar(
-    frame: &mut Frame,
-    area: Rect,
-    app: &ChatApp,
-    theme: &ChatTheme,
-) {
+fn render_status_bar(frame: &mut Frame, area: Rect, app: &ChatApp, theme: &ChatTheme) {
     let display_path = app.display_path();
     let branch = app.branch();
     let left = format!("blazar • {display_path} • {branch}");

@@ -146,10 +146,10 @@ impl ChatApp {
 
 /// Shorten `/home/<user>/...` to `~/...` for display.
 fn shorten_home(path: &str) -> String {
-    if let Ok(home) = std::env::var("HOME") {
-        if let Some(rest) = path.strip_prefix(&home) {
-            return format!("~{rest}");
-        }
+    if let Ok(home) = std::env::var("HOME")
+        && let Some(rest) = path.strip_prefix(&home)
+    {
+        return format!("~{rest}");
     }
     path.to_owned()
 }
@@ -202,10 +202,7 @@ fn demo_timeline() -> Vec<TimelineEntry> {
             0,
             "New snapshot test for width=40 rendering",
         ),
-        TimelineEntry::bash(
-            "cargo test --lib",
-            "77 tests passed, 0 failed (2.4s)",
-        ),
+        TimelineEntry::bash("cargo test --lib", "77 tests passed, 0 failed (2.4s)"),
         TimelineEntry::response(
             "**Fixed.** Narrow terminals (< 60 cols) now get a stacked layout:\n\n- Row 1: mascot (3 lines, centered)\n- Row 2: chat timeline (remaining space)\n- Row 3: `input` + `status`\n\n77 tests pass including the new `narrow-render` snapshot.",
         ),
