@@ -3,6 +3,7 @@ use crate::chat::git::GitSummary;
 use crate::chat::input::InputAction;
 use crate::chat::session::SessionSummary;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use std::path::Path;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorkspaceView {
@@ -27,18 +28,35 @@ pub struct WorkspaceApp {
 }
 
 impl WorkspaceApp {
+    /// Creates a `WorkspaceApp` that loads live Git and session data.
     pub fn new(repo_path: &str) -> Self {
+        let path = if repo_path.is_empty() {
+            std::env::current_dir()
+                .unwrap_or_else(|_| Path::new(".").to_path_buf())
+        } else {
+            Path::new(repo_path).to_path_buf()
+        };
         Self {
             chat: ChatApp::new(repo_path),
             active_view: WorkspaceView::Chat,
             focus: WorkspaceFocus::Nav,
-            git_summary: GitSummary::default(),
-            session_summary: SessionSummary::default(),
+            git_summary: GitSummary::load(&path),
+            session_summary: SessionSummary::load(&path),
         }
     }
 
-    pub fn new_for_test(repo_path: &str) -> Self {
-        Self::new(repo_path)
+    /// Creates a `WorkspaceApp` with deterministic test fixtures.
+    ///
+    /// Does **not** invoke live Git or session loaders so tests remain
+    /// independent of the caller's real repository / session state.
+    pub fn new_for_test(_repo_path: &str) -> Self {
+        Self {
+            chat: ChatApp::new(_repo_path),
+            active_view: WorkspaceView::Chat,
+            focus: WorkspaceFocus::Nav,
+            git_summary: GitSummary::for_test(),
+            session_summary: SessionSummary::for_test(),
+        }
     }
 
     pub fn should_quit(&self) -> bool {

@@ -109,8 +109,17 @@ pub fn run_terminal_chat(
     let backend = CrosstermBackend::new(stdout());
     let mut terminal = Terminal::new(backend)?;
 
-    // Initialize app
-    let mut app = WorkspaceApp::new("");
+    // Initialize app — extract repo path from schema, fall back to cwd
+    let repo_path: String = _schema
+        .pointer("/properties/workspace/properties/repoPath/default")
+        .and_then(|v| v.as_str())
+        .map(str::to_owned)
+        .unwrap_or_else(|| {
+            std::env::current_dir()
+                .map(|p| p.display().to_string())
+                .unwrap_or_default()
+        });
+    let mut app = WorkspaceApp::new(&repo_path);
     let start_time = Instant::now();
 
     // Event loop

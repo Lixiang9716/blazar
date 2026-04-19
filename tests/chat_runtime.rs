@@ -264,3 +264,36 @@ fn generic_key_input_in_non_chat_footer_does_not_write_to_composer() {
         "generic key input in a non-chat footer must not write into the hidden composer"
     );
 }
+
+// Live-data gap: new_for_test must be deterministic and not load real repo/session state.
+#[test]
+fn new_for_test_git_summary_is_deterministic() {
+    let app = WorkspaceApp::new_for_test(REPO_ROOT);
+    // Must reflect GitSummary::for_test() values, not live git state.
+    assert_eq!(
+        app.git_summary().branch,
+        "main",
+        "new_for_test must use GitSummary::for_test(), not live git"
+    );
+    assert_eq!(app.git_summary().ahead, 2);
+    assert_eq!(app.git_summary().staged, 1);
+    assert_eq!(app.git_summary().unstaged, 3);
+    assert!(
+        app.git_summary().recent_commits.len() >= 1,
+        "for_test should have at least one commit"
+    );
+}
+
+#[test]
+fn new_for_test_session_summary_is_deterministic() {
+    let app = WorkspaceApp::new_for_test(REPO_ROOT);
+    // Must reflect SessionSummary::for_test() values, not live session state.
+    assert_eq!(
+        app.session_summary().session_label,
+        "spirit-workspace-tui",
+        "new_for_test must use SessionSummary::for_test(), not live session"
+    );
+    assert_eq!(app.session_summary().ready_todos, 2);
+    assert_eq!(app.session_summary().in_progress_todos, 1);
+    assert_eq!(app.session_summary().done_todos, 4);
+}
