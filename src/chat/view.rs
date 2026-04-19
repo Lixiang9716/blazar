@@ -194,7 +194,8 @@ pub fn render_workspace(frame: &mut Frame, app: &WorkspaceApp, tick_ms: u64) {
     // Content
     match app.active_view() {
         WorkspaceView::Chat => {
-            render_chat_pane(frame, cols[1], app.chat(), &theme);
+            // render messages only in the main content area; the real composer belongs in the footer
+            render_messages_only(frame, cols[1], app.chat(), &theme);
         }
         WorkspaceView::Git => {
             let block = Block::default()
@@ -214,15 +215,22 @@ pub fn render_workspace(frame: &mut Frame, app: &WorkspaceApp, tick_ms: u64) {
         }
     }
 
-    // Footer / composer title - render the block and the real composer inside it
+    // Footer / composer title - render the block, then render the composer into the block's inner area
     let footer_block = Block::default()
         .borders(Borders::ALL)
         .border_style(theme.panel_border)
         .title("Ask Spirit");
     frame.render_widget(footer_block, rows[2]);
-    // render the actual composer TextArea from the chat app into the footer area
+    // compute inner rect for the block so the top-left corner remains visible
+    let footer_inner = Rect {
+        x: rows[2].x + 1,
+        y: rows[2].y + 1,
+        width: rows[2].width.saturating_sub(2),
+        height: rows[2].height.saturating_sub(2),
+    };
+    // render the actual composer TextArea from the chat app into the footer inner area
     let composer = app.chat().composer();
-    frame.render_widget(composer, rows[2]);
+    frame.render_widget(composer, footer_inner);
 }
 
 fn render_chat_pane(
