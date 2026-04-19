@@ -41,8 +41,11 @@ impl ChatApp {
         }
     }
 
-    pub fn new_for_test(repo_path: &str) -> Self {
-        Self::new(repo_path)
+    pub fn new_for_test(_repo_path: &str) -> Self {
+        let mut app = Self::new(_repo_path);
+        // Use a fixed display path so snapshots are environment-independent.
+        app.display_path = "~/blazar".to_owned();
+        app
     }
 
     /// Creates a ChatApp pre-loaded with demo timeline entries for visual testing.
