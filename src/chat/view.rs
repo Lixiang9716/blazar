@@ -236,6 +236,20 @@ fn render_entry<'a>(entry: &TimelineEntry, theme: &ChatTheme, _width: u16) -> Ve
                 ]));
             }
         }
+        EntryKind::CodeBlock { language } => {
+            if !language.is_empty() {
+                lines.push(Line::from(vec![
+                    Span::raw(INDENT),
+                    Span::styled(language.clone(), theme.dim_text),
+                ]));
+            }
+            for code_line in entry.body.lines() {
+                lines.push(Line::from(vec![
+                    Span::raw(INDENT),
+                    Span::styled(code_line.to_owned(), theme.code_block),
+                ]));
+            }
+        }
     }
 
     lines
@@ -246,6 +260,7 @@ fn marker_style_for(entry: &TimelineEntry, theme: &ChatTheme) -> Style {
         (Actor::User, _) => theme.marker_response,
         (_, EntryKind::Thinking) => theme.marker_thinking,
         (_, EntryKind::ToolUse { .. } | EntryKind::Bash { .. }) => theme.marker_tool,
+        (_, EntryKind::CodeBlock { .. }) => theme.marker_tool,
         _ => theme.marker_response,
     }
 }

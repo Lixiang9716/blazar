@@ -25,6 +25,9 @@ pub enum EntryKind {
         command: String,
     },
     Thinking,
+    CodeBlock {
+        language: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -90,6 +93,16 @@ impl TimelineEntry {
         Self {
             actor: Actor::Assistant,
             kind: EntryKind::Thinking,
+            body: body.into(),
+        }
+    }
+
+    pub fn code_block(language: impl Into<String>, body: impl Into<String>) -> Self {
+        Self {
+            actor: Actor::Assistant,
+            kind: EntryKind::CodeBlock {
+                language: language.into(),
+            },
             body: body.into(),
         }
     }
