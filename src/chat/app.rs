@@ -1,24 +1,43 @@
 use crate::chat::input::InputAction;
-use crate::chat::model::{Author, ChatMessage};
+use crate::chat::model::{Author, ChatMessage, TimelineEntry};
 use crate::config::MascotConfig;
 use ratatui_textarea::TextArea;
 use serde_json::Value;
 
 pub struct ChatApp {
     messages: Vec<ChatMessage>,
+    timeline: Vec<TimelineEntry>,
     composer: TextArea<'static>,
     should_quit: bool,
+    display_path: String,
+    branch: String,
+    scroll_offset: u16,
 }
 
 impl ChatApp {
-    pub fn new(_repo_path: &str) -> Self {
+    pub fn new(repo_path: &str) -> Self {
+        let display_path = shorten_home(repo_path);
+        let branch = detect_branch(repo_path);
+
+        let timeline = if std::env::var("BLAZAR_DEMO").is_ok() {
+            demo_timeline()
+        } else {
+            vec![TimelineEntry::response(
+                "Tell me what you'd like to explore.",
+            )]
+        };
+
         Self {
             messages: vec![ChatMessage {
                 author: Author::Spirit,
                 body: "Spirit: Tell me what you'd like to explore.".to_owned(),
             }],
+            timeline,
             composer: TextArea::default(),
             should_quit: false,
+            display_path,
+            branch,
+            scroll_offset: u16::MAX, // auto-scroll sentinel
         }
     }
 
@@ -26,8 +45,36 @@ impl ChatApp {
         Self::new(repo_path)
     }
 
+    /// Creates a ChatApp pre-loaded with demo timeline entries for visual testing.
+    #[cfg(test)]
+    pub fn new_with_demo_timeline(repo_path: &str) -> Self {
+        let mut app = Self::new(repo_path);
+        app.timeline = demo_timeline();
+        app
+    }
+
     pub fn messages(&self) -> &[ChatMessage] {
         &self.messages
+    }
+
+    pub fn timeline(&self) -> &[TimelineEntry] {
+        &self.timeline
+    }
+
+    pub fn display_path(&self) -> &str {
+        &self.display_path
+    }
+
+    pub fn branch(&self) -> &str {
+        &self.branch
+    }
+
+    pub fn scroll_offset(&self) -> u16 {
+        self.scroll_offset
+    }
+
+    pub fn status_label(&self) -> String {
+        "ready".to_owned()
     }
 
     pub fn send_message(&mut self, input: &str) {
@@ -44,6 +91,14 @@ impl ChatApp {
             author: Author::Spirit,
             body: format!("Spirit: I hear you — {trimmed}"),
         });
+
+        // Also append to timeline
+        self.timeline.push(TimelineEntry::user_message(trimmed));
+        self.timeline
+            .push(TimelineEntry::response(format!("I hear you — {trimmed}")));
+
+        // Auto-scroll to bottom
+        self.scroll_offset = u16::MAX;
     }
 
     pub fn set_composer_text(&mut self, value: &str) {
@@ -68,10 +123,12 @@ impl ChatApp {
         match action {
             InputAction::Quit => self.should_quit = true,
             InputAction::Submit => self.submit_composer(),
-            InputAction::CycleFocus
-            | InputAction::SelectChatView
-            | InputAction::SelectGitView
-            | InputAction::SelectSessionsView => {}
+            InputAction::ScrollUp => {
+                self.scroll_offset = self.scroll_offset.saturating_sub(3);
+            }
+            InputAction::ScrollDown => {
+                self.scroll_offset = self.scroll_offset.saturating_add(3);
+            }
             InputAction::Key(key) => {
                 self.composer.input(key);
             }
@@ -87,12 +144,71 @@ impl ChatApp {
     }
 }
 
+/// Shorten `/home/<user>/...` to `~/...` for display.
+fn shorten_home(path: &str) -> String {
+    if let Ok(home) = std::env::var("HOME") {
+        if let Some(rest) = path.strip_prefix(&home) {
+            return format!("~{rest}");
+        }
+    }
+    path.to_owned()
+}
+
+/// Detect the current git branch. Returns "main" as fallback.
+fn detect_branch(repo_path: &str) -> String {
+    std::process::Command::new("git")
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .current_dir(repo_path)
+        .output()
+        .ok()
+        .and_then(|o| {
+            if o.status.success() {
+                String::from_utf8(o.stdout)
+                    .ok()
+                    .map(|s| s.trim().to_owned())
+            } else {
+                None
+            }
+        })
+        .unwrap_or_else(|| "main".to_owned())
+}
+
+/// Demo timeline entries for visual testing.
+/// Activated by setting `BLAZAR_DEMO=1` environment variable.
+fn demo_timeline() -> Vec<TimelineEntry> {
+    vec![
+        TimelineEntry::thinking(
+            "Found it. Line 67 has a hard guard:\n\n  if area.width < 60 { return; }  // skips mascot entirely",
+        ),
+        TimelineEntry::tool_use(
+            "Edit",
+            "src/chat/view.rs",
+            18,
+            6,
+            "Replaced hard guard with stacked layout branch",
+        ),
+        TimelineEntry::tool_use(
+            "Create",
+            "tests/chat_render_narrow.rs",
+            34,
+            0,
+            "New snapshot test for width=40 rendering",
+        ),
+        TimelineEntry::bash(
+            "cargo test --lib",
+            "77 tests passed, 0 failed (2.4s)",
+        ),
+        TimelineEntry::response(
+            "Fixed. Narrow terminals (< 60 cols) now get a stacked layout:\n  Row 1: mascot (3 lines, centered)\n  Row 2: chat timeline (remaining space)\n  Row 3: input + status\n\n77 tests pass including the new narrow-render snapshot.",
+        ),
+    ]
+}
+
 pub fn run_terminal_chat(
-    _schema: Value,
+    schema: Value,
     _mascot: MascotConfig,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    use crate::chat::view::render_workspace;
-    use crate::chat::workspace::WorkspaceApp;
+    use crate::chat::view::render_frame;
     use crossterm::{
         ExecutableCommand,
         event::{self, Event},
@@ -103,10 +219,8 @@ pub fn run_terminal_chat(
     use std::io::stdout;
     use std::time::{Duration, Instant};
 
-    // Resolve repo path and initialise the app BEFORE touching the terminal so
-    // that the potentially slow git/session I/O does not run inside raw mode.
-    let repo_path = resolve_repo_path(&_schema);
-    let mut app = WorkspaceApp::new(&repo_path);
+    let repo_path = resolve_repo_path(&schema);
+    let mut app = ChatApp::new(&repo_path);
 
     // Setup terminal; the guard ensures cleanup on any exit path including `?`.
     enable_raw_mode()?;
@@ -121,7 +235,7 @@ pub fn run_terminal_chat(
     loop {
         let tick_ms = start_time.elapsed().as_millis() as u64;
 
-        terminal.draw(|frame| render_workspace(frame, &app, tick_ms))?;
+        terminal.draw(|frame| render_frame(frame, &app, tick_ms))?;
 
         if event::poll(Duration::from_millis(100))?
             && let Event::Key(key) = event::read()?

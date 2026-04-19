@@ -18,7 +18,7 @@ fn bundled_app_schema_contains_runtime_defaults() {
     assert_eq!(schema["title"], "Blazar Mission Console");
     assert_eq!(
         schema["properties"]["task"]["properties"]["request"]["default"],
-        "Design a polished terminal workflow"
+        "Work on this repository with clear, safe steps"
     );
     assert_eq!(
         schema["properties"]["workspace"]["properties"]["repoPath"]["default"],

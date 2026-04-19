@@ -5,4 +5,3 @@ pub mod model;
 pub mod session;
 pub mod theme;
 pub mod view;
-pub mod workspace;

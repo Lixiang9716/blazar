@@ -18,13 +18,13 @@
           "type": "string",
           "title": "Request",
           "description": "The main thing you want the TUI session to accomplish.",
-          "default": "Design a polished terminal workflow"
+          "default": "Work on this repository with clear, safe steps"
         },
         "goal": {
           "type": "string",
           "title": "Goal",
           "description": "What outcome would count as success?",
-          "default": "Ship a clear, validated TUI experience"
+          "default": "Finish the requested coding task with verified changes"
         },
         "priority": {
           "type": "string",
@@ -91,7 +91,7 @@
           "type": "string",
           "title": "Notes",
           "description": "Optional constraints, preferences, or extra context.",
-          "default": "Prefer simple, maintainable changes"
+          "default": "Prefer useful, minimal changes"
         }
       }
     }

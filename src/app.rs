@@ -356,8 +356,8 @@ mod tests {
             submission,
             json!({
                 "task": {
-                    "request": "Design a polished terminal workflow",
-                    "goal": "Ship a clear, validated TUI experience",
+                    "request": "Work on this repository with clear, safe steps",
+                    "goal": "Finish the requested coding task with verified changes",
                     "priority": "normal"
                 },
                 "workspace": {
@@ -368,7 +368,7 @@ mod tests {
                 "delivery": {
                     "responseStyle": "balanced",
                     "runValidation": true,
-                    "notes": "Prefer simple, maintainable changes"
+                    "notes": "Prefer useful, minimal changes"
                 }
             })
         );

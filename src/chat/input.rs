@@ -4,10 +4,8 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 pub enum InputAction {
     Quit,
     Submit,
-    CycleFocus,
-    SelectChatView,
-    SelectGitView,
-    SelectSessionsView,
+    ScrollUp,
+    ScrollDown,
     Key(KeyEvent),
 }
 
@@ -17,10 +15,12 @@ impl InputAction {
             (KeyCode::Esc, _) => InputAction::Quit,
             (KeyCode::Char('c'), KeyModifiers::CONTROL) => InputAction::Quit,
             (KeyCode::Enter, _) => InputAction::Submit,
-            (KeyCode::Tab, _) => InputAction::CycleFocus,
-            (KeyCode::Char('1'), KeyModifiers::NONE) => InputAction::SelectChatView,
-            (KeyCode::Char('2'), KeyModifiers::NONE) => InputAction::SelectGitView,
-            (KeyCode::Char('3'), KeyModifiers::NONE) => InputAction::SelectSessionsView,
+            (KeyCode::PageUp, _) | (KeyCode::Char('u'), KeyModifiers::CONTROL) => {
+                InputAction::ScrollUp
+            }
+            (KeyCode::PageDown, _) | (KeyCode::Char('d'), KeyModifiers::CONTROL) => {
+                InputAction::ScrollDown
+            }
             _ => InputAction::Key(key),
         }
     }

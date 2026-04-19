@@ -1,25 +1,25 @@
 ---
 source: tests/chat_render_snapshot.rs
-assertion_line: 11
+assertion_line: 10
 expression: "lines.join(\"\\n\")"
 ---
-Chat · Git · Sessions                                       
-┌Chat──────────────────────────────────────────────────────┐
-│Spirit: Tell me what you'd like to explore.               │
-│                                                          │
-│                                                          │
-│                                                          │
-│                                                          │
-│                                                          │
-│                                                          │
-│                                                          │
-│                                                          │
-│                                                          │
-│                                                          │
-│                                                          │
-│                                                          │
-│                                                          │
-└──────────────────────────────────────────────────────────┘
-┌Ask Spirit────────────────────────────────────────────────┐
-│                                                          │
-└──────────────────────────────────────────────────────────┘
+                      blazar — ~/blazar                     
+  ● Tell me what you'd like to explore.                     
+                                                            
+                                                            
+                                                            
+                                                            
+                                                            
+                                                            
+                                                            
+                                                            
+                                                            
+                                                            
+                                                            
+                                                            
+                                                            
+                                                            
+› Ask blazar…                                               
+                                                            
+                                                            
+blazar • ~/blazar • master                         ready

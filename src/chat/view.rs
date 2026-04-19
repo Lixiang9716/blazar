@@ -1,22 +1,16 @@
 use crate::chat::app::ChatApp;
-use crate::chat::git::GitSummary;
-use crate::chat::model::Author;
-use crate::chat::session::SessionSummary;
-use crate::chat::theme::build_theme;
-use crate::chat::workspace::{WorkspaceApp, WorkspaceView};
-use crate::welcome::mascot::render_mascot_lines;
-use crate::welcome::state::WelcomeState;
+use crate::chat::model::{Actor, EntryKind, TimelineEntry};
+use crate::chat::theme::{build_theme, ChatTheme};
 use core::cmp;
 use ratatui_core::{
     backend::TestBackend,
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Style},
+    style::Style,
     terminal::{Frame, Terminal},
     text::{Line, Span},
 };
 use ratatui_widgets::{
     block::Block,
-    borders::Borders,
     paragraph::{Paragraph, Wrap},
 };
 use unicode_width::UnicodeWidthStr;
@@ -53,451 +47,263 @@ pub fn render_to_lines_for_test(app: &ChatApp, width: u16, height: u16) -> Vec<S
         .collect()
 }
 
-pub fn render_workspace_to_lines_for_test(
-    app: &WorkspaceApp,
-    width: u16,
-    height: u16,
-) -> Vec<String> {
-    if width == 0 || height == 0 {
-        return Vec::new();
-    }
-
-    let backend = TestBackend::new(width, height);
-    let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
-
-    terminal
-        .draw(|frame| render_workspace(frame, app, 1_200))
-        .expect("workspace frame should render");
-
-    let buffer = terminal.backend().buffer();
-    buffer
-        .content()
-        .chunks(width as usize)
-        .map(|row| {
-            let mut line = String::new();
-            let mut skip = 0;
-
-            for cell in row {
-                if skip == 0 {
-                    line.push_str(cell.symbol());
-                }
-                skip = cmp::max(skip, cell.symbol().width()).saturating_sub(1);
-            }
-
-            line
-        })
-        .collect()
-}
-
-pub fn render_frame(frame: &mut Frame, app: &ChatApp, tick_ms: u64) {
+pub fn render_frame(frame: &mut Frame, app: &ChatApp, _tick_ms: u64) {
     let theme = build_theme();
     let area = frame.area();
 
-    // Split into left Spirit pane and right chat pane
+    // Fill background with Solarized Dark base03
+    let bg_block = Block::default().style(theme.timeline_bg);
+    frame.render_widget(bg_block, area);
+
+    // Vertical layout: title_bar | timeline | input | status_bar
     let chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),  // title bar
+            Constraint::Min(1),    // timeline (fills remaining)
+            Constraint::Length(3), // input area
+            Constraint::Length(1), // status bar
+        ])
         .split(area);
 
-    render_spirit_pane(frame, chunks[0], tick_ms, &theme);
-    render_chat_pane(frame, chunks[1], app, &theme);
+    render_title_bar(frame, chunks[0], app, &theme);
+    render_timeline(frame, chunks[1], app, &theme);
+    render_input(frame, chunks[2], app, &theme);
+    render_status_bar(frame, chunks[3], app, &theme);
 }
 
-fn render_spirit_pane(
+fn render_title_bar(
     frame: &mut Frame,
     area: Rect,
-    tick_ms: u64,
-    theme: &crate::chat::theme::ChatTheme,
+    app: &ChatApp,
+    theme: &ChatTheme,
 ) {
-    let state = WelcomeState::new().tick(tick_ms, false);
-    let mascot_lines = render_mascot_lines(state, tick_ms);
+    let display_path = app.display_path();
+    let title_text = format!("blazar — {display_path}");
 
-    let title_line = Line::from(vec![
-        Span::styled("Spirit / ", Style::default().fg(Color::Cyan)),
-        Span::styled("星糖导航马", Style::default().fg(Color::Magenta)),
+    // Center the title in the bar
+    let padding = area.width.saturating_sub(title_text.len() as u16) / 2;
+    let padded = format!("{:>width$}", title_text, width = (padding as usize) + title_text.len());
+
+    let line = Line::from(Span::styled(padded, theme.title_text));
+    let bar = Paragraph::new(line).style(theme.title_bar);
+    frame.render_widget(bar, area);
+}
+
+fn render_timeline(
+    frame: &mut Frame,
+    area: Rect,
+    app: &ChatApp,
+    theme: &ChatTheme,
+) {
+    let mut lines: Vec<Line> = Vec::new();
+
+    for entry in app.timeline() {
+        let entry_lines = render_entry(entry, theme, area.width);
+        lines.extend(entry_lines);
+        lines.push(Line::from("")); // blank separator
+    }
+
+    // If no entries, show welcome
+    if lines.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "  Welcome to Blazar. Type a message to begin.",
+            theme.dim_text,
+        )));
+    }
+
+    // Calculate scroll: auto-scroll to bottom
+    let content_height = lines.len() as u16;
+    let visible_height = area.height;
+    let scroll_offset = if content_height > visible_height {
+        let auto_scroll = content_height.saturating_sub(visible_height);
+        // Respect manual scroll if set
+        cmp::min(app.scroll_offset(), auto_scroll)
+    } else {
+        0
+    };
+
+    let paragraph = Paragraph::new(lines)
+        .style(theme.timeline_bg)
+        .wrap(Wrap { trim: false })
+        .scroll((scroll_offset, 0));
+
+    frame.render_widget(paragraph, area);
+}
+
+/// Left margin for all timeline content (matches Claude Code's indentation).
+const MARGIN: &str = "  ";
+/// Continuation indent (margin + marker width).
+const INDENT: &str = "    ";
+
+fn render_entry<'a>(entry: &TimelineEntry, theme: &ChatTheme, _width: u16) -> Vec<Line<'a>> {
+    let mut lines = Vec::new();
+    let marker_style = marker_style_for(entry, theme);
+
+    match &entry.kind {
+        EntryKind::Message => {
+            if !entry.body.is_empty() {
+                let body_style = if entry.actor == Actor::User {
+                    theme.bold_text
+                } else {
+                    theme.body_text
+                };
+                // First line: marker + first line of body
+                let mut body_lines = entry.body.lines();
+                if let Some(first) = body_lines.next() {
+                    lines.push(Line::from(vec![
+                        Span::raw(MARGIN),
+                        Span::styled("● ", marker_style),
+                        Span::styled(first.to_owned(), body_style),
+                    ]));
+                }
+                // Continuation lines: indented without marker
+                for cont in body_lines {
+                    lines.push(Line::from(vec![
+                        Span::raw(INDENT),
+                        Span::styled(cont.to_owned(), body_style),
+                    ]));
+                }
+            } else {
+                lines.push(Line::from(vec![
+                    Span::raw(MARGIN),
+                    Span::styled("● ", marker_style),
+                ]));
+            }
+        }
+        EntryKind::ToolUse {
+            tool,
+            target,
+            additions,
+            deletions,
+        } => {
+            let mut spans = vec![
+                Span::raw(MARGIN),
+                Span::styled("● ", marker_style),
+                Span::styled(tool.clone(), theme.tool_label),
+                Span::raw(" "),
+                Span::styled(target.clone(), theme.tool_target),
+            ];
+            if *additions > 0 {
+                spans.push(Span::styled(format!(" +{additions}"), theme.diff_add));
+            }
+            if *deletions > 0 {
+                spans.push(Span::styled(format!(" -{deletions}"), theme.diff_del));
+            }
+            lines.push(Line::from(spans));
+
+            if !entry.body.is_empty() {
+                for desc_line in entry.body.lines() {
+                    lines.push(Line::from(vec![
+                        Span::raw(INDENT),
+                        Span::styled(desc_line.to_owned(), theme.dim_text),
+                    ]));
+                }
+            }
+        }
+        EntryKind::Bash { command } => {
+            lines.push(Line::from(vec![
+                Span::raw(MARGIN),
+                Span::styled("● ", marker_style),
+                Span::styled("Bash", theme.tool_label),
+                Span::styled(" (shell)", theme.dim_text),
+            ]));
+
+            lines.push(Line::from(vec![
+                Span::raw(INDENT),
+                Span::styled(command.clone(), theme.code_block),
+            ]));
+            for output_line in entry.body.lines() {
+                lines.push(Line::from(vec![
+                    Span::raw(INDENT),
+                    Span::raw("  "),
+                    Span::styled(output_line.to_owned(), theme.dim_text),
+                ]));
+            }
+        }
+        EntryKind::Thinking => {
+            let mut body_lines = entry.body.lines();
+            let first = body_lines.next().unwrap_or("");
+            lines.push(Line::from(vec![
+                Span::raw(MARGIN),
+                Span::styled("● ", marker_style),
+                Span::styled(first.to_owned(), theme.dim_text),
+            ]));
+            for continuation in body_lines {
+                lines.push(Line::from(vec![
+                    Span::raw(INDENT),
+                    Span::styled(continuation.to_owned(), theme.dim_text),
+                ]));
+            }
+        }
+    }
+
+    lines
+}
+
+fn marker_style_for(entry: &TimelineEntry, theme: &ChatTheme) -> Style {
+    match (&entry.actor, &entry.kind) {
+        (Actor::User, _) => theme.marker_response,
+        (_, EntryKind::Thinking) => theme.marker_thinking,
+        (_, EntryKind::ToolUse { .. } | EntryKind::Bash { .. }) => theme.marker_tool,
+        _ => theme.marker_response,
+    }
+}
+
+fn render_input(
+    frame: &mut Frame,
+    area: Rect,
+    app: &ChatApp,
+    theme: &ChatTheme,
+) {
+    // Render prompt "›" on the left, TextArea takes the rest
+    let chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Length(2), Constraint::Min(1)])
+        .split(area);
+
+    // Prompt character
+    let prompt = Paragraph::new(Line::from(Span::styled("› ", theme.input_prompt)))
+        .style(theme.timeline_bg);
+    frame.render_widget(prompt, chunks[0]);
+
+    // Show placeholder if composer is empty
+    if app.composer_text().is_empty() {
+        let placeholder = Paragraph::new(Line::from(Span::styled(
+            "Ask blazar…",
+            theme.input_placeholder,
+        )))
+        .style(theme.timeline_bg);
+        frame.render_widget(placeholder, chunks[1]);
+    } else {
+        let composer = app.composer();
+        frame.render_widget(composer, chunks[1]);
+    }
+}
+
+fn render_status_bar(
+    frame: &mut Frame,
+    area: Rect,
+    app: &ChatApp,
+    theme: &ChatTheme,
+) {
+    let display_path = app.display_path();
+    let branch = app.branch();
+    let left = format!("blazar • {display_path} • {branch}");
+
+    let status_label = app.status_label();
+    let right_len = status_label.len();
+
+    // Right-align the status label
+    let available = area.width as usize;
+    let gap = available.saturating_sub(left.len() + right_len);
+
+    let line = Line::from(vec![
+        Span::styled(left, theme.status_bar),
+        Span::styled(" ".repeat(gap), theme.status_bar),
+        Span::styled(status_label, theme.status_right),
     ]);
 
-    let status = "Waiting with a sprinkle of stardust";
-
-    let mut text_lines = vec![title_line, Line::from(status), Line::from("")];
-    text_lines.extend(mascot_lines);
-
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(theme.spirit_border)
-        .title("Spirit");
-
-    let paragraph = Paragraph::new(text_lines)
-        .block(block)
-        .wrap(Wrap { trim: false });
-
-    frame.render_widget(paragraph, area);
-}
-
-pub fn render_workspace(frame: &mut Frame, app: &WorkspaceApp, tick_ms: u64) {
-    let area = frame.area();
-    if area.width < 80 {
-        render_workspace_narrow(frame, app, area);
-    } else {
-        render_workspace_wide(frame, app, tick_ms, area);
-    }
-}
-
-fn render_workspace_narrow(frame: &mut Frame, app: &WorkspaceApp, area: Rect) {
-    let theme = build_theme();
-
-    // Compact: nav bar (1 line) + content (fill) + footer (3 lines)
-    let rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1),
-            Constraint::Min(3),
-            Constraint::Length(3),
-        ])
-        .split(area);
-
-    // Compact nav bar
-    let nav_line = Line::from(Span::styled("Chat · Git · Sessions", theme.status_text));
-    frame.render_widget(Paragraph::new(nav_line), rows[0]);
-
-    // Content panel
-    match app.active_view() {
-        WorkspaceView::Chat => render_messages_only(frame, rows[1], app.chat(), &theme),
-        WorkspaceView::Git => render_git_panel(frame, rows[1], app.git_summary(), &theme),
-        WorkspaceView::Sessions => {
-            render_session_panel(frame, rows[1], app.session_summary(), &theme)
-        }
-    }
-
-    // Footer
-    render_footer(frame, rows[2], app, &theme);
-}
-
-fn render_workspace_wide(frame: &mut Frame, app: &WorkspaceApp, tick_ms: u64, area: Rect) {
-    let theme = build_theme();
-
-    // Header, body, footer
-    let rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1),
-            Constraint::Min(3),
-            Constraint::Length(3),
-        ])
-        .split(area);
-
-    // Header
-    let header = Block::default()
-        .borders(Borders::BOTTOM)
-        .border_style(theme.shell_border)
-        .title("Blazar · Spirit Workspace");
-    let header_para = Paragraph::new(Line::from(""))
-        .block(header)
-        .wrap(Wrap { trim: false });
-    frame.render_widget(header_para, rows[0]);
-
-    // Body: rail (left) + content (right)
-    let cols = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Length(22), Constraint::Min(10)])
-        .split(rows[1]);
-
-    // Rail
-    let mut rail_lines: Vec<Line> = vec![];
-    let state = WelcomeState::new().tick(tick_ms, false);
-    let mut mascot_lines = render_mascot_lines(state, tick_ms);
-    // keep mascot compact
-    mascot_lines.truncate(3);
-
-    rail_lines.push(Line::from(Span::styled("Spirit", theme.status_text)));
-    rail_lines.push(Line::from(""));
-    for line in mascot_lines {
-        rail_lines.push(line);
-    }
-    rail_lines.push(Line::from(""));
-
-    // Navigation items
-    let views = [
-        WorkspaceView::Chat,
-        WorkspaceView::Git,
-        WorkspaceView::Sessions,
-    ];
-    for v in views.iter() {
-        let label = match v {
-            WorkspaceView::Chat => "Chat",
-            WorkspaceView::Git => "Git",
-            WorkspaceView::Sessions => "Sessions",
-        };
-        let style = if *v == app.active_view() {
-            theme.active_nav
-        } else {
-            theme.inactive_nav
-        };
-        rail_lines.push(Line::from(Span::styled(label, style)));
-    }
-
-    let rail_block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(theme.rail_border)
-        .title("Nav");
-    let rail_para = Paragraph::new(rail_lines).block(rail_block);
-    frame.render_widget(rail_para, cols[0]);
-
-    // Content
-    match app.active_view() {
-        WorkspaceView::Chat => {
-            // render messages only in the main content area; the real composer belongs in the footer
-            render_messages_only(frame, cols[1], app.chat(), &theme);
-        }
-        WorkspaceView::Git => {
-            render_git_panel(frame, cols[1], app.git_summary(), &theme);
-        }
-        WorkspaceView::Sessions => {
-            render_session_panel(frame, cols[1], app.session_summary(), &theme);
-        }
-    }
-
-    // Footer
-    render_footer(frame, rows[2], app, &theme);
-}
-
-fn render_chat_pane(
-    frame: &mut Frame,
-    area: Rect,
-    app: &ChatApp,
-    theme: &crate::chat::theme::ChatTheme,
-) {
-    // Split chat area into messages (top) and composer (bottom)
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(3), Constraint::Length(3)])
-        .split(area);
-
-    render_messages(frame, chunks[0], app, theme);
-    render_composer(frame, chunks[1], app, theme);
-}
-
-// messages-only renderer (no composer) for workspace content area
-fn render_messages_only(
-    frame: &mut Frame,
-    area: Rect,
-    app: &ChatApp,
-    theme: &crate::chat::theme::ChatTheme,
-) {
-    let mut text_lines = vec![];
-
-    for msg in app.messages() {
-        let style = match msg.author {
-            Author::Spirit => theme.spirit_bubble,
-            Author::User => theme.user_bubble,
-        };
-        text_lines.push(Line::from(Span::styled(&msg.body, style)));
-        text_lines.push(Line::from(""));
-    }
-
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(theme.chat_border)
-        .title("Chat");
-
-    let paragraph = Paragraph::new(text_lines)
-        .block(block)
-        .wrap(Wrap { trim: false });
-
-    frame.render_widget(paragraph, area);
-}
-
-fn render_messages(
-    frame: &mut Frame,
-    area: Rect,
-    app: &ChatApp,
-    theme: &crate::chat::theme::ChatTheme,
-) {
-    render_messages_only(frame, area, app, theme);
-}
-
-fn render_composer(
-    frame: &mut Frame,
-    area: Rect,
-    app: &ChatApp,
-    _theme: &crate::chat::theme::ChatTheme,
-) {
-    // TextArea widget requires immutable reference
-    let composer = app.composer();
-    frame.render_widget(composer, area);
-}
-
-fn render_git_panel(
-    frame: &mut Frame,
-    area: Rect,
-    summary: &GitSummary,
-    theme: &crate::chat::theme::ChatTheme,
-) {
-    let mut lines: Vec<Line> = vec![];
-
-    let status_label = if summary.is_dirty { "dirty" } else { "clean" };
-    lines.push(Line::from(vec![
-        Span::styled("Branch: ", Style::default()),
-        Span::styled(&summary.branch, theme.status_text),
-        Span::styled("  ", Style::default()),
-        Span::styled(
-            status_label,
-            if summary.is_dirty {
-                Style::default().fg(Color::Yellow)
-            } else {
-                Style::default().fg(Color::Green)
-            },
-        ),
-    ]));
-
-    lines.push(Line::from(format!(
-        "ahead: {}  behind: {}  staged: {}  unstaged: {}",
-        summary.ahead, summary.behind, summary.staged, summary.unstaged
-    )));
-
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        "Changed files:",
-        Style::default().fg(Color::Cyan),
-    )));
-    if summary.changed_files.is_empty() {
-        lines.push(Line::from(Span::styled(
-            "  Working tree clean",
-            Style::default().fg(Color::Green),
-        )));
-    } else {
-        for f in &summary.changed_files {
-            lines.push(Line::from(format!("  {f}")));
-        }
-    }
-
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        "Recent commits:",
-        Style::default().fg(Color::Cyan),
-    )));
-    if summary.recent_commits.is_empty() {
-        lines.push(Line::from(Span::styled(
-            "  No recent commits",
-            Style::default().fg(Color::DarkGray),
-        )));
-    } else {
-        for c in &summary.recent_commits {
-            lines.push(Line::from(format!("  {c}")));
-        }
-    }
-
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(theme.panel_border)
-        .title("Git");
-
-    let paragraph = Paragraph::new(lines)
-        .block(block)
-        .wrap(Wrap { trim: false });
-
-    frame.render_widget(paragraph, area);
-}
-
-fn render_footer(
-    frame: &mut Frame,
-    area: Rect,
-    app: &WorkspaceApp,
-    theme: &crate::chat::theme::ChatTheme,
-) {
-    if app.active_view() == WorkspaceView::Chat {
-        let footer_block = Block::default()
-            .borders(Borders::ALL)
-            .border_style(theme.panel_border)
-            .title("Ask Spirit");
-        let footer_inner = footer_block.inner(area);
-        frame.render_widget(footer_block, area);
-        let composer = app.chat().composer();
-        frame.render_widget(composer, footer_inner);
-    } else {
-        let hint_text = Line::from(Span::styled(
-            "[1] Chat  [2] Git  [3] Sessions  [Tab] Focus  [Esc] Quit",
-            theme.status_text,
-        ));
-        let footer_block = Block::default()
-            .borders(Borders::ALL)
-            .border_style(theme.panel_border)
-            .title("Workspace Hints");
-        let footer_inner = footer_block.inner(area);
-        frame.render_widget(footer_block, area);
-        frame.render_widget(Paragraph::new(hint_text), footer_inner);
-    }
-}
-
-fn render_session_panel(
-    frame: &mut Frame,
-    area: Rect,
-    summary: &SessionSummary,
-    theme: &crate::chat::theme::ChatTheme,
-) {
-    let mut lines: Vec<Line> = vec![];
-
-    if summary.session_label.is_empty() {
-        lines.push(Line::from("No session details available yet"));
-    } else {
-        lines.push(Line::from(vec![
-            Span::styled("Session: ", Style::default()),
-            Span::styled(&summary.session_label, theme.status_text),
-        ]));
-
-        if !summary.cwd.is_empty() {
-            lines.push(Line::from(vec![
-                Span::styled("Repo: ", Style::default()),
-                Span::styled(&summary.cwd, Style::default().fg(Color::Cyan)),
-            ]));
-        }
-
-        if !summary.active_intent.is_empty() {
-            lines.push(Line::from(vec![
-                Span::styled("Intent: ", Style::default()),
-                Span::styled(&summary.active_intent, Style::default().fg(Color::Magenta)),
-            ]));
-        }
-
-        if !summary.plan_status.is_empty() {
-            lines.push(Line::from(vec![
-                Span::styled("Plan: ", Style::default()),
-                Span::styled(&summary.plan_status, Style::default().fg(Color::Green)),
-            ]));
-        }
-
-        lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled(
-            "Checkpoints:",
-            Style::default().fg(Color::Cyan),
-        )));
-        if summary.checkpoints.is_empty() {
-            lines.push(Line::from("  No checkpoints recorded"));
-        } else {
-            for cp in &summary.checkpoints {
-                lines.push(Line::from(format!("  {cp}")));
-            }
-        }
-
-        lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled(
-            "Todos:",
-            Style::default().fg(Color::Cyan),
-        )));
-        lines.push(Line::from(format!(
-            "  done: {}  in progress: {}  ready: {}",
-            summary.done_todos, summary.in_progress_todos, summary.ready_todos
-        )));
-    }
-
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(theme.panel_border)
-        .title("Sessions");
-
-    let paragraph = Paragraph::new(lines)
-        .block(block)
-        .wrap(Wrap { trim: false });
-
-    frame.render_widget(paragraph, area);
+    let bar = Paragraph::new(line).style(theme.status_bar);
+    frame.render_widget(bar, area);
 }
