@@ -1,6 +1,8 @@
 use crate::chat::app::ChatApp;
 use crate::chat::model::{Actor, EntryKind, TimelineEntry};
 use crate::chat::theme::{ChatTheme, build_theme};
+use crate::welcome::mascot::render_mascot_lines;
+use crate::welcome::state::WelcomeState;
 use core::cmp;
 use ratatui_core::{
     backend::TestBackend,
@@ -58,7 +60,7 @@ pub fn render_frame(frame: &mut Frame, app: &ChatApp, _tick_ms: u64) {
     frame.render_widget(bg_block, area);
 
     // Vertical layout: welcome_banner | timeline | separator | input | status_bar
-    let [banner, timeline, sep, input, status] = vertical![==5, >=1, ==1, ==3, ==1].areas(area);
+    let [banner, timeline, sep, input, status] = vertical![==6, >=1, ==1, ==3, ==1].areas(area);
 
     render_welcome_banner(frame, banner, &theme);
     render_timeline(frame, timeline, app, &theme);
@@ -69,27 +71,48 @@ pub fn render_frame(frame: &mut Frame, app: &ChatApp, _tick_ms: u64) {
 
 fn render_welcome_banner(frame: &mut Frame, area: Rect, theme: &ChatTheme) {
     let version = env!("CARGO_PKG_VERSION");
-    let lines = vec![
-        Line::from(vec![
-            Span::styled("  Blazar", theme.title_text),
-            Span::styled(format!(" v{version}"), theme.dim_text),
-        ]),
-        Line::from(Span::styled(
-            "  Describe a task to get started.",
-            theme.body_text,
-        )),
-        Line::from(""),
-        Line::from(Span::styled(
-            "  Tip: /help for commands. Blazar uses AI. Check for mistakes.",
-            theme.dim_text,
-        )),
-    ];
+
+    // Get mascot sprite lines (first idle frame) — take top 4 rows as icon
+    let mascot_lines = render_mascot_lines(WelcomeState::new(), 0);
+    let mascot_rows: Vec<Line<'static>> = mascot_lines.into_iter().take(4).collect();
+    let mascot_width = mascot_rows.first().map(|l| l.width()).unwrap_or(0) as u16;
 
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
         .border_style(theme.dim_text);
-    let paragraph = Paragraph::new(lines).block(block);
-    frame.render_widget(paragraph, area);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    if inner.width < 2 || inner.height < 4 {
+        return;
+    }
+
+    // Split inner: mascot | text
+    let mascot_col_width = cmp::min(mascot_width + 1, inner.width / 3);
+    let [mascot_area, text_area] = horizontal![==(mascot_col_width), >=1].areas(inner);
+
+    // Render mascot sprite
+    let mascot_paragraph = Paragraph::new(mascot_rows);
+    frame.render_widget(mascot_paragraph, mascot_area);
+
+    // Render text beside mascot
+    let text_lines = vec![
+        Line::from(vec![
+            Span::styled("Blazar", theme.title_text),
+            Span::styled(format!(" v{version}"), theme.dim_text),
+        ]),
+        Line::from(Span::styled(
+            "Describe a task to get started.",
+            theme.body_text,
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            "Tip: /help for commands. Blazar uses AI. Check for mistakes.",
+            theme.dim_text,
+        )),
+    ];
+    let text_paragraph = Paragraph::new(text_lines);
+    frame.render_widget(text_paragraph, text_area);
 }
 
 fn render_timeline(frame: &mut Frame, area: Rect, app: &ChatApp, theme: &ChatTheme) {
