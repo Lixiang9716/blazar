@@ -7,7 +7,6 @@ mod status;
 mod timeline;
 
 use crate::chat::app::ChatApp;
-use crate::chat::theme::build_theme;
 use core::cmp;
 use ratatui_core::{
     backend::TestBackend,
@@ -50,7 +49,7 @@ pub fn render_to_lines_for_test(app: &mut ChatApp, width: u16, height: u16) -> V
 }
 
 pub fn render_frame(frame: &mut Frame, app: &mut ChatApp, tick_ms: u64) {
-    let theme = build_theme();
+    let theme = app.theme().clone();
     let area = frame.area();
 
     let bg_block = Block::default().style(theme.timeline_bg);

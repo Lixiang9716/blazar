@@ -70,6 +70,7 @@ impl tui_markdown::StyleSheet for ThemeStyleSheet {
 }
 
 /// ChatTheme — rendering contract. Views use this, never opaline directly.
+#[derive(Clone)]
 pub struct ChatTheme {
     pub title_bar: Style,
     pub title_text: Style,

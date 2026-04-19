@@ -1,6 +1,7 @@
 use crate::chat::input::InputAction;
 use crate::chat::model::{Author, ChatMessage, TimelineEntry};
-use crate::chat::picker::ModalPicker;
+use crate::chat::picker::{ModalPicker, PickerItem};
+use crate::chat::theme::{ChatTheme, ThemeStyleSheet};
 use ratatui_textarea::TextArea;
 use std::cell::Cell;
 use std::time::Instant;
@@ -24,6 +25,9 @@ pub struct ChatApp {
     pub timeline_content_height: Cell<u16>,
     /// Last known visible height of the timeline area (set by renderer).
     pub timeline_visible_height: Cell<u16>,
+    theme_name: String,
+    theme: ChatTheme,
+    markdown_stylesheet: ThemeStyleSheet,
 }
 
 impl ChatApp {
@@ -38,6 +42,9 @@ impl ChatApp {
                 "Tell me what you'd like to explore.",
             )]
         };
+
+        let theme = crate::chat::theme::build_theme();
+        let markdown_stylesheet = ThemeStyleSheet::from_chat_theme(&theme);
 
         Self {
             messages: vec![ChatMessage {
@@ -61,6 +68,9 @@ impl ChatApp {
             demo_last_add: None,
             timeline_content_height: Cell::new(0),
             timeline_visible_height: Cell::new(0),
+            theme_name: crate::chat::theme::DEFAULT_THEME.to_owned(),
+            theme,
+            markdown_stylesheet,
         }
     }
 
@@ -109,6 +119,24 @@ impl ChatApp {
 
     pub fn tick_count(&self) -> u64 {
         self.tick_count
+    }
+
+    pub fn theme(&self) -> &ChatTheme {
+        &self.theme
+    }
+
+    pub fn theme_name(&self) -> &str {
+        &self.theme_name
+    }
+
+    pub fn markdown_stylesheet(&self) -> &ThemeStyleSheet {
+        &self.markdown_stylesheet
+    }
+
+    pub fn set_theme(&mut self, name: &str) {
+        self.theme = crate::chat::theme::build_theme_by_name(name);
+        self.markdown_stylesheet = ThemeStyleSheet::from_chat_theme(&self.theme);
+        self.theme_name = name.to_owned();
     }
 
     pub fn tick(&mut self) {
@@ -207,6 +235,28 @@ impl ChatApp {
                 InputAction::Submit => {
                     if let Some(cmd) = self.picker.select_current() {
                         self.picker.close();
+
+                        // Theme name selected (no / prefix) — apply it
+                        if !cmd.starts_with('/') {
+                            self.set_theme(&cmd);
+                            self.picker = ModalPicker::command_palette();
+                            return;
+                        }
+
+                        // /theme selected — open theme picker
+                        if cmd == "/theme" {
+                            let theme_items: Vec<PickerItem> =
+                                crate::chat::theme::available_themes()
+                                    .into_iter()
+                                    .map(|info| {
+                                        PickerItem::new(info.name.clone(), info.display_name.clone())
+                                    })
+                                    .collect();
+                            self.picker = ModalPicker::new("Select Theme", theme_items);
+                            self.picker.open();
+                            return;
+                        }
+
                         self.send_message(&cmd);
                     }
                 }
