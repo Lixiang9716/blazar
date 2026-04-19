@@ -4,11 +4,12 @@ use crate::chat::theme::{build_theme, ChatTheme};
 use core::cmp;
 use ratatui_core::{
     backend::TestBackend,
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::Rect,
     style::Style,
     terminal::{Frame, Terminal},
     text::{Line, Span},
 };
+use ratatui_macros::{horizontal, vertical};
 use ratatui_widgets::{
     block::Block,
     paragraph::{Paragraph, Wrap},
@@ -56,20 +57,13 @@ pub fn render_frame(frame: &mut Frame, app: &ChatApp, _tick_ms: u64) {
     frame.render_widget(bg_block, area);
 
     // Vertical layout: title_bar | timeline | input | status_bar
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1),  // title bar
-            Constraint::Min(1),    // timeline (fills remaining)
-            Constraint::Length(3), // input area
-            Constraint::Length(1), // status bar
-        ])
-        .split(area);
+    let [title, timeline, input, status] =
+        vertical![==1, >=1, ==3, ==1].areas(area);
 
-    render_title_bar(frame, chunks[0], app, &theme);
-    render_timeline(frame, chunks[1], app, &theme);
-    render_input(frame, chunks[2], app, &theme);
-    render_status_bar(frame, chunks[3], app, &theme);
+    render_title_bar(frame, title, app, &theme);
+    render_timeline(frame, timeline, app, &theme);
+    render_input(frame, input, app, &theme);
+    render_status_bar(frame, status, app, &theme);
 }
 
 fn render_title_bar(
@@ -272,15 +266,12 @@ fn render_input(
     theme: &ChatTheme,
 ) {
     // Render prompt "›" on the left, TextArea takes the rest
-    let chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Length(2), Constraint::Min(1)])
-        .split(area);
+    let [prompt_area, composer_area] = horizontal![==2, >=1].areas(area);
 
     // Prompt character
     let prompt = Paragraph::new(Line::from(Span::styled("› ", theme.input_prompt)))
         .style(theme.timeline_bg);
-    frame.render_widget(prompt, chunks[0]);
+    frame.render_widget(prompt, prompt_area);
 
     // Show placeholder if composer is empty
     if app.composer_text().is_empty() {
@@ -289,10 +280,10 @@ fn render_input(
             theme.input_placeholder,
         )))
         .style(theme.timeline_bg);
-        frame.render_widget(placeholder, chunks[1]);
+        frame.render_widget(placeholder, composer_area);
     } else {
         let composer = app.composer();
-        frame.render_widget(composer, chunks[1]);
+        frame.render_widget(composer, composer_area);
     }
 }
 

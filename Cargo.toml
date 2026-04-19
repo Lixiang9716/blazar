@@ -8,6 +8,7 @@ license = "MIT OR Apache-2.0"
 crossterm = "0.29"
 image = "0.25"
 ratatui-core = "0.1"
+ratatui-macros = "0.7"
 ratatui-widgets = "0.3"
 ratatui-crossterm = "0.1"
 ratatui-textarea = { version = "0.9", features = ["crossterm"] }
