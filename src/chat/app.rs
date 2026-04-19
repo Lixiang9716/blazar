@@ -191,9 +191,6 @@ pub fn resolve_startup_preference(
 
     crate::chat::workspace_catalog::StartupPreference {
         repo_path_hint: (!repo_path.is_empty()).then_some(std::path::PathBuf::from(repo_path)),
-        force_launcher: schema
-            .pointer("/properties/workspace/properties/forceLauncher/default")
-            .and_then(Value::as_bool)
-            .unwrap_or(false),
+        force_launcher: false,
     }
 }
