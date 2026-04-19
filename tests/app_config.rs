@@ -24,12 +24,6 @@ fn bundled_app_schema_contains_runtime_defaults() {
         schema["properties"]["workspace"]["properties"]["repoPath"]["default"],
         "/home/lx/blazar"
     );
-    assert!(
-        schema
-            .pointer("/properties/workspace/properties/forceLauncher")
-            .is_none(),
-        "Task 5 should not add the launcher schema toggle yet"
-    );
 }
 
 #[test]
