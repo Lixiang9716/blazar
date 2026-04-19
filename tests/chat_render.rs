@@ -33,6 +33,54 @@ fn chat_view_renders_status_bar() {
 }
 
 #[test]
+fn slash_opens_command_picker_overlay() {
+    use blazar::chat::input::InputAction;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    let mut app = ChatApp::new_for_test(REPO_ROOT);
+
+    app.handle_action(InputAction::Key(KeyEvent::new(
+        KeyCode::Char('/'),
+        KeyModifiers::NONE,
+    )));
+
+    let lines = render_to_lines_for_test(&app, 100, 35);
+
+    assert!(
+        lines.iter().any(|line| line.contains("Commands")),
+        "picker overlay should show its title"
+    );
+    assert!(
+        lines.iter().any(|line| line.contains("/help")),
+        "picker overlay should show command entries"
+    );
+}
+
+#[test]
+fn picker_navigation_reaches_later_commands() {
+    use blazar::chat::input::InputAction;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    let mut app = ChatApp::new_for_test(REPO_ROOT);
+
+    app.handle_action(InputAction::Key(KeyEvent::new(
+        KeyCode::Char('/'),
+        KeyModifiers::NONE,
+    )));
+
+    for _ in 0..12 {
+        app.handle_action(InputAction::PickerDown);
+    }
+
+    let lines = render_to_lines_for_test(&app, 100, 35);
+
+    assert!(
+        lines.iter().any(|line| line.contains("/tools") || line.contains("/agents")),
+        "picker navigation should reach later command entries"
+    );
+}
+
+#[test]
 fn timeline_does_not_emit_raw_ansi_escape_sequences() {
     let app = ChatApp::new_for_test(REPO_ROOT);
     let lines = render_to_lines_for_test(&app, 100, 35);
