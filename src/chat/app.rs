@@ -117,7 +117,7 @@ impl ChatApp {
         self.tick_count = self.tick_count.wrapping_add(1);
         self.picker
             .overlay_state_mut()
-            .tick(std::time::Duration::from_millis(16));
+            .tick(std::time::Duration::from_millis(100));
 
         // Demo playback: add one entry per second
         if !self.demo_queue.is_empty() {
