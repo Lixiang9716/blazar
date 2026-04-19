@@ -42,19 +42,45 @@ fn session_view_renders_label_plan_status_checkpoint_and_todo_counts() {
 }
 
 #[test]
-fn session_view_empty_state_shows_placeholders() {
+fn session_view_no_metadata_shows_no_session_details() {
     let mut app = WorkspaceApp::new_for_test(REPO_ROOT);
     app.select_view(WorkspaceView::Sessions);
 
-    // Default (empty) summary
+    // Fully empty summary — session_label is empty, takes the early branch.
     app.set_session_summary_for_test(SessionSummary::default());
 
     let lines = render_workspace_to_lines_for_test(&app, 100, 40);
     let all = lines.join("\n");
 
     assert!(
-        all.contains("No session details available yet")
-            || all.contains("No checkpoints recorded"),
-        "empty session view should show a placeholder message, got:\n{all}"
+        all.contains("No session details available yet"),
+        "empty session view should show 'No session details available yet', got:\n{all}"
+    );
+}
+
+#[test]
+fn session_view_no_checkpoints_shows_no_checkpoints_recorded() {
+    let mut app = WorkspaceApp::new_for_test(REPO_ROOT);
+    app.select_view(WorkspaceView::Sessions);
+
+    // Non-empty session label (skips the early branch) but no checkpoints.
+    let summary = SessionSummary {
+        session_label: "spirit-workspace-tui".to_string(),
+        cwd: "/home/lx/blazar".to_string(),
+        active_intent: "Exploring".to_string(),
+        plan_status: "plan.md".to_string(),
+        checkpoints: vec![],
+        ready_todos: 0,
+        in_progress_todos: 0,
+        done_todos: 0,
+    };
+    app.set_session_summary_for_test(summary);
+
+    let lines = render_workspace_to_lines_for_test(&app, 100, 40);
+    let all = lines.join("\n");
+
+    assert!(
+        all.contains("No checkpoints recorded"),
+        "session view with no checkpoints should show 'No checkpoints recorded', got:\n{all}"
     );
 }
