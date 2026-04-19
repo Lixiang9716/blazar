@@ -9,7 +9,7 @@ expression: "lines.join(\"\\n\")"
 │       ▄█▀█████████Blazar v0.1.0                          │
 │      ▄█▀██████████Describe a task to get started.        │
 │      █████████▀███                                       │
-│      ▀████████████Tip: /help for commands. Blazar uses AI│
+│      █████████████Tip: /help for commands. Blazar uses AI│
 │      ▀██▀▀▀▀▀▀▀▀▀▀                                       │
 │         ▀▀▀▀▀▀▀▀▀▀                                       │
 │                                                          │
