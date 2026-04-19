@@ -335,7 +335,7 @@ fn run_app_with_io<R: BufRead, W: Write>(input: &mut R, output: &mut W) -> AppRe
 pub fn run() -> AppResult<()> {
     let schema = build_schema()?;
     let mascot = config::load_mascot_config()?;
-    chat::app::run_terminal_chat(schema, mascot)
+    chat::event_loop::run_terminal_chat(schema, mascot)
 }
 
 #[cfg(test)]

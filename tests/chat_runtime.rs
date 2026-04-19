@@ -1,5 +1,5 @@
 use blazar::chat::app::ChatApp;
-use blazar::chat::app::resolve_repo_path;
+use blazar::chat::event_loop::resolve_repo_path;
 use blazar::chat::input::InputAction;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 

@@ -1,5 +1,6 @@
 pub mod app;
 pub mod demo;
+pub mod event_loop;
 pub mod git;
 pub mod input;
 pub mod model;
