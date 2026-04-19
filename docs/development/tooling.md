@@ -29,3 +29,13 @@ git config core.hooksPath .githooks
 ```
 
 After that, every commit runs `just preflight`.
+
+## GitHub Actions CI
+
+The repository CI mirrors the shared local quality gate on GitHub Actions.
+
+- Workflow file: `.github/workflows/ci.yml`
+- Triggers: pushes to `master` and all pull requests
+- Checks: `just fmt-check`, `just lint`, `just test`, `just audit`
+
+If CI fails, reproduce the same command locally through `just` before pushing a fix.
