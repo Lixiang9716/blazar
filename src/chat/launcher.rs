@@ -20,6 +20,7 @@ pub enum LauncherOutcome {
     },
 }
 
+#[derive(Debug)]
 pub struct LauncherApp {
     workspaces: Vec<WorkspaceRecord>,
     selected_index: usize,
@@ -43,6 +44,12 @@ impl LauncherApp {
         self.selected_index
     }
 
+    /// Returns the currently selected workspace.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the launcher has no workspaces. Callers must ensure at least
+    /// one workspace exists before calling this accessor.
     pub fn selected_workspace(&self) -> &WorkspaceRecord {
         &self.workspaces[self.selected_index]
     }
