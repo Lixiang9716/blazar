@@ -1,6 +1,7 @@
 use crate::chat::launcher::LauncherApp;
 use crate::welcome::mascot::render_mascot_lines;
 use crate::welcome::state::WelcomeState;
+use core::cmp;
 use ratatui_core::{
     backend::TestBackend,
     layout::{Constraint, Direction, Layout, Rect},
@@ -8,6 +9,7 @@ use ratatui_core::{
     text::Line,
 };
 use ratatui_widgets::{block::Block, borders::Borders, paragraph::Paragraph};
+use unicode_width::UnicodeWidthStr;
 
 pub fn render_launcher_to_lines_for_test(
     app: &LauncherApp,
@@ -30,8 +32,13 @@ pub fn render_launcher_to_lines_for_test(
         .chunks(width as usize)
         .map(|row| {
             let mut line = String::new();
+            let mut skip = 0;
+
             for cell in row {
-                line.push_str(cell.symbol());
+                if skip == 0 {
+                    line.push_str(cell.symbol());
+                }
+                skip = cmp::max(skip, cell.symbol().width()).saturating_sub(1);
             }
             line
         })
