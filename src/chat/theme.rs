@@ -40,6 +40,12 @@ pub struct ChatTheme {
     pub input_placeholder: Style,
     pub status_bar: Style,
     pub status_right: Style,
+    pub picker_title: Style,
+    pub picker_item: Style,
+    pub picker_selected: Style,
+    pub picker_desc: Style,
+    pub spinner: Style,
+    pub tip_command: Style,
 }
 
 pub fn build_theme() -> ChatTheme {
@@ -64,5 +70,11 @@ pub fn build_theme() -> ChatTheme {
         input_placeholder: Style::default().fg(BASE01),
         status_bar: Style::default().fg(BASE1),
         status_right: Style::default().fg(BASE01),
+        picker_title: Style::default().fg(BLUE).add_modifier(Modifier::BOLD),
+        picker_item: Style::default().fg(BASE0),
+        picker_selected: Style::default().fg(CYAN).add_modifier(Modifier::BOLD),
+        picker_desc: Style::default().fg(BASE01),
+        spinner: Style::default().fg(CYAN),
+        tip_command: Style::default().fg(YELLOW),
     }
 }

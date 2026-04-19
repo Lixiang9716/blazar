@@ -7,6 +7,9 @@ pub enum InputAction {
     ToggleDetails,
     ScrollUp,
     ScrollDown,
+    PickerUp,
+    PickerDown,
+    Backspace,
     Key(KeyEvent),
 }
 
@@ -17,6 +20,9 @@ impl InputAction {
             (KeyCode::Char('c'), KeyModifiers::CONTROL) => InputAction::Quit,
             (KeyCode::Char('o'), KeyModifiers::CONTROL) => InputAction::ToggleDetails,
             (KeyCode::Enter, _) => InputAction::Submit,
+            (KeyCode::Up, _) => InputAction::PickerUp,
+            (KeyCode::Down, _) => InputAction::PickerDown,
+            (KeyCode::Backspace, _) => InputAction::Backspace,
             (KeyCode::PageUp, _) | (KeyCode::Char('u'), KeyModifiers::CONTROL) => {
                 InputAction::ScrollUp
             }

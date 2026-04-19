@@ -15,6 +15,7 @@ use ratatui_macros::{horizontal, vertical};
 use ratatui_widgets::{
     block::Block,
     borders::BorderType,
+    clear::Clear,
     paragraph::{Paragraph, Wrap},
 };
 use unicode_width::UnicodeWidthStr;
@@ -55,21 +56,26 @@ pub fn render_frame(frame: &mut Frame, app: &ChatApp, _tick_ms: u64) {
     let theme = build_theme();
     let area = frame.area();
 
-    // Fill background with Solarized Dark base03
+    // Fill background
     let bg_block = Block::default().style(theme.timeline_bg);
     frame.render_widget(bg_block, area);
 
     // Vertical layout: welcome_banner | timeline | separator | input | status_bar
     let [banner, timeline, sep, input, status] = vertical![==6, >=1, ==1, ==3, ==1].areas(area);
 
-    render_welcome_banner(frame, banner, &theme);
+    render_welcome_banner(frame, banner, app, &theme);
     render_timeline(frame, timeline, app, &theme);
     render_separator(frame, sep, &theme);
     render_input(frame, input, app, &theme);
     render_status_bar(frame, status, app, &theme);
+
+    // Render modal picker overlay if visible
+    if app.picker.visible {
+        render_picker(frame, area, app, &theme);
+    }
 }
 
-fn render_welcome_banner(frame: &mut Frame, area: Rect, theme: &ChatTheme) {
+fn render_welcome_banner(frame: &mut Frame, area: Rect, app: &ChatApp, theme: &ChatTheme) {
     let version = env!("CARGO_PKG_VERSION");
 
     // Get mascot sprite lines (first idle frame) — take top 4 rows as icon
@@ -95,7 +101,7 @@ fn render_welcome_banner(frame: &mut Frame, area: Rect, theme: &ChatTheme) {
     let mascot_paragraph = Paragraph::new(mascot_rows);
     frame.render_widget(mascot_paragraph, mascot_area);
 
-    // Render text beside mascot
+    // Render text beside mascot with highlighted tip command
     let text_lines = vec![
         Line::from(vec![
             Span::styled("Blazar", theme.title_text),
@@ -106,13 +112,29 @@ fn render_welcome_banner(frame: &mut Frame, area: Rect, theme: &ChatTheme) {
             theme.body_text,
         )),
         Line::from(""),
-        Line::from(Span::styled(
-            "Tip: /help for commands. Blazar uses AI. Check for mistakes.",
-            theme.dim_text,
-        )),
+        Line::from(vec![
+            Span::styled("Tip: ", theme.dim_text),
+            Span::styled("/help", theme.tip_command),
+            Span::styled(
+                " for commands. Blazar uses AI. Check for mistakes.",
+                theme.dim_text,
+            ),
+        ]),
     ];
     let text_paragraph = Paragraph::new(text_lines);
     frame.render_widget(text_paragraph, text_area);
+
+    // Spinner in top-right corner of banner area
+    let spinner_chars = ['◐', '◓', '◑', '◒'];
+    let spinner_ch = spinner_chars[(app.tick_count() as usize / 4) % spinner_chars.len()];
+    if area.width > 4 && area.height > 0 {
+        let spinner_area = Rect::new(area.right().saturating_sub(3), area.y, 2, 1);
+        let spinner = Paragraph::new(Line::from(Span::styled(
+            spinner_ch.to_string(),
+            theme.spinner,
+        )));
+        frame.render_widget(spinner, spinner_area);
+    }
 }
 
 fn render_timeline(frame: &mut Frame, area: Rect, app: &ChatApp, theme: &ChatTheme) {
@@ -392,4 +414,70 @@ fn render_status_bar(frame: &mut Frame, area: Rect, _app: &ChatApp, theme: &Chat
 
     let bar = Paragraph::new(line).style(theme.status_bar);
     frame.render_widget(bar, area);
+}
+
+fn render_picker(frame: &mut Frame, full_area: Rect, app: &ChatApp, theme: &ChatTheme) {
+    let items = app.picker.filtered_items();
+    let item_count = items.len() as u16;
+    // Picker height: title(1) + items + footer(1) + border(2)
+    let picker_h = cmp::min(item_count + 4, full_area.height.saturating_sub(2));
+    let picker_w = cmp::min(50, full_area.width.saturating_sub(4));
+
+    // Position at bottom-left, above the status bar
+    let x = 2;
+    let y = full_area.bottom().saturating_sub(picker_h + 2);
+    let picker_area = Rect::new(x, y, picker_w, picker_h);
+
+    // Clear the background
+    frame.render_widget(Clear, picker_area);
+
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(theme.picker_title)
+        .title(Line::from(Span::styled(
+            format!(" {} ", app.picker.title),
+            theme.picker_title,
+        )));
+    let inner = block.inner(picker_area);
+    frame.render_widget(block, picker_area);
+
+    if inner.height < 2 || inner.width < 4 {
+        return;
+    }
+
+    // Reserve last row for footer
+    let items_h = inner.height.saturating_sub(1);
+    let [items_area, footer_area] = vertical![>=(items_h), ==1].areas(inner);
+
+    // Render items
+    let mut lines: Vec<Line<'_>> = Vec::new();
+    for (i, item) in items.iter().enumerate().take(items_h as usize) {
+        let is_selected = i == app.picker.selected;
+        let marker = if is_selected { "› " } else { "  " };
+        let label_style = if is_selected {
+            theme.picker_selected
+        } else {
+            theme.picker_item
+        };
+        let mut spans = vec![
+            Span::styled(marker, label_style),
+            Span::styled(item.label.clone(), label_style),
+        ];
+        if !item.description.is_empty() {
+            spans.push(Span::styled(
+                format!("  {}", item.description),
+                theme.picker_desc,
+            ));
+        }
+        lines.push(Line::from(spans));
+    }
+    let items_para = Paragraph::new(lines);
+    frame.render_widget(items_para, items_area);
+
+    // Footer
+    let footer = Line::from(Span::styled(
+        "↑↓ navigate · enter select · esc cancel",
+        theme.dim_text,
+    ));
+    frame.render_widget(Paragraph::new(footer), footer_area);
 }

@@ -1,5 +1,6 @@
 use crate::chat::input::InputAction;
 use crate::chat::model::{Author, ChatMessage, TimelineEntry};
+use crate::chat::picker::ModalPicker;
 use crate::config::MascotConfig;
 use ratatui_textarea::TextArea;
 use serde_json::Value;
@@ -13,6 +14,8 @@ pub struct ChatApp {
     branch: String,
     scroll_offset: u16,
     show_details: bool,
+    pub picker: ModalPicker,
+    tick_count: u64,
 }
 
 impl ChatApp {
@@ -40,6 +43,8 @@ impl ChatApp {
             branch,
             scroll_offset: u16::MAX, // auto-scroll sentinel
             show_details: false,
+            picker: ModalPicker::command_palette(),
+            tick_count: 0,
         }
     }
 
@@ -86,6 +91,14 @@ impl ChatApp {
         self.show_details
     }
 
+    pub fn tick_count(&self) -> u64 {
+        self.tick_count
+    }
+
+    pub fn tick(&mut self) {
+        self.tick_count = self.tick_count.wrapping_add(1);
+    }
+
     pub fn send_message(&mut self, input: &str) {
         let trimmed = input.trim();
         if trimmed.is_empty() {
@@ -129,6 +142,37 @@ impl ChatApp {
     }
 
     pub fn handle_action(&mut self, action: InputAction) {
+        // When picker is open, route input to it
+        if self.picker.visible {
+            match action {
+                InputAction::Quit => self.picker.close(),
+                InputAction::Submit => {
+                    if let Some(cmd) = self.picker.select_current() {
+                        self.picker.close();
+                        self.send_message(&cmd);
+                    }
+                }
+                InputAction::ScrollUp => self.picker.move_up(),
+                InputAction::ScrollDown => self.picker.move_down(),
+                InputAction::PickerUp => self.picker.move_up(),
+                InputAction::PickerDown => self.picker.move_down(),
+                InputAction::Backspace => {
+                    if self.picker.filter.is_empty() {
+                        self.picker.close();
+                    } else {
+                        self.picker.pop_filter();
+                    }
+                }
+                InputAction::Key(key) => {
+                    if let crossterm::event::KeyCode::Char(ch) = key.code {
+                        self.picker.push_filter(ch);
+                    }
+                }
+                _ => {}
+            }
+            return;
+        }
+
         match action {
             InputAction::Quit => self.should_quit = true,
             InputAction::Submit => self.submit_composer(),
@@ -140,8 +184,16 @@ impl ChatApp {
                 self.scroll_offset = self.scroll_offset.saturating_add(3);
             }
             InputAction::Key(key) => {
+                // Open command palette when typing '/' in empty composer
+                if let crossterm::event::KeyCode::Char('/') = key.code
+                    && self.composer_text().is_empty()
+                {
+                    self.picker.open();
+                    return;
+                }
                 self.composer.input(key);
             }
+            _ => {}
         }
     }
 

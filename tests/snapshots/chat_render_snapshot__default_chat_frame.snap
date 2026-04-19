@@ -2,7 +2,7 @@
 source: tests/chat_render_snapshot.rs
 expression: "lines.join(\"\\n\")"
 ---
-╭──────────────────────────────────────────────────────────╮
+╭────────────────────────────────────────────────────────◐─╮
 │                   Blazar v0.1.0                          │
 │                   Describe a task to get started.        │
 │                                                          │
