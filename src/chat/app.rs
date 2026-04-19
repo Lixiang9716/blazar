@@ -180,14 +180,10 @@ fn detect_branch(repo_path: &str) -> String {
 /// Activated by setting `BLAZAR_DEMO=1` environment variable.
 fn demo_timeline() -> Vec<TimelineEntry> {
     vec![
-        TimelineEntry::code_block(
-            "",
-            "fn render_spirit_pane(\n    frame: &mut Frame,\n    app: &ChatApp,\n    area: Rect,\n) {\n    if area.width < 60 { return; }  // ← hard guard\n    ...",
+        TimelineEntry::warning(
+            "No blazar instructions found. Run /init to generate a blazar-instructions.md file.",
         ),
-        TimelineEntry::tool_use("Grep", "\"spirit_pane\" in src/", 0, 0, "2 matches found"),
-        TimelineEntry::thinking(
-            "Found it. Line 67 has a hard guard:\n\n  if area.width < 60 { return; }  // skips mascot entirely",
-        ),
+        TimelineEntry::warning("Failed to load 2 skills. Run /skills for more details."),
         TimelineEntry::response(
             "The fix: switch to a **stacked layout** for narrow terminals instead of\nskipping the mascot. I'll also add a `snapshot test` for width=40.",
         ),
@@ -197,13 +193,6 @@ fn demo_timeline() -> Vec<TimelineEntry> {
             18,
             6,
             "Replaced hard guard with stacked layout branch",
-        ),
-        TimelineEntry::tool_use(
-            "Create",
-            "tests/chat_render_narrow.rs",
-            34,
-            0,
-            "New snapshot test for width=40 rendering",
         ),
         TimelineEntry::bash("cargo test --lib", "77 tests passed, 0 failed (2.4s)"),
         TimelineEntry::response(

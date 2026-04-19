@@ -2,7 +2,11 @@
 source: tests/chat_render_snapshot.rs
 expression: "lines.join(\"\\n\")"
 ---
-                      blazar — ~/blazar                     
+╭──────────────────────────────────────────────────────────╮
+│  Blazar v0.1.0                                           │
+│  Describe a task to get started.                         │
+│                                                          │
+╰──────────────────────────────────────────────────────────╯
   ● Tell me what you'd like to explore.                     
                                                             
                                                             
@@ -13,12 +17,8 @@ expression: "lines.join(\"\\n\")"
                                                             
                                                             
                                                             
-                                                            
-                                                            
-                                                            
-                                                            
 ───────────────────────────────────────────────── blazar-dev
-› Type @ to mention files, / for commands, or ? for shortcut
+› Type @ to mention files, # for issues/PRs, / for commands,
                                                             
                                                             
 shift+tab switch mode                                  ready

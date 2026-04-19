@@ -15,6 +15,7 @@ pub enum Actor {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EntryKind {
     Message,
+    Warning,
     ToolUse {
         tool: String,
         target: String,
@@ -103,6 +104,14 @@ impl TimelineEntry {
             kind: EntryKind::CodeBlock {
                 language: language.into(),
             },
+            body: body.into(),
+        }
+    }
+
+    pub fn warning(body: impl Into<String>) -> Self {
+        Self {
+            actor: Actor::System,
+            kind: EntryKind::Warning,
             body: body.into(),
         }
     }

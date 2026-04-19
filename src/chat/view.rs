@@ -12,6 +12,7 @@ use ratatui_core::{
 use ratatui_macros::{horizontal, vertical};
 use ratatui_widgets::{
     block::Block,
+    borders::BorderType,
     paragraph::{Paragraph, Wrap},
 };
 use unicode_width::UnicodeWidthStr;
@@ -56,31 +57,39 @@ pub fn render_frame(frame: &mut Frame, app: &ChatApp, _tick_ms: u64) {
     let bg_block = Block::default().style(theme.timeline_bg);
     frame.render_widget(bg_block, area);
 
-    // Vertical layout: title_bar | timeline | separator | input | status_bar
-    let [title, timeline, sep, input, status] = vertical![==1, >=1, ==1, ==3, ==1].areas(area);
+    // Vertical layout: welcome_banner | timeline | separator | input | status_bar
+    let [banner, timeline, sep, input, status] = vertical![==5, >=1, ==1, ==3, ==1].areas(area);
 
-    render_title_bar(frame, title, app, &theme);
+    render_welcome_banner(frame, banner, &theme);
     render_timeline(frame, timeline, app, &theme);
     render_separator(frame, sep, &theme);
     render_input(frame, input, app, &theme);
     render_status_bar(frame, status, app, &theme);
 }
 
-fn render_title_bar(frame: &mut Frame, area: Rect, app: &ChatApp, theme: &ChatTheme) {
-    let display_path = app.display_path();
-    let title_text = format!("blazar — {display_path}");
+fn render_welcome_banner(frame: &mut Frame, area: Rect, theme: &ChatTheme) {
+    let version = env!("CARGO_PKG_VERSION");
+    let lines = vec![
+        Line::from(vec![
+            Span::styled("  Blazar", theme.title_text),
+            Span::styled(format!(" v{version}"), theme.dim_text),
+        ]),
+        Line::from(Span::styled(
+            "  Describe a task to get started.",
+            theme.body_text,
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            "  Tip: /help for commands. Blazar uses AI. Check for mistakes.",
+            theme.dim_text,
+        )),
+    ];
 
-    // Center the title in the bar
-    let padding = area.width.saturating_sub(title_text.len() as u16) / 2;
-    let padded = format!(
-        "{:>width$}",
-        title_text,
-        width = (padding as usize) + title_text.len()
-    );
-
-    let line = Line::from(Span::styled(padded, theme.title_text));
-    let bar = Paragraph::new(line).style(theme.title_bar);
-    frame.render_widget(bar, area);
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(theme.dim_text);
+    let paragraph = Paragraph::new(lines).block(block);
+    frame.render_widget(paragraph, area);
 }
 
 fn render_timeline(frame: &mut Frame, area: Rect, app: &ChatApp, theme: &ChatTheme) {
@@ -233,6 +242,21 @@ fn render_entry<'a>(entry: &TimelineEntry, theme: &ChatTheme, _width: u16) -> Ve
                 ]));
             }
         }
+        EntryKind::Warning => {
+            let mut body_lines = entry.body.lines();
+            let first = body_lines.next().unwrap_or("");
+            lines.push(Line::from(vec![
+                Span::raw(MARGIN),
+                Span::styled("! ", marker_style),
+                Span::styled(first.to_owned(), theme.body_text),
+            ]));
+            for continuation in body_lines {
+                lines.push(Line::from(vec![
+                    Span::raw(INDENT),
+                    Span::styled(continuation.to_owned(), theme.body_text),
+                ]));
+            }
+        }
         EntryKind::Thinking => {
             let mut body_lines = entry.body.lines();
             let first = body_lines.next().unwrap_or("");
@@ -270,6 +294,7 @@ fn render_entry<'a>(entry: &TimelineEntry, theme: &ChatTheme, _width: u16) -> Ve
 fn marker_style_for(entry: &TimelineEntry, theme: &ChatTheme) -> Style {
     match (&entry.actor, &entry.kind) {
         (Actor::User, _) => theme.marker_response,
+        (_, EntryKind::Warning) => theme.marker_warning,
         (_, EntryKind::Thinking) => theme.marker_thinking,
         (_, EntryKind::ToolUse { .. } | EntryKind::Bash { .. }) => theme.marker_tool,
         (_, EntryKind::CodeBlock { .. }) => theme.marker_tool,
@@ -289,7 +314,7 @@ fn render_input(frame: &mut Frame, area: Rect, app: &ChatApp, theme: &ChatTheme)
     // Show placeholder if composer is empty
     if app.composer_text().is_empty() {
         let placeholder = Paragraph::new(Line::from(Span::styled(
-            "Type @ to mention files, / for commands, or ? for shortcuts",
+            "Type @ to mention files, # for issues/PRs, / for commands, or ? for shortcuts",
             theme.input_placeholder,
         )))
         .style(theme.timeline_bg);
