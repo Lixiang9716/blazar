@@ -3,6 +3,7 @@ use crate::chat::model::{Author, ChatMessage};
 use crate::config::MascotConfig;
 use ratatui_textarea::TextArea;
 use serde_json::Value;
+use std::path::Path;
 
 pub struct ChatApp {
     messages: Vec<ChatMessage>,
@@ -108,6 +109,7 @@ pub fn run_terminal_chat(
     let catalog = crate::chat::workspace_catalog::WorkspaceCatalog::load_from_path(&catalog_path);
     let decision = catalog.decide_startup(preference);
     let mut app = crate::chat::root::RootApp::from_launch_decision(catalog, decision);
+    persist_opened_workspace(&mut app, &catalog_path)?;
 
     // Setup terminal; the guard ensures cleanup on any exit path including `?`.
     enable_raw_mode()?;
@@ -136,12 +138,7 @@ pub fn run_terminal_chat(
         {
             let action = InputAction::from_key_event(key);
             app.handle_action(action);
-            if let Some(opened_repo) = app.take_opened_workspace() {
-                let mut catalog =
-                    crate::chat::workspace_catalog::WorkspaceCatalog::load_from_path(&catalog_path);
-                catalog.record_opened_workspace(&opened_repo)?;
-                catalog.save_to_path(&catalog_path)?;
-            }
+            persist_opened_workspace(&mut app, &catalog_path)?;
         }
 
         if app.should_quit() {
@@ -151,6 +148,20 @@ pub fn run_terminal_chat(
 
     Ok(())
     // _guard drops here, restoring raw mode and alternate screen.
+}
+
+fn persist_opened_workspace(
+    app: &mut crate::chat::root::RootApp,
+    catalog_path: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if let Some(opened_repo) = app.take_opened_workspace() {
+        let mut catalog =
+            crate::chat::workspace_catalog::WorkspaceCatalog::load_from_path(catalog_path);
+        catalog.record_opened_workspace(&opened_repo)?;
+        catalog.save_to_path(catalog_path)?;
+    }
+
+    Ok(())
 }
 
 /// Restores raw mode and alternate screen when dropped.

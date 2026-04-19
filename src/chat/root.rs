@@ -17,22 +17,26 @@ pub struct RootApp {
 
 impl RootApp {
     pub fn from_launch_decision(catalog: WorkspaceCatalog, decision: LaunchDecision) -> Self {
-        let mode = match decision {
-            LaunchDecision::ShowLauncher => {
-                RootMode::Launcher(LauncherApp::new(catalog.workspaces))
-            }
+        let (mode, opened_workspace) = match decision {
+            LaunchDecision::ShowLauncher => (
+                RootMode::Launcher(LauncherApp::new(catalog.workspaces)),
+                None,
+            ),
             LaunchDecision::Resume {
                 repo_path,
                 initial_view,
-            } => RootMode::Workspace(Box::new(WorkspaceApp::new_with_view(
-                repo_path.to_string_lossy().as_ref(),
-                initial_view.unwrap_or(WorkspaceView::Chat),
-            ))),
+            } => (
+                RootMode::Workspace(Box::new(WorkspaceApp::new_with_view(
+                    repo_path.to_string_lossy().as_ref(),
+                    initial_view.unwrap_or(WorkspaceView::Chat),
+                ))),
+                Some(repo_path),
+            ),
         };
 
         Self {
             mode,
-            opened_workspace: None,
+            opened_workspace,
             should_quit: false,
         }
     }
