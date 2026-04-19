@@ -149,11 +149,18 @@ fn workspace_app_quits_on_quit_action() {
     assert!(!app.should_quit());
 
     app.handle_action(InputAction::Quit);
-    assert!(app.should_quit(), "WorkspaceApp must expose should_quit() after Quit action");
+    assert!(
+        app.should_quit(),
+        "WorkspaceApp must expose should_quit() after Quit action"
+    );
 }
 
 #[test]
 fn workspace_default_view_is_chat() {
     let app = WorkspaceApp::new_for_test(REPO_ROOT);
-    assert_eq!(app.active_view(), WorkspaceView::Chat, "Chat must be the default home view");
+    assert_eq!(
+        app.active_view(),
+        WorkspaceView::Chat,
+        "Chat must be the default home view"
+    );
 }

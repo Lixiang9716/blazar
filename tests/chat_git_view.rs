@@ -19,7 +19,9 @@ fn git_view_renders_branch_and_dirty_status() {
         "git view should show the branch name"
     );
     assert!(
-        lines.iter().any(|line| line.contains("dirty") || line.contains("clean")),
+        lines
+            .iter()
+            .any(|line| line.contains("dirty") || line.contains("clean")),
         "git view should show clean/dirty status"
     );
     assert!(
@@ -27,7 +29,9 @@ fn git_view_renders_branch_and_dirty_status() {
         "git view should show a changed file"
     );
     assert!(
-        lines.iter().any(|line| line.contains("feat: initial commit")),
+        lines
+            .iter()
+            .any(|line| line.contains("feat: initial commit")),
         "git view should show a recent commit"
     );
 }
@@ -46,5 +50,8 @@ fn git_view_shows_ahead_behind_and_staged_unstaged() {
     assert!(all.contains("ahead"), "git view should show ahead count");
     assert!(all.contains("behind"), "git view should show behind count");
     assert!(all.contains("staged"), "git view should show staged count");
-    assert!(all.contains("unstaged"), "git view should show unstaged count");
+    assert!(
+        all.contains("unstaged"),
+        "git view should show unstaged count"
+    );
 }

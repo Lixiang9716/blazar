@@ -53,7 +53,11 @@ pub fn render_to_lines_for_test(app: &ChatApp, width: u16, height: u16) -> Vec<S
         .collect()
 }
 
-pub fn render_workspace_to_lines_for_test(app: &WorkspaceApp, width: u16, height: u16) -> Vec<String> {
+pub fn render_workspace_to_lines_for_test(
+    app: &WorkspaceApp,
+    width: u16,
+    height: u16,
+) -> Vec<String> {
     if width == 0 || height == 0 {
         return Vec::new();
     }
@@ -145,7 +149,11 @@ fn render_workspace_narrow(frame: &mut Frame, app: &WorkspaceApp, area: Rect) {
     // Compact: nav bar (1 line) + content (fill) + footer (3 lines)
     let rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(1), Constraint::Min(3), Constraint::Length(3)])
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Min(3),
+            Constraint::Length(3),
+        ])
         .split(area);
 
     // Compact nav bar
@@ -178,7 +186,11 @@ fn render_workspace_wide(frame: &mut Frame, app: &WorkspaceApp, tick_ms: u64, ar
     // Header, body, footer
     let rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(1), Constraint::Min(3), Constraint::Length(3)])
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Min(3),
+            Constraint::Length(3),
+        ])
         .split(area);
 
     // Header
@@ -212,7 +224,11 @@ fn render_workspace_wide(frame: &mut Frame, app: &WorkspaceApp, tick_ms: u64, ar
     rail_lines.push(Line::from(""));
 
     // Navigation items
-    let views = [WorkspaceView::Chat, WorkspaceView::Git, WorkspaceView::Sessions];
+    let views = [
+        WorkspaceView::Chat,
+        WorkspaceView::Git,
+        WorkspaceView::Sessions,
+    ];
     for v in views.iter() {
         let label = match v {
             WorkspaceView::Chat => "Chat",
@@ -340,7 +356,14 @@ fn render_git_panel(
         Span::styled("Branch: ", Style::default()),
         Span::styled(&summary.branch, theme.status_text),
         Span::styled("  ", Style::default()),
-        Span::styled(status_label, if summary.is_dirty { Style::default().fg(Color::Yellow) } else { Style::default().fg(Color::Green) }),
+        Span::styled(
+            status_label,
+            if summary.is_dirty {
+                Style::default().fg(Color::Yellow)
+            } else {
+                Style::default().fg(Color::Green)
+            },
+        ),
     ]));
 
     lines.push(Line::from(format!(
@@ -350,7 +373,10 @@ fn render_git_panel(
 
     if !summary.changed_files.is_empty() {
         lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled("Changed files:", Style::default().fg(Color::Cyan))));
+        lines.push(Line::from(Span::styled(
+            "Changed files:",
+            Style::default().fg(Color::Cyan),
+        )));
         for f in &summary.changed_files {
             lines.push(Line::from(format!("  {f}")));
         }
@@ -358,7 +384,10 @@ fn render_git_panel(
 
     if !summary.recent_commits.is_empty() {
         lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled("Recent commits:", Style::default().fg(Color::Cyan))));
+        lines.push(Line::from(Span::styled(
+            "Recent commits:",
+            Style::default().fg(Color::Cyan),
+        )));
         for c in &summary.recent_commits {
             lines.push(Line::from(format!("  {c}")));
         }
@@ -414,7 +443,10 @@ fn render_session_panel(
         }
 
         lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled("Checkpoints:", Style::default().fg(Color::Cyan))));
+        lines.push(Line::from(Span::styled(
+            "Checkpoints:",
+            Style::default().fg(Color::Cyan),
+        )));
         if summary.checkpoints.is_empty() {
             lines.push(Line::from("  No checkpoints recorded"));
         } else {
@@ -424,7 +456,10 @@ fn render_session_panel(
         }
 
         lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled("Todos:", Style::default().fg(Color::Cyan))));
+        lines.push(Line::from(Span::styled(
+            "Todos:",
+            Style::default().fg(Color::Cyan),
+        )));
         lines.push(Line::from(format!(
             "  done: {}  in progress: {}  ready: {}",
             summary.done_todos, summary.in_progress_todos, summary.ready_todos

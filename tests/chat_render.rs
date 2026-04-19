@@ -1,5 +1,7 @@
 use blazar::chat::app::ChatApp;
-use blazar::chat::view::{render_frame, render_to_lines_for_test, render_workspace_to_lines_for_test};
+use blazar::chat::view::{
+    render_frame, render_to_lines_for_test, render_workspace_to_lines_for_test,
+};
 use blazar::chat::workspace::WorkspaceApp;
 use ratatui_core::{backend::TestBackend, style::Color, terminal::Terminal};
 
@@ -77,7 +79,11 @@ fn workspace_shell_shows_header_nav_and_chat_footer() {
     let app = WorkspaceApp::new_for_test(env!("CARGO_MANIFEST_DIR"));
     let lines = render_workspace_to_lines_for_test(&app, 100, 30);
 
-    assert!(lines.iter().any(|line| line.contains("Blazar · Spirit Workspace")));
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.contains("Blazar · Spirit Workspace"))
+    );
     assert!(lines.iter().any(|line| line.contains("Chat")));
     assert!(lines.iter().any(|line| line.contains("Git")));
     assert!(lines.iter().any(|line| line.contains("Sessions")));
@@ -91,7 +97,9 @@ fn narrow_layout_shows_compact_nav_and_footer() {
     let lines = render_workspace_to_lines_for_test(&app, 60, 20);
 
     assert!(
-        lines.iter().any(|line| line.contains("Chat · Git · Sessions")),
+        lines
+            .iter()
+            .any(|line| line.contains("Chat · Git · Sessions")),
         "narrow layout must show compact nav; lines:\n{}",
         lines.join("\n")
     );

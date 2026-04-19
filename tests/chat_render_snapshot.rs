@@ -1,6 +1,6 @@
-use blazar::chat::workspace::WorkspaceApp;
 use blazar::chat::app::ChatApp;
-use blazar::chat::view::{render_workspace_to_lines_for_test, render_to_lines_for_test};
+use blazar::chat::view::{render_to_lines_for_test, render_workspace_to_lines_for_test};
+use blazar::chat::workspace::WorkspaceApp;
 use insta::assert_snapshot;
 
 #[test]
