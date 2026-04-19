@@ -1,5 +1,6 @@
 use crate::chat::app::ChatApp;
 use crate::chat::input::InputAction;
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorkspaceView {
@@ -54,6 +55,25 @@ impl WorkspaceApp {
     pub fn handle_action(&mut self, action: InputAction) {
         if action == InputAction::CycleFocus {
             self.cycle_focus();
+        } else if self.focus == WorkspaceFocus::Footer && action == InputAction::SelectChatView {
+            self.chat_mut()
+                .handle_action(InputAction::Key(KeyEvent::new(
+                    KeyCode::Char('1'),
+                    KeyModifiers::NONE,
+                )));
+        } else if self.focus == WorkspaceFocus::Footer && action == InputAction::SelectGitView {
+            self.chat_mut()
+                .handle_action(InputAction::Key(KeyEvent::new(
+                    KeyCode::Char('2'),
+                    KeyModifiers::NONE,
+                )));
+        } else if self.focus == WorkspaceFocus::Footer && action == InputAction::SelectSessionsView
+        {
+            self.chat_mut()
+                .handle_action(InputAction::Key(KeyEvent::new(
+                    KeyCode::Char('3'),
+                    KeyModifiers::NONE,
+                )));
         } else if action == InputAction::SelectChatView {
             self.select_view(WorkspaceView::Chat);
         } else if action == InputAction::SelectGitView {

@@ -103,6 +103,37 @@ fn workspace_routes_shortcuts_and_forwards_other_keys() {
 }
 
 #[test]
+fn digit_shortcuts_type_into_composer_when_footer_is_focused() {
+    let mut app = WorkspaceApp::new_for_test(REPO_ROOT);
+
+    app.handle_action(InputAction::from_key_event(KeyEvent::new(
+        KeyCode::Tab,
+        KeyModifiers::NONE,
+    )));
+    app.handle_action(InputAction::from_key_event(KeyEvent::new(
+        KeyCode::Tab,
+        KeyModifiers::NONE,
+    )));
+    assert_eq!(app.focus(), WorkspaceFocus::Footer);
+
+    app.handle_action(InputAction::from_key_event(KeyEvent::new(
+        KeyCode::Char('1'),
+        KeyModifiers::NONE,
+    )));
+    app.handle_action(InputAction::from_key_event(KeyEvent::new(
+        KeyCode::Char('2'),
+        KeyModifiers::NONE,
+    )));
+    app.handle_action(InputAction::from_key_event(KeyEvent::new(
+        KeyCode::Char('3'),
+        KeyModifiers::NONE,
+    )));
+
+    assert_eq!(app.active_view(), WorkspaceView::Chat);
+    assert_eq!(app.chat().composer_text(), "123");
+}
+
+#[test]
 fn app_tracks_quit_flag() {
     let mut app = ChatApp::new_for_test(REPO_ROOT);
     assert!(!app.should_quit());
