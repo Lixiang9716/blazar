@@ -152,6 +152,10 @@ impl SpriteAnimation {
         self.frames.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.frames.is_empty()
+    }
+
     pub fn frame_by_index(&self, index: usize) -> &TerminalFrame {
         &self.frames[index % self.frames.len()]
     }
@@ -210,7 +214,12 @@ impl From<image::ImageError> for SpriteError {
     }
 }
 
-fn build_frame(sheet: &RgbaImage, x_offset: u32, frame_width: u32, frame_height: u32) -> TerminalFrame {
+fn build_frame(
+    sheet: &RgbaImage,
+    x_offset: u32,
+    frame_width: u32,
+    frame_height: u32,
+) -> TerminalFrame {
     let mut rows = Vec::new();
     let mut y = 0;
 
@@ -274,8 +283,12 @@ mod tests {
     use std::time::Duration;
 
     fn animation_with_frame_time() -> SpriteAnimation {
-        SpriteAnimation::from_png_bytes(include_bytes!("../../assets/spirit/slime/slime_idle.png"), 4, 2)
-            .expect("slime idle sprite sheet should decode into frames")
+        SpriteAnimation::from_png_bytes(
+            include_bytes!("../../assets/spirit/slime/slime_idle.png"),
+            4,
+            2,
+        )
+        .expect("slime idle sprite sheet should decode into frames")
     }
 
     #[test]
@@ -322,7 +335,8 @@ mod tests {
     fn tick_catches_up_over_multiple_intervals() {
         let mut animation = animation_with_frame_time();
         animation.current = 0;
-        animation.last_tick = Instant::now() - animation.frame_time * 2 - Duration::from_millis(200);
+        animation.last_tick =
+            Instant::now() - animation.frame_time * 2 - Duration::from_millis(200);
 
         animation.tick();
 
@@ -347,8 +361,12 @@ mod tests {
 
     #[test]
     fn high_fps_uses_sub_millisecond_frame_time() {
-        let animation = SpriteAnimation::from_png_bytes(include_bytes!("../../assets/spirit/slime/slime_idle.png"), 4, 2000)
-            .expect("slime idle sprite sheet should decode into frames");
+        let animation = SpriteAnimation::from_png_bytes(
+            include_bytes!("../../assets/spirit/slime/slime_idle.png"),
+            4,
+            2000,
+        )
+        .expect("slime idle sprite sheet should decode into frames");
 
         assert_eq!(animation.frame_time, Duration::from_nanos(500_000));
         assert!(animation.frame_time > Duration::ZERO);

@@ -1,5 +1,5 @@
-use crate::config;
 use crate::chat;
+use crate::config;
 use serde_json::Value;
 use std::io::{self, BufRead, Write};
 

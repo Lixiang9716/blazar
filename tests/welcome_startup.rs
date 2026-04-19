@@ -1,4 +1,4 @@
-use blazar::welcome::startup::{run_preview, run_session, WelcomeController};
+use blazar::welcome::startup::{WelcomeController, run_preview, run_session};
 use std::io::{self, BufRead, Read};
 
 #[test]
@@ -56,7 +56,10 @@ fn run_session_advances_idle_mascot_before_listening() {
         .filter(|scene| scene.contains("Waiting with a sprinkle of stardust"))
         .collect::<Vec<_>>();
 
-    assert!(idle_scenes.len() >= 2, "session should render idle more than once");
+    assert!(
+        idle_scenes.len() >= 2,
+        "session should render idle more than once"
+    );
     assert_ne!(idle_scenes[0], idle_scenes[1]);
 }
 

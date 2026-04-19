@@ -85,9 +85,9 @@ pub fn run_terminal_chat(
 ) -> Result<(), Box<dyn std::error::Error>> {
     use crate::chat::view::render_frame;
     use crossterm::{
-        event::{self, Event},
-        terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
         ExecutableCommand,
+        event::{self, Event},
+        terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
     };
     use ratatui_core::terminal::Terminal;
     use ratatui_crossterm::CrosstermBackend;
@@ -112,11 +112,11 @@ pub fn run_terminal_chat(
         terminal.draw(|frame| render_frame(frame, &app, tick_ms))?;
 
         // Handle events with timeout
-        if event::poll(Duration::from_millis(100))? {
-            if let Event::Key(key) = event::read()? {
-                let action = InputAction::from_key_event(key);
-                app.handle_action(action);
-            }
+        if event::poll(Duration::from_millis(100))?
+            && let Event::Key(key) = event::read()?
+        {
+            let action = InputAction::from_key_event(key);
+            app.handle_action(action);
         }
 
         // Check quit
