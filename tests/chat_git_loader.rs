@@ -70,12 +70,18 @@ fn git_loader_reads_recent_commits() {
     let summary = GitSummary::load(&dir);
 
     assert!(
-        summary.recent_commits.iter().any(|c| c.contains("first commit")),
+        summary
+            .recent_commits
+            .iter()
+            .any(|c| c.contains("first commit")),
         "should include 'first commit', got: {:?}",
         summary.recent_commits
     );
     assert!(
-        summary.recent_commits.iter().any(|c| c.contains("second commit")),
+        summary
+            .recent_commits
+            .iter()
+            .any(|c| c.contains("second commit")),
         "should include 'second commit'"
     );
     std::fs::remove_dir_all(&dir).ok();
@@ -94,9 +100,15 @@ fn git_loader_detects_unstaged_changes() {
 
     let summary = GitSummary::load(&dir);
 
-    assert!(summary.is_dirty, "repo should be dirty after uncommitted change");
     assert!(
-        summary.changed_files.iter().any(|f| f.contains("README.md")),
+        summary.is_dirty,
+        "repo should be dirty after uncommitted change"
+    );
+    assert!(
+        summary
+            .changed_files
+            .iter()
+            .any(|f| f.contains("README.md")),
         "should list README.md as changed, got: {:?}",
         summary.changed_files
     );
@@ -127,7 +139,9 @@ fn git_loader_invalid_path_returns_non_default_fallback() {
     let summary = GitSummary::load(&dir);
     // Must not silently pretend to be "HEAD" with no indication of failure
     assert!(
-        summary.branch.contains("unavailable") || summary.branch.contains("unknown") || summary.branch.contains("error"),
+        summary.branch.contains("unavailable")
+            || summary.branch.contains("unknown")
+            || summary.branch.contains("error"),
         "fallback branch should indicate failure, got: {}",
         summary.branch
     );

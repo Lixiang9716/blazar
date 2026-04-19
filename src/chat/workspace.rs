@@ -31,8 +31,7 @@ impl WorkspaceApp {
     /// Creates a `WorkspaceApp` that loads live Git and session data.
     pub fn new(repo_path: &str) -> Self {
         let path = if repo_path.is_empty() {
-            std::env::current_dir()
-                .unwrap_or_else(|_| Path::new(".").to_path_buf())
+            std::env::current_dir().unwrap_or_else(|_| Path::new(".").to_path_buf())
         } else {
             Path::new(repo_path).to_path_buf()
         };

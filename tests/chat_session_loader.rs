@@ -91,7 +91,10 @@ fn session_loader_reads_checkpoints_from_index() {
         "should load checkpoints from index.md"
     );
     assert!(
-        summary.checkpoints.iter().any(|c| c.contains("Checkpoint 001")),
+        summary
+            .checkpoints
+            .iter()
+            .any(|c| c.contains("Checkpoint 001")),
         "should include Checkpoint 001, got: {:?}",
         summary.checkpoints
     );
@@ -105,8 +108,14 @@ fn session_loader_counts_todos_by_status() {
 
     let summary = SessionSummary::load_from_dir(std::path::Path::new("."), Some(&dir));
 
-    assert_eq!(summary.ready_todos, 2, "pending=2 should map to ready_todos");
-    assert_eq!(summary.in_progress_todos, 1, "in_progress_todos should be 1");
+    assert_eq!(
+        summary.ready_todos, 2,
+        "pending=2 should map to ready_todos"
+    );
+    assert_eq!(
+        summary.in_progress_todos, 1,
+        "in_progress_todos should be 1"
+    );
     assert_eq!(summary.done_todos, 3, "done_todos should be 3");
     std::fs::remove_dir_all(&dir).ok();
 }
@@ -161,7 +170,10 @@ fn load_from_dir_does_not_create_session_db_when_absent() {
     std::fs::write(dir.join("workspace.yaml"), "label: no-db-session\n").unwrap();
 
     let db_path = dir.join("session.db");
-    assert!(!db_path.exists(), "session.db must not exist before the call");
+    assert!(
+        !db_path.exists(),
+        "session.db must not exist before the call"
+    );
 
     let _summary = SessionSummary::load_from_dir(std::path::Path::new("."), Some(&dir));
 

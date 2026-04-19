@@ -319,5 +319,8 @@ fn resolve_repo_path_uses_schema_repopath_default() {
 fn resolve_repo_path_falls_back_to_non_empty_string_when_schema_empty() {
     let schema = serde_json::json!({});
     let path = resolve_repo_path(&schema);
-    assert!(!path.is_empty(), "fallback must not be empty; got: {path:?}");
+    assert!(
+        !path.is_empty(),
+        "fallback must not be empty; got: {path:?}"
+    );
 }

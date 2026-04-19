@@ -44,11 +44,7 @@ impl SessionSummary {
 
         // Session label: read from workspace.yaml or fall back to dir name
         let session_label = read_yaml_field(dir.join("workspace.yaml").as_path(), "label")
-            .or_else(|| {
-                dir.file_name()
-                    .and_then(|n| n.to_str())
-                    .map(str::to_owned)
-            })
+            .or_else(|| dir.file_name().and_then(|n| n.to_str()).map(str::to_owned))
             .unwrap_or_default();
 
         // CWD from repo_path (or workspace.yaml if repo_path is just ".")
