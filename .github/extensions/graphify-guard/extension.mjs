@@ -9,6 +9,7 @@ const BLOCKED_TOOLS = new Set([
   "glob",
   "rg",
   "task",
+  "apply_patch",
   "github-mcp-server-search_code",
   "github-mcp-server-get_file_contents",
 ]);
@@ -77,6 +78,10 @@ async function findGuidePath(repoRoot) {
   return candidates[0]?.filePath;
 }
 
+function findStandardsPath(repoRoot) {
+  return path.join(repoRoot, "docs", "knowledge-base", "blazar-coding-standards.md");
+}
+
 function toRepoRelative(repoRoot, absolutePath) {
   if (!absolutePath) {
     return undefined;
@@ -126,16 +131,19 @@ async function resolveGraphifyContext(cwd) {
     "graph.html",
   );
   const guidePath = await findGuidePath(repoRoot);
+  const standardsPath = findStandardsPath(repoRoot);
 
   return {
     repoRoot,
     available: true,
     reportPath,
     guidePath,
+    standardsPath,
     graphJsonPath,
     graphHtmlPath,
     reportRel: toRepoRelative(repoRoot, reportPath),
     guideRel: toRepoRelative(repoRoot, guidePath),
+    standardsRel: toRepoRelative(repoRoot, standardsPath),
     graphJsonRel: toRepoRelative(repoRoot, graphJsonPath),
     graphHtmlRel: toRepoRelative(repoRoot, graphHtmlPath),
   };
@@ -153,6 +161,7 @@ async function getSessionState(sessionId, cwd) {
     context,
     reportRead: false,
     guideRead: false,
+    standardsRead: false,
     activationLogged: false,
   };
   sessionStates.set(sessionId, next);
@@ -160,7 +169,7 @@ async function getSessionState(sessionId, cwd) {
 }
 
 function buildAdditionalContext(state) {
-  const { context, reportRead, guideRead } = state;
+  const { context, reportRead, guideRead, standardsRead } = state;
   if (!context.available) {
     return undefined;
   }
@@ -186,6 +195,12 @@ function buildAdditionalContext(state) {
     );
   }
 
+  if (context.standardsRel) {
+    lines.push(
+      `Use ${context.standardsRel} as the repository coding rulebook for architecture, workflow priority, state ownership, and review decisions.`,
+    );
+  }
+
   if (context.graphJsonRel) {
     lines.push(
       `For deeper graph inspection, raw graph data is available at ${context.graphJsonRel}. Do not paste the entire JSON into context; use the report for orientation first.`,
@@ -204,6 +219,16 @@ function buildAdditionalContext(state) {
     );
   }
 
+  if (!standardsRead && context.standardsRel) {
+    lines.push(
+      "Before changing code, read the coding standards document. It is mandatory for implementation work, not optional background reading.",
+    );
+  } else if (standardsRead) {
+    lines.push(
+      "The coding standards document has already been read in this session; continue to apply it as the default implementation rulebook.",
+    );
+  }
+
   return lines.join(" ");
 }
 
@@ -215,7 +240,8 @@ function isRequiredKnowledgePath(state, candidatePath) {
 
   return (
     resolved === normalizePath(state.context.reportPath) ||
-    resolved === normalizePath(state.context.guidePath)
+    resolved === normalizePath(state.context.guidePath) ||
+    resolved === normalizePath(state.context.standardsPath)
   );
 }
 
@@ -229,6 +255,12 @@ function isGuidePath(state, candidatePath) {
   return normalizePath(candidatePath) === normalizePath(state.context.guidePath);
 }
 
+function isStandardsPath(state, candidatePath) {
+  return (
+    normalizePath(candidatePath) === normalizePath(state.context.standardsPath)
+  );
+}
+
 const session = await joinSession({
   hooks: {
     onSessionStart: async (input, invocation) => {
@@ -240,7 +272,7 @@ const session = await joinSession({
       if (!state.activationLogged) {
         state.activationLogged = true;
         await session.log(
-          `graphify-guard active: read ${state.context.reportRel} before raw repo search.`,
+          `graphify-guard active: read ${state.context.reportRel} before raw repo search and ${state.context.standardsRel ?? "the coding standards"} before code changes.`,
           { ephemeral: true },
         );
       }
@@ -263,7 +295,7 @@ const session = await joinSession({
 
     onPreToolUse: async (input, invocation) => {
       const state = await getSessionState(invocation.sessionId, input.cwd);
-      if (!state.context.available || state.reportRead) {
+      if (!state.context.available) {
         return;
       }
 
@@ -273,10 +305,25 @@ const session = await joinSession({
         };
       }
 
-      if (BLOCKED_TOOLS.has(input.toolName)) {
+      const needsKnowledgeRead = BLOCKED_TOOLS.has(input.toolName) && !state.reportRead;
+      const needsStandardsRead =
+        (input.toolName === "apply_patch" ||
+          input.toolName === "task" ||
+          input.toolName === "bash") &&
+        !state.standardsRead;
+
+      if (needsKnowledgeRead) {
         return {
           permissionDecision: "deny",
           permissionDecisionReason: `Read graphify knowledge first: ${state.context.reportRel}${state.context.guideRel ? ` (and ${state.context.guideRel} for project guidance)` : ""}.`,
+          additionalContext: buildAdditionalContext(state),
+        };
+      }
+
+      if (needsStandardsRead) {
+        return {
+          permissionDecision: "deny",
+          permissionDecisionReason: `Read the coding rulebook first: ${state.context.standardsRel}.`,
           additionalContext: buildAdditionalContext(state),
         };
       }
@@ -299,11 +346,22 @@ const session = await joinSession({
       if (isGuidePath(state, viewedPath)) {
         state.guideRead = true;
       }
+      if (isStandardsPath(state, viewedPath)) {
+        state.standardsRead = true;
+      }
 
       if (state.reportRead) {
         await session.log("graphify-guard: graphify report read for this session.", {
           ephemeral: true,
         });
+      }
+      if (state.standardsRead) {
+        await session.log(
+          "graphify-guard: coding standards read for this session.",
+          {
+            ephemeral: true,
+          },
+        );
       }
     },
   },

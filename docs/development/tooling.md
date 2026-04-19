@@ -20,6 +20,25 @@ cargo install just bacon cargo-nextest cargo-deny cargo-llvm-cov cargo-outdated
 - `just snapshots` — run snapshot-oriented tests
 - `just preflight` — run the default local quality gate
 
+## Knowledge-base workflow
+
+Before architecture, UI, or implementation work, read:
+
+1. `docs/knowledge-base/blazar-coding-standards.md`
+2. `docs/knowledge-base/2026-04-18-ratatui-codex-guide.md`
+
+Use them differently:
+
+- `blazar-coding-standards.md` is the **operational rulebook** for daily coding and review.
+- `2026-04-18-ratatui-codex-guide.md` is the **research-backed rationale** for product direction, architecture choices, and library selection.
+
+Do not treat the knowledge base as passive reference material. Use it to decide:
+
+- whether a change improves workflow usefulness
+- whether product state still lives in Blazar-owned types
+- whether a new surface is actionable enough to justify its complexity
+- whether polish work is being prioritized too early
+
 ## Optional local hook
 
 Enable the repository hook path:

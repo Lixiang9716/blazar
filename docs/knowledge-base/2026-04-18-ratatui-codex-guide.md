@@ -4,6 +4,8 @@
 
 This document distills the local `graphify` knowledge-base build and the follow-up recursive research pass into a project-facing guide for Blazar.
 
+For day-to-day implementation rules, use `docs/knowledge-base/blazar-coding-standards.md` as the operational companion to this guide.
+
 Use it as the default reference when making decisions about:
 
 - product direction
