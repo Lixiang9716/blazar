@@ -130,8 +130,11 @@ Use a two-column launcher:
    - recent checkpoint
    - session/todo summary
    - actions: `Resume`, `Open Sessions`, `Open Git`
+   - a **small Spirit status card** that keeps the mascot visible without overtaking the launcher
 3. **Footer**
    - keyboard hints only
+
+The Spirit card should use the same slime identity as the welcome screen, but in a compact footprint. It belongs in the preview/action column, not as a separate hero panel.
 
 ### Narrow terminals
 
@@ -149,17 +152,50 @@ The preview panel is reduced to the most important summary lines:
 - active session count or last session label
 - recent checkpoint / last intent
 
+On narrow terminals, Spirit still appears, but as a **compact animated slime card** or a single stacked status block rather than a large decorative region.
+
 ## Visual style
 
 Follow the existing Spirit Workspace shell language:
 
+- default theme: **One Dark Pro**
 - dark terminal background
-- restrained blue/cyan accent
+- restrained One Dark Pro accents: blue, green, yellow, red, purple, and cyan used semantically
 - selected card with the strongest highlight
 - soft borders instead of dense separators
 - compact, readable metadata chips instead of verbose prose
 
 The launcher should feel like the **front door** to the same product, not a different tool.
+
+### Theme management
+
+The theme system should move away from hardcoded palette values in `theme.rs` alone.
+
+Use a small user-facing config file, for example:
+
+- `config/theme.json`
+
+That config should own:
+
+- active theme key (default: `one-dark-pro`)
+- theme palette tokens
+- density / spacing preference
+- label style preferences such as uppercase vs sentence case
+
+It should **not** try to own the terminal font family itself. Terminal font selection remains outside the TUI; the application only controls styling tokens and information density.
+
+### Spirit behavior
+
+Spirit should remain visible at startup.
+
+The launcher should use the existing **welcome slime** identity as a **compact animated version**:
+
+- same slime asset family as welcome
+- same idle animation language
+- smaller presentation suitable for a launcher status card
+- no replacement mascot and no static placeholder face
+
+This keeps continuity between welcome, launcher, and workspace surfaces.
 
 ## Post-entry workspace behavior
 
