@@ -123,4 +123,3 @@ fn interactive_send_message_shows_echo_response() {
         "user message 'hi' should appear in timeline"
     );
 }
-
