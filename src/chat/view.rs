@@ -457,10 +457,13 @@ fn render_status_bar(frame: &mut Frame, area: Rect, _app: &ChatApp, theme: &Chat
 }
 
 fn render_picker(frame: &mut Frame, full_area: Rect, app: &ChatApp, theme: &ChatTheme) {
-    let items = app.picker.filtered_items();
-    let item_count = items.len() as u16;
-    // Picker height: title(1) + items + footer(1) + border(2)
-    let picker_h = cmp::min(item_count + 4, full_area.height.saturating_sub(2));
+    use crate::chat::picker::PICKER_PAGE_SIZE;
+
+    let filtered = app.picker.filtered_items();
+    let total = filtered.len();
+    let visible_count = total.min(PICKER_PAGE_SIZE) as u16;
+    // title(1) + visible items + footer(1) + border(2)
+    let picker_h = cmp::min(visible_count + 4, full_area.height.saturating_sub(2));
     let picker_w = cmp::min(50, full_area.width.saturating_sub(4));
 
     // Position at bottom-left, above the status bar
@@ -470,6 +473,9 @@ fn render_picker(frame: &mut Frame, full_area: Rect, app: &ChatApp, theme: &Chat
 
     // Clear the background
     frame.render_widget(Clear, picker_area);
+
+    let has_up = app.picker.has_scroll_up();
+    let has_down = app.picker.has_scroll_down();
 
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
@@ -489,10 +495,18 @@ fn render_picker(frame: &mut Frame, full_area: Rect, app: &ChatApp, theme: &Chat
     let items_h = inner.height.saturating_sub(1);
     let [items_area, footer_area] = vertical![>=(items_h), ==1].areas(inner);
 
-    // Render items
+    // Render visible window of items
+    let (window, offset) = app.picker.visible_window();
     let mut lines: Vec<Line<'_>> = Vec::new();
-    for (i, item) in items.iter().enumerate().take(items_h as usize) {
-        let is_selected = i == app.picker.selected;
+
+    // Scroll-up indicator
+    if has_up {
+        lines.push(Line::from(Span::styled("  ▲ more", theme.dim_text)));
+    }
+
+    for (i, item) in window.iter().enumerate() {
+        let global_idx = offset + i;
+        let is_selected = global_idx == app.picker.selected;
         let marker = if is_selected { "› " } else { "  " };
         let label_style = if is_selected {
             theme.picker_selected
@@ -511,13 +525,21 @@ fn render_picker(frame: &mut Frame, full_area: Rect, app: &ChatApp, theme: &Chat
         }
         lines.push(Line::from(spans));
     }
+
+    // Scroll-down indicator
+    if has_down {
+        lines.push(Line::from(Span::styled("  ▼ more", theme.dim_text)));
+    }
+
     let items_para = Paragraph::new(lines);
     frame.render_widget(items_para, items_area);
 
-    // Footer
-    let footer = Line::from(Span::styled(
-        "↑↓ navigate · enter select · esc cancel",
-        theme.dim_text,
-    ));
+    // Footer with count info
+    let footer_text = format!(
+        "↑↓ navigate · enter select · esc cancel  ({}/{})",
+        app.picker.selected + 1,
+        total
+    );
+    let footer = Line::from(Span::styled(footer_text, theme.dim_text));
     frame.render_widget(Paragraph::new(footer), footer_area);
 }
