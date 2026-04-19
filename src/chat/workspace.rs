@@ -44,12 +44,6 @@ impl WorkspaceApp {
         }
     }
 
-    pub fn new_with_view(repo_path: &str, view: WorkspaceView) -> Self {
-        let mut app = Self::new(repo_path);
-        app.select_view(view);
-        app
-    }
-
     /// Creates a `WorkspaceApp` with deterministic test fixtures.
     ///
     /// Does **not** invoke live Git or session loaders so tests remain

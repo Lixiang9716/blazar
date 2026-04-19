@@ -3,7 +3,6 @@ use crate::chat::model::{Author, ChatMessage};
 use crate::config::MascotConfig;
 use ratatui_textarea::TextArea;
 use serde_json::Value;
-use std::path::Path;
 
 pub struct ChatApp {
     messages: Vec<ChatMessage>,
@@ -92,6 +91,8 @@ pub fn run_terminal_chat(
     _schema: Value,
     _mascot: MascotConfig,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    use crate::chat::view::render_workspace;
+    use crate::chat::workspace::WorkspaceApp;
     use crossterm::{
         ExecutableCommand,
         event::{self, Event},
@@ -104,12 +105,8 @@ pub fn run_terminal_chat(
 
     // Resolve repo path and initialise the app BEFORE touching the terminal so
     // that the potentially slow git/session I/O does not run inside raw mode.
-    let preference = resolve_startup_preference(&_schema);
-    let catalog_path = crate::chat::workspace_catalog::workspace_catalog_path();
-    let catalog = crate::chat::workspace_catalog::WorkspaceCatalog::load_from_path(&catalog_path);
-    let decision = catalog.decide_startup(preference);
-    let mut app = crate::chat::root::RootApp::from_launch_decision(catalog, decision);
-    persist_opened_workspace(&mut app, &catalog_path)?;
+    let repo_path = resolve_repo_path(&_schema);
+    let mut app = WorkspaceApp::new(&repo_path);
 
     // Setup terminal; the guard ensures cleanup on any exit path including `?`.
     enable_raw_mode()?;
@@ -124,21 +121,13 @@ pub fn run_terminal_chat(
     loop {
         let tick_ms = start_time.elapsed().as_millis() as u64;
 
-        terminal.draw(|frame| match app.mode() {
-            crate::chat::root::RootMode::Launcher(launcher) => {
-                crate::chat::launcher_view::render_launcher(frame, launcher, tick_ms)
-            }
-            crate::chat::root::RootMode::Workspace(workspace) => {
-                crate::chat::view::render_workspace(frame, workspace, tick_ms)
-            }
-        })?;
+        terminal.draw(|frame| render_workspace(frame, &app, tick_ms))?;
 
         if event::poll(Duration::from_millis(100))?
             && let Event::Key(key) = event::read()?
         {
             let action = InputAction::from_key_event(key);
             app.handle_action(action);
-            persist_opened_workspace(&mut app, &catalog_path)?;
         }
 
         if app.should_quit() {
@@ -148,20 +137,6 @@ pub fn run_terminal_chat(
 
     Ok(())
     // _guard drops here, restoring raw mode and alternate screen.
-}
-
-fn persist_opened_workspace(
-    app: &mut crate::chat::root::RootApp,
-    catalog_path: &Path,
-) -> Result<(), Box<dyn std::error::Error>> {
-    if let Some(opened_repo) = app.take_opened_workspace() {
-        let mut catalog =
-            crate::chat::workspace_catalog::WorkspaceCatalog::load_from_path(catalog_path);
-        catalog.record_opened_workspace(&opened_repo)?;
-        catalog.save_to_path(catalog_path)?;
-    }
-
-    Ok(())
 }
 
 /// Restores raw mode and alternate screen when dropped.
@@ -191,19 +166,4 @@ pub fn resolve_repo_path(schema: &Value) -> String {
                 .map(|p| p.display().to_string())
                 .unwrap_or_default()
         })
-}
-
-pub fn resolve_startup_preference(
-    schema: &Value,
-) -> crate::chat::workspace_catalog::StartupPreference {
-    let repo_path = resolve_repo_path(schema);
-    let force_launcher = schema
-        .pointer("/properties/workspace/properties/showLauncherOnStart/default")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-
-    crate::chat::workspace_catalog::StartupPreference {
-        repo_path_hint: (!repo_path.is_empty()).then_some(std::path::PathBuf::from(repo_path)),
-        force_launcher,
-    }
 }

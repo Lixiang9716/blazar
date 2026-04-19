@@ -27,16 +27,6 @@ fn bundled_app_schema_contains_runtime_defaults() {
 }
 
 #[test]
-fn bundled_app_schema_exposes_workspace_launcher_toggle() {
-    let schema = load_app_schema().expect("bundled config should load");
-
-    assert_eq!(
-        schema["properties"]["workspace"]["properties"]["showLauncherOnStart"]["default"],
-        false
-    );
-}
-
-#[test]
 fn config_loader_reads_schema_from_json_file() {
     let dir = unique_temp_dir();
     fs::create_dir_all(&dir).expect("temp dir should be created");

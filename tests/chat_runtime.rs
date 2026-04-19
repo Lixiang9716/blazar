@@ -1,12 +1,7 @@
 use blazar::chat::app::ChatApp;
 use blazar::chat::input::InputAction;
-use blazar::chat::root::{RootApp, RootMode};
 use blazar::chat::workspace::{WorkspaceApp, WorkspaceFocus, WorkspaceView};
-use blazar::chat::workspace_catalog::{LaunchDecision, WorkspaceCatalog, WorkspaceRecord};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use std::fs;
-use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 const REPO_ROOT: &str = env!("CARGO_MANIFEST_DIR");
 
@@ -270,87 +265,6 @@ fn generic_key_input_in_non_chat_footer_does_not_write_to_composer() {
     );
 }
 
-#[test]
-fn root_app_transitions_from_launcher_into_requested_workspace_view() {
-    let catalog = WorkspaceCatalog {
-        last_opened: None,
-        workspaces: vec![WorkspaceRecord::named("blazar", "/tmp/blazar")],
-    };
-    let mut app = RootApp::from_launch_decision(catalog, LaunchDecision::ShowLauncher);
-
-    let outcome = app.handle_action(InputAction::Key(KeyEvent::from(KeyCode::Char('g'))));
-
-    assert!(outcome.is_none());
-    assert!(matches!(app.mode(), RootMode::Workspace(_)));
-    assert_eq!(app.workspace().unwrap().active_view(), WorkspaceView::Git);
-}
-
-#[test]
-fn root_app_resumes_directly_into_chat_workspace_view_by_default() {
-    let catalog = WorkspaceCatalog::default();
-    let app = RootApp::from_launch_decision(
-        catalog,
-        LaunchDecision::Resume {
-            repo_path: REPO_ROOT.into(),
-            initial_view: None,
-        },
-    );
-
-    assert!(matches!(app.mode(), RootMode::Workspace(_)));
-    assert_eq!(app.workspace().unwrap().active_view(), WorkspaceView::Chat);
-}
-
-#[test]
-fn root_app_respects_explicit_initial_view_on_resume() {
-    let catalog = WorkspaceCatalog::default();
-    let app = RootApp::from_launch_decision(
-        catalog,
-        LaunchDecision::Resume {
-            repo_path: REPO_ROOT.into(),
-            initial_view: Some(WorkspaceView::Sessions),
-        },
-    );
-
-    assert!(matches!(app.mode(), RootMode::Workspace(_)));
-    assert_eq!(
-        app.workspace().unwrap().active_view(),
-        WorkspaceView::Sessions
-    );
-}
-
-#[test]
-fn resumed_root_app_exposes_workspace_for_catalog_persistence() {
-    let repo_dir = unique_temp_dir();
-    fs::create_dir_all(&repo_dir).expect("repo dir should be created");
-    let catalog_path = repo_dir.join("workspaces.json");
-    let mut app = RootApp::from_launch_decision(
-        WorkspaceCatalog::default(),
-        LaunchDecision::Resume {
-            repo_path: repo_dir.clone(),
-            initial_view: None,
-        },
-    );
-
-    if let Some(opened_repo) = app.take_opened_workspace() {
-        let mut catalog = WorkspaceCatalog::load_from_path(&catalog_path);
-        catalog
-            .record_opened_workspace(&opened_repo)
-            .expect("opened workspace should be recorded");
-        catalog
-            .save_to_path(&catalog_path)
-            .expect("catalog should save");
-    }
-
-    let saved_catalog = WorkspaceCatalog::load_from_path(&catalog_path);
-    assert_eq!(
-        saved_catalog.last_opened,
-        Some(repo_dir.display().to_string())
-    );
-    assert_eq!(saved_catalog.workspaces.len(), 1);
-
-    fs::remove_dir_all(&repo_dir).expect("temp dir should be removed");
-}
-
 // Live-data gap: new_for_test must be deterministic and not load real repo/session state.
 #[test]
 fn new_for_test_git_summary_is_deterministic() {
@@ -459,17 +373,4 @@ fn quit_from_sessions_view_footer_propagates() {
         app.should_quit(),
         "Quit action from Sessions footer must propagate"
     );
-}
-
-fn unique_temp_dir() -> PathBuf {
-    let mut path = std::env::temp_dir();
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system time should be after epoch")
-        .as_nanos();
-    path.push(format!(
-        "blazar-chat-runtime-test-{}-{nanos}",
-        std::process::id()
-    ));
-    path
 }

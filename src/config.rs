@@ -5,34 +5,9 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 pub const APP_SCHEMA_PATH: &str = "config/app.json";
-pub const THEME_CONFIG_PATH: &str = "config/theme.json";
 
 pub fn load_app_schema() -> Result<Value, ConfigError> {
     load_app_schema_from_path(APP_SCHEMA_PATH)
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
-pub struct ThemePalette {
-    pub background: String,
-    pub surface: String,
-    pub text: String,
-    pub muted: String,
-    pub accent: String,
-    pub success: String,
-    pub warning: String,
-    pub danger: String,
-    pub spirit: String,
-    pub info: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
-pub struct ThemeConfig {
-    #[serde(rename = "activeTheme")]
-    pub active_theme: String,
-    pub themes: std::collections::BTreeMap<String, ThemePalette>,
-    pub density: String,
-    #[serde(rename = "uppercaseLabels")]
-    pub uppercase_labels: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,24 +25,6 @@ impl MascotConfig {
 
 pub fn load_mascot_config() -> Result<MascotConfig, ConfigError> {
     load_mascot_config_from_path(APP_SCHEMA_PATH)
-}
-
-pub fn load_theme_config() -> Result<ThemeConfig, ConfigError> {
-    load_theme_config_from_path(THEME_CONFIG_PATH)
-}
-
-pub fn load_theme_config_from_path(path: impl AsRef<Path>) -> Result<ThemeConfig, ConfigError> {
-    let path = path.as_ref();
-    let contents = fs::read_to_string(path).map_err(|source| ConfigError::Read {
-        path: path.to_path_buf(),
-        source,
-    })?;
-    let config = serde_json::from_str(&contents).map_err(|source| ConfigError::Parse {
-        path: path.to_path_buf(),
-        source,
-    })?;
-
-    Ok(config)
 }
 
 pub fn load_mascot_config_from_path(path: impl AsRef<Path>) -> Result<MascotConfig, ConfigError> {
