@@ -72,3 +72,50 @@ fn title_bar_uses_terminal_default_background() {
         "title bar should use the terminal default background"
     );
 }
+
+/// Simulates the interactive flow: start → type "1" → submit → verify echo response.
+#[test]
+fn interactive_send_message_shows_echo_response() {
+    use blazar::chat::input::InputAction;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    let mut app = ChatApp::new_for_test(REPO_ROOT);
+
+    // Step 1: initial state — only greeting visible
+    let lines_before = render_to_lines_for_test(&app, 60, 20);
+    assert!(
+        lines_before
+            .iter()
+            .any(|l| l.contains("Tell me what you'd like to explore")),
+        "initial state should show greeting"
+    );
+    assert!(
+        !lines_before.iter().any(|l| l.contains("I hear you")),
+        "no echo response before user input"
+    );
+
+    // Step 2: simulate typing "1"
+    app.handle_action(InputAction::Key(KeyEvent::new(
+        KeyCode::Char('1'),
+        KeyModifiers::NONE,
+    )));
+    let lines_typing = render_to_lines_for_test(&app, 60, 20);
+    assert!(
+        lines_typing.iter().any(|l| l.contains('1')),
+        "composer should show typed character"
+    );
+
+    // Step 3: press Enter to submit
+    app.handle_action(InputAction::Submit);
+
+    // Step 4: verify the echo response appeared in the rendered output
+    let lines_after = render_to_lines_for_test(&app, 60, 20);
+    assert!(
+        lines_after.iter().any(|l| l.contains("I hear you")),
+        "echo response should appear after submit"
+    );
+    assert!(
+        lines_after.iter().any(|l| l.contains('1')),
+        "user message '1' should appear in timeline"
+    );
+}
