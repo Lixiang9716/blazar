@@ -154,18 +154,6 @@ fn render_welcome_banner(
     );
     let text_paragraph = Paragraph::new(text_lines);
     frame.render_widget(text_paragraph, centered_text);
-
-    // Spinner in top-right corner inside the border
-    let spinner_chars = ['◐', '◓', '◑', '◒'];
-    let spinner_ch = spinner_chars[(app.tick_count() as usize / 4) % spinner_chars.len()];
-    if inner.width > 2 && inner.height > 0 {
-        let spinner_area = Rect::new(inner.right().saturating_sub(2), inner.y, 1, 1);
-        let spinner = Paragraph::new(Line::from(Span::styled(
-            spinner_ch.to_string(),
-            theme.spinner,
-        )));
-        frame.render_widget(spinner, spinner_area);
-    }
 }
 
 fn render_timeline(frame: &mut Frame, area: Rect, app: &ChatApp, theme: &ChatTheme) {
