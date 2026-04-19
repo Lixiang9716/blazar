@@ -1,6 +1,6 @@
 use crate::chat::app::ChatApp;
 use crate::chat::picker::PICKER_PAGE_SIZE;
-use crate::chat::theme::{BASE03, ChatTheme};
+use crate::chat::theme::ChatTheme;
 use core::cmp;
 use ratatui_core::{
     layout::{Constraint, Rect},
@@ -42,7 +42,7 @@ pub(super) fn render_picker(
         .width(Constraint::Length(picker_w))
         .height(Constraint::Length(picker_h))
         .slide(Slide::Bottom)
-        .backdrop(Backdrop::new(BASE03))
+        .backdrop(Backdrop::new(theme.backdrop_color))
         .block(
             Block::bordered()
                 .border_type(BorderType::Rounded)

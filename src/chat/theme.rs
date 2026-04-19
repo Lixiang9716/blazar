@@ -1,60 +1,75 @@
+//! Theme engine — loads opaline themes and maps semantic tokens to ChatTheme.
+
+use opaline::{OpalineColor, ThemeInfo, list_available_themes, load_by_name};
 use ratatui_core::style::{Color, Modifier, Style};
 
-// Solarized Dark palette
-pub const BASE03: Color = Color::Rgb(0, 43, 54);
-pub const BASE02: Color = Color::Rgb(7, 54, 66);
-pub const BASE01: Color = Color::Rgb(88, 110, 117);
-pub const BASE00: Color = Color::Rgb(101, 123, 131);
-pub const BASE0: Color = Color::Rgb(131, 148, 150);
-pub const BASE1: Color = Color::Rgb(147, 161, 161);
-pub const BASE2: Color = Color::Rgb(238, 232, 213);
-pub const BASE3: Color = Color::Rgb(253, 246, 227);
+/// Default theme name.
+pub const DEFAULT_THEME: &str = "one-dark";
 
-pub const YELLOW: Color = Color::Rgb(181, 137, 0);
-pub const ORANGE: Color = Color::Rgb(203, 75, 22);
-pub const RED: Color = Color::Rgb(220, 50, 47);
-pub const MAGENTA: Color = Color::Rgb(211, 54, 130);
-pub const VIOLET: Color = Color::Rgb(108, 113, 196);
-pub const BLUE: Color = Color::Rgb(38, 139, 210);
-pub const CYAN: Color = Color::Rgb(42, 161, 152);
-pub const GREEN: Color = Color::Rgb(133, 153, 0);
+/// Convert an opaline color to ratatui Color.
+fn to_color(c: OpalineColor) -> Color {
+    Color::Rgb(c.r, c.g, c.b)
+}
 
-/// Solarized Dark stylesheet for tui-markdown rendering.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct SolarizedStyleSheet;
+/// Dynamic stylesheet for tui-markdown, derived from the current theme.
+#[derive(Clone, Debug)]
+pub struct ThemeStyleSheet {
+    heading_1: Style,
+    heading_2: Style,
+    heading_other: Style,
+    code: Style,
+    link: Style,
+    blockquote: Style,
+    heading_meta: Style,
+    metadata_block: Style,
+}
 
-impl tui_markdown::StyleSheet for SolarizedStyleSheet {
+impl ThemeStyleSheet {
+    pub fn from_chat_theme(theme: &ChatTheme) -> Self {
+        Self {
+            heading_1: theme.title_text.add_modifier(Modifier::UNDERLINED),
+            heading_2: theme.picker_title,
+            heading_other: theme.tool_target.add_modifier(Modifier::BOLD),
+            code: theme.code_block.bg(theme.code_bg),
+            link: theme.tool_target.add_modifier(Modifier::UNDERLINED),
+            blockquote: theme.dim_text,
+            heading_meta: theme.dim_text,
+            metadata_block: theme.tip_command,
+        }
+    }
+}
+
+impl tui_markdown::StyleSheet for ThemeStyleSheet {
     fn heading(&self, level: u8) -> Style {
         match level {
-            1 => Style::new()
-                .fg(BASE2)
-                .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
-            2 => Style::new().fg(BLUE).add_modifier(Modifier::BOLD),
-            _ => Style::new().fg(CYAN).add_modifier(Modifier::BOLD),
+            1 => self.heading_1,
+            2 => self.heading_2,
+            _ => self.heading_other,
         }
     }
 
     fn code(&self) -> Style {
-        Style::new().fg(ORANGE).bg(BASE02)
+        self.code
     }
 
     fn link(&self) -> Style {
-        Style::new().fg(BLUE).add_modifier(Modifier::UNDERLINED)
+        self.link
     }
 
     fn blockquote(&self) -> Style {
-        Style::new().fg(BASE01)
+        self.blockquote
     }
 
     fn heading_meta(&self) -> Style {
-        Style::new().fg(BASE01)
+        self.heading_meta
     }
 
     fn metadata_block(&self) -> Style {
-        Style::new().fg(YELLOW)
+        self.metadata_block
     }
 }
 
+/// ChatTheme — rendering contract. Views use this, never opaline directly.
 pub struct ChatTheme {
     pub title_bar: Style,
     pub title_text: Style,
@@ -83,9 +98,101 @@ pub struct ChatTheme {
     pub picker_desc: Style,
     pub spinner: Style,
     pub tip_command: Style,
+    /// Background color for code blocks (used by ThemeStyleSheet).
+    pub code_bg: Color,
+    /// Background color for overlays (picker backdrop etc.).
+    pub backdrop_color: Color,
 }
 
+/// Build `ChatTheme` using the default theme.
 pub fn build_theme() -> ChatTheme {
+    build_theme_by_name(DEFAULT_THEME)
+}
+
+/// Build `ChatTheme` from an opaline theme by name, falling back to Solarized Dark.
+pub fn build_theme_by_name(name: &str) -> ChatTheme {
+    match load_by_name(name) {
+        Some(theme) => map_opaline_theme(&theme),
+        None => fallback_theme(),
+    }
+}
+
+/// List all available theme names for the picker UI.
+pub fn available_themes() -> Vec<ThemeInfo> {
+    list_available_themes()
+}
+
+fn map_opaline_theme(theme: &opaline::Theme) -> ChatTheme {
+    let bg_base = to_color(theme.color("bg.base"));
+    let text_primary = to_color(theme.color("text.primary"));
+    let text_secondary = to_color(theme.color("text.secondary"));
+    let text_muted = to_color(theme.color("text.muted"));
+    let accent_primary = to_color(theme.color("accent.primary"));
+    let accent_info = to_color(theme.color("accent.info"));
+    let accent_warning = to_color(theme.color("accent.warning"));
+    let accent_error = to_color(theme.color("accent.error"));
+    let accent_success = to_color(theme.color("accent.success"));
+    let code_plain = to_color(theme.color("code.plain"));
+    let code_bg = to_color(theme.color("code.background"));
+
+    ChatTheme {
+        title_bar: Style::default().fg(text_secondary),
+        title_text: Style::default()
+            .fg(text_primary)
+            .add_modifier(Modifier::BOLD),
+        timeline_bg: Style::default().fg(text_primary),
+        body_text: Style::default().fg(text_primary),
+        dim_text: Style::default().fg(text_muted),
+        bold_text: Style::default()
+            .fg(text_primary)
+            .add_modifier(Modifier::BOLD),
+        marker_response: Style::default().fg(accent_primary),
+        marker_tool: Style::default().fg(accent_success),
+        marker_bash: Style::default().fg(accent_success),
+        marker_thinking: Style::default().fg(accent_warning),
+        marker_warning: Style::default().fg(accent_error),
+        marker_hint: Style::default().fg(accent_warning),
+        tool_label: Style::default()
+            .fg(text_primary)
+            .add_modifier(Modifier::BOLD),
+        tool_target: Style::default().fg(accent_info),
+        diff_add: Style::default().fg(accent_success),
+        diff_del: Style::default().fg(accent_error),
+        code_block: Style::default().fg(code_plain),
+        input_prompt: Style::default().fg(accent_info),
+        input_placeholder: Style::default().fg(text_muted),
+        status_bar: Style::default().fg(text_secondary),
+        status_right: Style::default().fg(text_muted),
+        picker_title: Style::default()
+            .fg(accent_primary)
+            .add_modifier(Modifier::BOLD),
+        picker_item: Style::default().fg(text_primary),
+        picker_selected: Style::default()
+            .fg(accent_info)
+            .add_modifier(Modifier::BOLD),
+        picker_desc: Style::default().fg(text_muted),
+        spinner: Style::default().fg(accent_info),
+        tip_command: Style::default().fg(accent_warning),
+        code_bg,
+        backdrop_color: bg_base,
+    }
+}
+
+/// Solarized Dark fallback — used when opaline fails to load a theme.
+fn fallback_theme() -> ChatTheme {
+    // Solarized Dark palette
+    const BASE03: Color = Color::Rgb(0, 43, 54);
+    const BASE02: Color = Color::Rgb(7, 54, 66);
+    const BASE01: Color = Color::Rgb(88, 110, 117);
+    const BASE0: Color = Color::Rgb(131, 148, 150);
+    const BASE1: Color = Color::Rgb(147, 161, 161);
+    const BASE2: Color = Color::Rgb(238, 232, 213);
+    const YELLOW: Color = Color::Rgb(181, 137, 0);
+    const RED: Color = Color::Rgb(220, 50, 47);
+    const BLUE: Color = Color::Rgb(38, 139, 210);
+    const CYAN: Color = Color::Rgb(42, 161, 152);
+    const GREEN: Color = Color::Rgb(133, 153, 0);
+
     ChatTheme {
         title_bar: Style::default().fg(BASE1),
         title_text: Style::default().fg(BASE2).add_modifier(Modifier::BOLD),
@@ -114,5 +221,29 @@ pub fn build_theme() -> ChatTheme {
         picker_desc: Style::default().fg(BASE01),
         spinner: Style::default().fg(CYAN),
         tip_command: Style::default().fg(YELLOW),
+        code_bg: BASE02,
+        backdrop_color: BASE03,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_theme_loads_successfully() {
+        let theme = build_theme();
+        assert_ne!(theme.body_text, Style::default());
+    }
+
+    #[test]
+    fn fallback_works_for_invalid_name() {
+        let theme = build_theme_by_name("nonexistent-theme-xyz");
+        assert_ne!(theme.body_text, Style::default());
+    }
+
+    #[test]
+    fn available_themes_returns_nonempty() {
+        assert!(!available_themes().is_empty());
     }
 }

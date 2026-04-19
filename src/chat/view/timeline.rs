@@ -1,6 +1,6 @@
 use crate::chat::app::ChatApp;
 use crate::chat::model::{Actor, EntryKind, TimelineEntry};
-use crate::chat::theme::{ChatTheme, SolarizedStyleSheet};
+use crate::chat::theme::{ChatTheme, ThemeStyleSheet};
 use core::cmp;
 use ratatui_core::{
     layout::Rect,
@@ -94,7 +94,7 @@ fn render_entry<'a>(entry: &TimelineEntry, theme: &ChatTheme, _width: u16) -> Ve
                     }
                 } else {
                     // Assistant messages: render markdown with Solarized theme
-                    let opts = tui_markdown::Options::new(SolarizedStyleSheet);
+                    let opts = tui_markdown::Options::new(ThemeStyleSheet::from_chat_theme(theme));
                     let md_text = tui_markdown::from_str_with_options(&entry.body, &opts);
                     for (i, md_line) in md_text.lines.into_iter().enumerate() {
                         let owned_spans: Vec<Span<'a>> = md_line
