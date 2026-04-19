@@ -186,7 +186,7 @@ fn demo_timeline() -> Vec<TimelineEntry> {
             "Found it. Line 67 has a hard guard:\n\n  if area.width < 60 { return; }  // skips mascot entirely",
         ),
         TimelineEntry::response(
-            "The fix: switch to a stacked layout for narrow terminals instead of\nskipping the mascot. I'll also add a snapshot test for width=40.",
+            "The fix: switch to a **stacked layout** for narrow terminals instead of\nskipping the mascot. I'll also add a `snapshot test` for width=40.",
         ),
         TimelineEntry::tool_use(
             "Edit",
@@ -207,7 +207,7 @@ fn demo_timeline() -> Vec<TimelineEntry> {
             "77 tests passed, 0 failed (2.4s)",
         ),
         TimelineEntry::response(
-            "Fixed. Narrow terminals (< 60 cols) now get a stacked layout:\n  Row 1: mascot (3 lines, centered)\n  Row 2: chat timeline (remaining space)\n  Row 3: input + status\n\n77 tests pass including the new narrow-render snapshot.",
+            "**Fixed.** Narrow terminals (< 60 cols) now get a stacked layout:\n\n- Row 1: mascot (3 lines, centered)\n- Row 2: chat timeline (remaining space)\n- Row 3: `input` + `status`\n\n77 tests pass including the new `narrow-render` snapshot.",
         ),
     ]
 }

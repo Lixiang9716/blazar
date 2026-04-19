@@ -12,6 +12,7 @@ ratatui-macros = "0.7"
 ratatui-widgets = "0.3"
 ratatui-crossterm = "0.1"
 ratatui-textarea = { version = "0.9", features = ["crossterm"] }
+tui-markdown = "0.3"
 rusqlite = "0.31"
 serde_json = "1"
 unicode-width = "0.2"

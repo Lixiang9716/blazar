@@ -137,26 +137,52 @@ fn render_entry<'a>(entry: &TimelineEntry, theme: &ChatTheme, _width: u16) -> Ve
     match &entry.kind {
         EntryKind::Message => {
             if !entry.body.is_empty() {
-                let body_style = if entry.actor == Actor::User {
-                    theme.bold_text
+                if entry.actor == Actor::User {
+                    // User messages: plain bold text (no markdown)
+                    let mut body_lines = entry.body.lines();
+                    if let Some(first) = body_lines.next() {
+                        lines.push(Line::from(vec![
+                            Span::raw(MARGIN),
+                            Span::styled("● ", marker_style),
+                            Span::styled(first.to_owned(), theme.bold_text),
+                        ]));
+                    }
+                    for cont in body_lines {
+                        lines.push(Line::from(vec![
+                            Span::raw(INDENT),
+                            Span::styled(cont.to_owned(), theme.bold_text),
+                        ]));
+                    }
                 } else {
-                    theme.body_text
-                };
-                // First line: marker + first line of body
-                let mut body_lines = entry.body.lines();
-                if let Some(first) = body_lines.next() {
-                    lines.push(Line::from(vec![
-                        Span::raw(MARGIN),
-                        Span::styled("● ", marker_style),
-                        Span::styled(first.to_owned(), body_style),
-                    ]));
-                }
-                // Continuation lines: indented without marker
-                for cont in body_lines {
-                    lines.push(Line::from(vec![
-                        Span::raw(INDENT),
-                        Span::styled(cont.to_owned(), body_style),
-                    ]));
+                    // Assistant messages: render markdown
+                    let md_text = tui_markdown::from_str(&entry.body);
+                    for (i, md_line) in md_text.lines.into_iter().enumerate() {
+                        let owned_spans: Vec<Span<'a>> = md_line
+                            .spans
+                            .into_iter()
+                            .map(|s| Span::styled(s.content.into_owned(), s.style))
+                            .collect();
+
+                        if i == 0 {
+                            let mut first = vec![
+                                Span::raw(MARGIN),
+                                Span::styled("● ", marker_style),
+                            ];
+                            first.extend(owned_spans);
+                            lines.push(Line::from(first));
+                        } else {
+                            let mut cont = vec![Span::raw(INDENT)];
+                            cont.extend(owned_spans);
+                            lines.push(Line::from(cont));
+                        }
+                    }
+                    // Fallback if markdown produced nothing
+                    if lines.is_empty() {
+                        lines.push(Line::from(vec![
+                            Span::raw(MARGIN),
+                            Span::styled("● ", marker_style),
+                        ]));
+                    }
                 }
             } else {
                 lines.push(Line::from(vec![
