@@ -1,6 +1,7 @@
 pub mod app;
 pub mod git;
 pub mod input;
+pub mod launcher;
 pub mod model;
 pub mod session;
 pub mod theme;

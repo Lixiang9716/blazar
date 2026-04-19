@@ -151,8 +151,7 @@ mod tests {
 
     #[test]
     fn workspace_catalog_path_uses_explicit_absolute_fallback_when_home_is_unavailable() {
-        let path =
-            workspace_catalog_path_from_home(None, Some(Path::new("/workspace")), None);
+        let path = workspace_catalog_path_from_home(None, Some(Path::new("/workspace")), None);
 
         assert_eq!(
             path,
