@@ -1,7 +1,7 @@
 // Tests for SessionSummary::load_from_dir() — uses a temp session dir fixture.
 use blazar::chat::session::SessionSummary;
 use rusqlite::Connection;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn unique_dir(prefix: &str) -> PathBuf {
@@ -12,7 +12,7 @@ fn unique_dir(prefix: &str) -> PathBuf {
     std::env::temp_dir().join(format!("{prefix}-{nanos}"))
 }
 
-fn create_session_fixture(base: &PathBuf) {
+fn create_session_fixture(base: &Path) {
     std::fs::create_dir_all(base.join("checkpoints")).unwrap();
 
     std::fs::write(

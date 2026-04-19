@@ -279,7 +279,7 @@ fn new_for_test_git_summary_is_deterministic() {
     assert_eq!(app.git_summary().staged, 1);
     assert_eq!(app.git_summary().unstaged, 3);
     assert!(
-        app.git_summary().recent_commits.len() >= 1,
+        !app.git_summary().recent_commits.is_empty(),
         "for_test should have at least one commit"
     );
 }
