@@ -6,3 +6,4 @@ pub mod session;
 pub mod theme;
 pub mod view;
 pub mod workspace;
+pub mod workspace_catalog;
