@@ -53,6 +53,20 @@ fn empty_launcher_renders_empty_state_without_panicking() {
 }
 
 #[test]
+fn narrow_empty_launcher_renders_empty_state_without_workspace_list() {
+    let app = LauncherApp::new(vec![]);
+
+    let lines = render_launcher_to_lines_for_test(&app, 72, 28);
+    let all = lines.join("\n");
+
+    assert!(all.contains("Workspace Launcher"));
+    assert!(all.contains("No workspaces yet"));
+    assert!(all.contains("Open Blazar from a repo"));
+    assert!(all.contains("to populate this launcher"));
+    assert!(!all.contains("Recent workspaces"));
+}
+
+#[test]
 fn launcher_test_helper_matches_buffer_extraction_for_wide_glyphs() {
     let app = LauncherApp::new(vec![WorkspaceRecord::named(
         "星糖-lab",
