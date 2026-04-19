@@ -61,7 +61,8 @@ pub fn render_frame(frame: &mut Frame, app: &ChatApp, _tick_ms: u64) {
     frame.render_widget(bg_block, area);
 
     // Vertical layout: welcome_banner | timeline | separator | input | status_bar
-    let [banner, timeline, sep, input, status] = vertical![==6, >=1, ==1, ==3, ==1].areas(area);
+    // Banner: 2 border + 9 slime rows + 1 padding = 12
+    let [banner, timeline, sep, input, status] = vertical![==12, >=1, ==1, ==3, ==1].areas(area);
 
     render_welcome_banner(frame, banner, app, &theme);
     render_timeline(frame, timeline, app, &theme);
@@ -78,14 +79,16 @@ pub fn render_frame(frame: &mut Frame, app: &ChatApp, _tick_ms: u64) {
 fn render_welcome_banner(frame: &mut Frame, area: Rect, app: &ChatApp, theme: &ChatTheme) {
     let version = env!("CARGO_PKG_VERSION");
 
-    // Get mascot sprite lines — skip leading blank rows, take 4 visible rows
-    let mascot_lines = render_mascot_lines(WelcomeState::new(), 0);
+    // Animate mascot: use tick_count to advance frames
+    let mascot_lines = render_mascot_lines(WelcomeState::new(), app.tick_count() * 200);
     let mascot_rows: Vec<Line<'static>> = mascot_lines
         .into_iter()
         .skip_while(|line| {
             line.width() == 0 || line.spans.iter().all(|s| s.content.trim().is_empty())
         })
-        .take(4)
+        .take_while(|line| {
+            line.width() > 0 && !line.spans.iter().all(|s| s.content.trim().is_empty())
+        })
         .collect();
     let mascot_width = mascot_rows.first().map(|l| l.width()).unwrap_or(0) as u16;
 
@@ -95,7 +98,7 @@ fn render_welcome_banner(frame: &mut Frame, area: Rect, app: &ChatApp, theme: &C
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    if inner.width < 2 || inner.height < 4 {
+    if inner.width < 2 || inner.height < 2 {
         return;
     }
 
@@ -103,11 +106,19 @@ fn render_welcome_banner(frame: &mut Frame, area: Rect, app: &ChatApp, theme: &C
     let mascot_col_width = cmp::min(mascot_width + 1, inner.width / 3);
     let [mascot_area, text_area] = horizontal![==(mascot_col_width), >=1].areas(inner);
 
-    // Render mascot sprite
+    // Render mascot sprite — vertically centered in its area
+    let mascot_h = mascot_rows.len() as u16;
+    let y_offset = mascot_area.height.saturating_sub(mascot_h) / 2;
+    let centered_mascot = Rect::new(
+        mascot_area.x,
+        mascot_area.y + y_offset,
+        mascot_area.width,
+        cmp::min(mascot_h, mascot_area.height),
+    );
     let mascot_paragraph = Paragraph::new(mascot_rows);
-    frame.render_widget(mascot_paragraph, mascot_area);
+    frame.render_widget(mascot_paragraph, centered_mascot);
 
-    // Render text beside mascot with highlighted tip command
+    // Render text beside mascot — vertically centered
     let text_lines = vec![
         Line::from(vec![
             Span::styled("Blazar", theme.title_text),
@@ -127,8 +138,16 @@ fn render_welcome_banner(frame: &mut Frame, area: Rect, app: &ChatApp, theme: &C
             ),
         ]),
     ];
+    let text_h = text_lines.len() as u16;
+    let text_y_offset = text_area.height.saturating_sub(text_h) / 2;
+    let centered_text = Rect::new(
+        text_area.x,
+        text_area.y + text_y_offset,
+        text_area.width,
+        cmp::min(text_h, text_area.height),
+    );
     let text_paragraph = Paragraph::new(text_lines);
-    frame.render_widget(text_paragraph, text_area);
+    frame.render_widget(text_paragraph, centered_text);
 
     // Spinner in top-right corner of banner area
     let spinner_chars = ['◐', '◓', '◑', '◒'];
