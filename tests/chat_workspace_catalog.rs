@@ -5,22 +5,12 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[test]
-fn startup_prefers_last_workspace_when_valid_and_launcher_not_forced() {
+fn startup_prefers_last_opened_path_when_valid_and_launcher_not_forced() {
     let repo_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let repo_path_text = repo_path.display().to_string();
     let catalog = WorkspaceCatalog {
         last_opened: Some(repo_path_text.clone()),
-        workspaces: vec![WorkspaceRecord {
-            name: "blazar".to_string(),
-            repo_path: repo_path_text.clone(),
-            branch: "master".to_string(),
-            dirty: false,
-            last_session_label: Some("session-a".to_string()),
-            last_intent: Some("Designing launcher".to_string()),
-            latest_checkpoint: Some("Checkpoint 010".to_string()),
-            ready_todos: 5,
-            last_opened_at: 42,
-        }],
+        workspaces: vec![],
     };
 
     let decision = catalog.decide_startup(StartupPreference {
@@ -32,6 +22,32 @@ fn startup_prefers_last_workspace_when_valid_and_launcher_not_forced() {
         decision,
         LaunchDecision::Resume {
             repo_path,
+            initial_view: None,
+        }
+    );
+}
+
+#[test]
+fn startup_prefers_last_opened_before_repo_path_hint_when_both_are_valid() {
+    let last_opened = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let repo_path_hint = last_opened
+        .parent()
+        .expect("workspace root should have a parent")
+        .to_path_buf();
+    let catalog = WorkspaceCatalog {
+        last_opened: Some(last_opened.display().to_string()),
+        workspaces: vec![],
+    };
+
+    let decision = catalog.decide_startup(StartupPreference {
+        repo_path_hint: Some(repo_path_hint),
+        force_launcher: false,
+    });
+
+    assert_eq!(
+        decision,
+        LaunchDecision::Resume {
+            repo_path: last_opened,
             initial_view: None,
         }
     );
