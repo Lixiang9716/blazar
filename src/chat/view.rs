@@ -155,11 +155,11 @@ fn render_welcome_banner(
     let text_paragraph = Paragraph::new(text_lines);
     frame.render_widget(text_paragraph, centered_text);
 
-    // Spinner in top-right corner of banner area
+    // Spinner in top-right corner inside the border
     let spinner_chars = ['◐', '◓', '◑', '◒'];
     let spinner_ch = spinner_chars[(app.tick_count() as usize / 4) % spinner_chars.len()];
-    if area.width > 4 && area.height > 0 {
-        let spinner_area = Rect::new(area.right().saturating_sub(3), area.y, 2, 1);
+    if inner.width > 2 && inner.height > 0 {
+        let spinner_area = Rect::new(inner.right().saturating_sub(2), inner.y, 1, 1);
         let spinner = Paragraph::new(Line::from(Span::styled(
             spinner_ch.to_string(),
             theme.spinner,
