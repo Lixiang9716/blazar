@@ -56,11 +56,12 @@ pub fn render_frame(frame: &mut Frame, app: &ChatApp, _tick_ms: u64) {
     let bg_block = Block::default().style(theme.timeline_bg);
     frame.render_widget(bg_block, area);
 
-    // Vertical layout: title_bar | timeline | input | status_bar
-    let [title, timeline, input, status] = vertical![==1, >=1, ==3, ==1].areas(area);
+    // Vertical layout: title_bar | timeline | separator | input | status_bar
+    let [title, timeline, sep, input, status] = vertical![==1, >=1, ==1, ==3, ==1].areas(area);
 
     render_title_bar(frame, title, app, &theme);
     render_timeline(frame, timeline, app, &theme);
+    render_separator(frame, sep, &theme);
     render_input(frame, input, app, &theme);
     render_status_bar(frame, status, app, &theme);
 }
@@ -131,12 +132,12 @@ fn render_entry<'a>(entry: &TimelineEntry, theme: &ChatTheme, _width: u16) -> Ve
         EntryKind::Message => {
             if !entry.body.is_empty() {
                 if entry.actor == Actor::User {
-                    // User messages: plain bold text (no markdown)
+                    // User messages: `›` prefix, plain bold text (no markdown)
                     let mut body_lines = entry.body.lines();
                     if let Some(first) = body_lines.next() {
                         lines.push(Line::from(vec![
                             Span::raw(MARGIN),
-                            Span::styled("● ", marker_style),
+                            Span::styled("› ", marker_style),
                             Span::styled(first.to_owned(), theme.bold_text),
                         ]));
                     }
@@ -288,7 +289,7 @@ fn render_input(frame: &mut Frame, area: Rect, app: &ChatApp, theme: &ChatTheme)
     // Show placeholder if composer is empty
     if app.composer_text().is_empty() {
         let placeholder = Paragraph::new(Line::from(Span::styled(
-            "Ask blazar…",
+            "Type @ to mention files, / for commands, or ? for shortcuts",
             theme.input_placeholder,
         )))
         .style(theme.timeline_bg);
@@ -299,13 +300,24 @@ fn render_input(frame: &mut Frame, area: Rect, app: &ChatApp, theme: &ChatTheme)
     }
 }
 
-fn render_status_bar(frame: &mut Frame, area: Rect, app: &ChatApp, theme: &ChatTheme) {
-    let display_path = app.display_path();
-    let branch = app.branch();
-    let left = format!("blazar • {display_path} • {branch}");
+fn render_separator(frame: &mut Frame, area: Rect, theme: &ChatTheme) {
+    let model_label = "blazar-dev";
+    let model_len = model_label.len();
+    let line_len = (area.width as usize).saturating_sub(model_len + 1);
 
-    let status_label = app.status_label();
-    let right_len = status_label.len();
+    let line = Line::from(vec![
+        Span::styled("─".repeat(line_len), theme.dim_text),
+        Span::raw(" "),
+        Span::styled(model_label, theme.status_right),
+    ]);
+    let bar = Paragraph::new(line);
+    frame.render_widget(bar, area);
+}
+
+fn render_status_bar(frame: &mut Frame, area: Rect, _app: &ChatApp, theme: &ChatTheme) {
+    let left = "shift+tab switch mode";
+    let right = "ready";
+    let right_len = right.len();
 
     // Right-align the status label
     let available = area.width as usize;
@@ -314,7 +326,7 @@ fn render_status_bar(frame: &mut Frame, area: Rect, app: &ChatApp, theme: &ChatT
     let line = Line::from(vec![
         Span::styled(left, theme.status_bar),
         Span::styled(" ".repeat(gap), theme.status_bar),
-        Span::styled(status_label, theme.status_right),
+        Span::styled(right, theme.status_right),
     ]);
 
     let bar = Paragraph::new(line).style(theme.status_bar);

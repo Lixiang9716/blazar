@@ -1,6 +1,5 @@
 ---
 source: tests/chat_render_snapshot.rs
-assertion_line: 10
 expression: "lines.join(\"\\n\")"
 ---
                       blazar — ~/blazar                     
@@ -18,8 +17,8 @@ expression: "lines.join(\"\\n\")"
                                                             
                                                             
                                                             
+───────────────────────────────────────────────── blazar-dev
+› Type @ to mention files, / for commands, or ? for shortcut
                                                             
-› Ask blazar…                                               
                                                             
-                                                            
-blazar • ~/blazar • master                         ready
+shift+tab switch mode                                  ready
