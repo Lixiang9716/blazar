@@ -541,7 +541,7 @@ pub fn run_terminal_chat(
         let tick_ms = start_time.elapsed().as_millis() as u64;
         app.tick();
 
-        terminal.draw(|frame| render_frame(frame, &app, tick_ms))?;
+        terminal.draw(|frame| render_frame(frame, &mut app, tick_ms))?;
 
         if event::poll(Duration::from_millis(100))? {
             match event::read()? {

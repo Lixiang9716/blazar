@@ -21,7 +21,7 @@ use tui_overlay::{Anchor, Backdrop, Overlay, Slide};
 use tui_widget_list::{ListBuilder, ListView};
 use unicode_width::UnicodeWidthStr;
 
-pub fn render_to_lines_for_test(app: &ChatApp, width: u16, height: u16) -> Vec<String> {
+pub fn render_to_lines_for_test(app: &mut ChatApp, width: u16, height: u16) -> Vec<String> {
     if width == 0 || height == 0 {
         return Vec::new();
     }
@@ -53,7 +53,7 @@ pub fn render_to_lines_for_test(app: &ChatApp, width: u16, height: u16) -> Vec<S
         .collect()
 }
 
-pub fn render_frame(frame: &mut Frame, app: &ChatApp, tick_ms: u64) {
+pub fn render_frame(frame: &mut Frame, app: &mut ChatApp, tick_ms: u64) {
     let theme = build_theme();
     let area = frame.area();
 
@@ -457,11 +457,16 @@ fn render_status_bar(frame: &mut Frame, area: Rect, _app: &ChatApp, theme: &Chat
     frame.render_widget(bar, area);
 }
 
-fn render_picker(frame: &mut Frame, full_area: Rect, app: &ChatApp, theme: &ChatTheme) {
+fn render_picker(frame: &mut Frame, full_area: Rect, app: &mut ChatApp, theme: &ChatTheme) {
     use crate::chat::picker::PICKER_PAGE_SIZE;
 
-    let filtered = app.picker.filtered_items();
-    let total = filtered.len();
+    let filtered_items: Vec<(String, String)> = app
+        .picker
+        .filtered_items()
+        .into_iter()
+        .map(|item| (item.label.clone(), item.description.clone()))
+        .collect();
+    let total = filtered_items.len();
     if full_area.width < 8 || full_area.height < 6 {
         return;
     }
@@ -471,7 +476,6 @@ fn render_picker(frame: &mut Frame, full_area: Rect, app: &ChatApp, theme: &Chat
     let picker_h = cmp::min(visible_count + 4, full_area.height.saturating_sub(2));
     let picker_w = cmp::min(50, full_area.width.saturating_sub(4));
 
-    let mut overlay_state = app.picker.overlay_state().clone();
     let overlay = Overlay::new()
         .anchor(Anchor::BottomLeft)
         .offset(2, -2)
@@ -488,9 +492,9 @@ fn render_picker(frame: &mut Frame, full_area: Rect, app: &ChatApp, theme: &Chat
                     theme.picker_title,
                 ))),
         );
-    frame.render_stateful_widget(overlay, full_area, &mut overlay_state);
+    frame.render_stateful_widget(overlay, full_area, app.picker.overlay_state_mut());
 
-    let Some(inner) = overlay_state.inner_area() else {
+    let Some(inner) = app.picker.overlay_state().inner_area() else {
         return;
     };
     if inner.height < 2 || inner.width < 4 || picker_h == 0 || picker_w == 0 {
@@ -501,17 +505,34 @@ fn render_picker(frame: &mut Frame, full_area: Rect, app: &ChatApp, theme: &Chat
     let items_h = inner.height.saturating_sub(1);
     let [items_area, footer_area] = vertical![>=(items_h), ==1].areas(inner);
 
+    let has_up = app.picker.has_scroll_up();
+    let has_down = app.picker.has_scroll_down();
+    let top_hint = u16::from(has_up);
+    let bottom_hint = u16::from(has_down);
+    if items_area.height <= top_hint + bottom_hint {
+        return;
+    }
+    let [top_hint_area, list_area, bottom_hint_area] =
+        vertical![==(top_hint), >=1, ==(bottom_hint)].areas(items_area);
+
+    if has_up {
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled("  ▲ more", theme.dim_text))),
+            top_hint_area,
+        );
+    }
+
     if total == 0 {
         frame.render_widget(
             Paragraph::new(Line::from(Span::styled(
                 "  No matching commands",
                 theme.dim_text,
             ))),
-            items_area,
+            list_area,
         );
     } else {
         let list_builder = ListBuilder::new(|context| {
-            let item = filtered[context.index];
+            let item = &filtered_items[context.index];
             let marker = if context.is_selected { "› " } else { "  " };
             let label_style = if context.is_selected {
                 theme.picker_selected
@@ -521,20 +542,23 @@ fn render_picker(frame: &mut Frame, full_area: Rect, app: &ChatApp, theme: &Chat
 
             let mut spans = vec![
                 Span::styled(marker, label_style),
-                Span::styled(item.label.clone(), label_style),
+                Span::styled(item.0.clone(), label_style),
             ];
-            if !item.description.is_empty() {
-                spans.push(Span::styled(
-                    format!("  {}", item.description),
-                    theme.picker_desc,
-                ));
+            if !item.1.is_empty() {
+                spans.push(Span::styled(format!("  {}", item.1), theme.picker_desc));
             }
 
             (Line::from(spans), 1)
         });
         let list = ListView::new(list_builder, total).scroll_padding(1);
-        let mut list_state = app.picker.list_state().clone();
-        frame.render_stateful_widget(list, items_area, &mut list_state);
+        frame.render_stateful_widget(list, list_area, app.picker.list_state_mut());
+    }
+
+    if has_down {
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled("  ▼ more", theme.dim_text))),
+            bottom_hint_area,
+        );
     }
 
     // Footer with count info

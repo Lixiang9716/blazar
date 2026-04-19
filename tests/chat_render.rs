@@ -6,8 +6,8 @@ const REPO_ROOT: &str = env!("CARGO_MANIFEST_DIR");
 
 #[test]
 fn chat_view_renders_title_bar_and_timeline() {
-    let app = ChatApp::new_for_test(REPO_ROOT);
-    let lines = render_to_lines_for_test(&app, 100, 35);
+    let mut app = ChatApp::new_for_test(REPO_ROOT);
+    let lines = render_to_lines_for_test(&mut app, 100, 35);
 
     assert!(
         lines.iter().any(|line| line.contains("blazar")),
@@ -23,8 +23,8 @@ fn chat_view_renders_title_bar_and_timeline() {
 
 #[test]
 fn chat_view_renders_status_bar() {
-    let app = ChatApp::new_for_test(REPO_ROOT);
-    let lines = render_to_lines_for_test(&app, 100, 35);
+    let mut app = ChatApp::new_for_test(REPO_ROOT);
+    let lines = render_to_lines_for_test(&mut app, 100, 35);
 
     assert!(
         lines.iter().any(|line| line.contains("commands")),
@@ -44,7 +44,7 @@ fn slash_opens_command_picker_overlay() {
         KeyModifiers::NONE,
     )));
 
-    let lines = render_to_lines_for_test(&app, 100, 35);
+    let lines = render_to_lines_for_test(&mut app, 100, 35);
 
     assert!(
         lines.iter().any(|line| line.contains("Commands")),
@@ -72,7 +72,7 @@ fn picker_navigation_reaches_later_commands() {
         app.handle_action(InputAction::PickerDown);
     }
 
-    let lines = render_to_lines_for_test(&app, 100, 35);
+    let lines = render_to_lines_for_test(&mut app, 100, 35);
 
     assert!(
         lines
@@ -84,8 +84,8 @@ fn picker_navigation_reaches_later_commands() {
 
 #[test]
 fn timeline_does_not_emit_raw_ansi_escape_sequences() {
-    let app = ChatApp::new_for_test(REPO_ROOT);
-    let lines = render_to_lines_for_test(&app, 100, 35);
+    let mut app = ChatApp::new_for_test(REPO_ROOT);
+    let lines = render_to_lines_for_test(&mut app, 100, 35);
 
     assert!(
         lines.iter().all(|line| !line.contains('\u{1b}')),
@@ -95,8 +95,8 @@ fn timeline_does_not_emit_raw_ansi_escape_sequences() {
 
 #[test]
 fn timeline_entries_have_identity_markers() {
-    let app = ChatApp::new_for_test(REPO_ROOT);
-    let lines = render_to_lines_for_test(&app, 100, 35);
+    let mut app = ChatApp::new_for_test(REPO_ROOT);
+    let lines = render_to_lines_for_test(&mut app, 100, 35);
 
     assert!(
         lines.iter().any(|line| line.contains('●')),
@@ -108,10 +108,10 @@ fn timeline_entries_have_identity_markers() {
 fn title_bar_uses_terminal_default_background() {
     let backend = TestBackend::new(100, 35);
     let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
-    let app = ChatApp::new_for_test(REPO_ROOT);
+    let mut app = ChatApp::new_for_test(REPO_ROOT);
 
     terminal
-        .draw(|frame| render_frame(frame, &app, 1_200))
+        .draw(|frame| render_frame(frame, &mut app, 1_200))
         .expect("chat frame should render");
 
     // Title bar is row 0 — background should be the terminal default (no override)
@@ -120,6 +120,29 @@ fn title_bar_uses_terminal_default_background() {
         first_row_cell.bg,
         Color::Reset,
         "title bar should use the terminal default background"
+    );
+}
+
+#[test]
+fn picker_render_persists_overlay_layout_state() {
+    use blazar::chat::input::InputAction;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    let backend = TestBackend::new(100, 35);
+    let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
+    let mut app = ChatApp::new_for_test(REPO_ROOT);
+    app.handle_action(InputAction::Key(KeyEvent::new(
+        KeyCode::Char('/'),
+        KeyModifiers::NONE,
+    )));
+
+    terminal
+        .draw(|frame| render_frame(frame, &mut app, 1_200))
+        .expect("chat frame should render");
+
+    assert!(
+        app.picker.overlay_state().inner_area().is_some(),
+        "picker overlay layout should persist in picker state after render"
     );
 }
 
@@ -132,7 +155,7 @@ fn interactive_send_message_shows_echo_response() {
     let mut app = ChatApp::new_for_test(REPO_ROOT);
 
     // Step 1: initial state — only greeting visible
-    let lines_before = render_to_lines_for_test(&app, 80, 35);
+    let lines_before = render_to_lines_for_test(&mut app, 80, 35);
     assert!(
         lines_before
             .iter()
@@ -153,7 +176,7 @@ fn interactive_send_message_shows_echo_response() {
         KeyCode::Char('i'),
         KeyModifiers::NONE,
     )));
-    let lines_typing = render_to_lines_for_test(&app, 80, 35);
+    let lines_typing = render_to_lines_for_test(&mut app, 80, 35);
     assert!(
         lines_typing.iter().any(|l| l.contains("hi")),
         "composer should show typed characters"
@@ -163,7 +186,7 @@ fn interactive_send_message_shows_echo_response() {
     app.handle_action(InputAction::Submit);
 
     // Step 4: verify the echo response appeared in the rendered output
-    let lines_after = render_to_lines_for_test(&app, 80, 35);
+    let lines_after = render_to_lines_for_test(&mut app, 80, 35);
     assert!(
         lines_after.iter().any(|l| l.contains("I hear you")),
         "echo response should appear after submit"

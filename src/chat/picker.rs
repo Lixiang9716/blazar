@@ -90,8 +90,16 @@ impl ModalPicker {
         &self.overlay_state
     }
 
+    pub fn overlay_state_mut(&mut self) -> &mut OverlayState {
+        &mut self.overlay_state
+    }
+
     pub fn list_state(&self) -> &ListState {
         &self.list_state
+    }
+
+    pub fn list_state_mut(&mut self) -> &mut ListState {
+        &mut self.list_state
     }
 
     pub fn selected_index(&self) -> Option<usize> {
