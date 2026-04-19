@@ -7,7 +7,7 @@ const REPO_ROOT: &str = env!("CARGO_MANIFEST_DIR");
 #[test]
 fn chat_view_renders_title_bar_and_timeline() {
     let app = ChatApp::new_for_test(REPO_ROOT);
-    let lines = render_to_lines_for_test(&app, 100, 30);
+    let lines = render_to_lines_for_test(&app, 100, 35);
 
     assert!(
         lines.iter().any(|line| line.contains("blazar")),
@@ -24,18 +24,18 @@ fn chat_view_renders_title_bar_and_timeline() {
 #[test]
 fn chat_view_renders_status_bar() {
     let app = ChatApp::new_for_test(REPO_ROOT);
-    let lines = render_to_lines_for_test(&app, 100, 30);
+    let lines = render_to_lines_for_test(&app, 100, 35);
 
     assert!(
-        lines.iter().any(|line| line.contains("ready")),
-        "status bar should show 'ready'"
+        lines.iter().any(|line| line.contains("commands")),
+        "status bar should show '/ commands'"
     );
 }
 
 #[test]
 fn timeline_does_not_emit_raw_ansi_escape_sequences() {
     let app = ChatApp::new_for_test(REPO_ROOT);
-    let lines = render_to_lines_for_test(&app, 100, 30);
+    let lines = render_to_lines_for_test(&app, 100, 35);
 
     assert!(
         lines.iter().all(|line| !line.contains('\u{1b}')),
@@ -46,7 +46,7 @@ fn timeline_does_not_emit_raw_ansi_escape_sequences() {
 #[test]
 fn timeline_entries_have_identity_markers() {
     let app = ChatApp::new_for_test(REPO_ROOT);
-    let lines = render_to_lines_for_test(&app, 100, 30);
+    let lines = render_to_lines_for_test(&app, 100, 35);
 
     assert!(
         lines.iter().any(|line| line.contains('●')),
@@ -56,7 +56,7 @@ fn timeline_entries_have_identity_markers() {
 
 #[test]
 fn title_bar_uses_terminal_default_background() {
-    let backend = TestBackend::new(100, 30);
+    let backend = TestBackend::new(100, 35);
     let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
     let app = ChatApp::new_for_test(REPO_ROOT);
 

@@ -60,12 +60,14 @@ pub fn render_frame(frame: &mut Frame, app: &ChatApp, tick_ms: u64) {
     let bg_block = Block::default().style(theme.timeline_bg);
     frame.render_widget(bg_block, area);
 
-    // Vertical layout: welcome_banner | timeline | separator | input | status_bar
-    // Banner: 2 border + 9 slime rows + 1 padding = 12
-    let [banner, timeline, sep, input, status] = vertical![==12, >=1, ==1, >=5, ==1].areas(area);
+    // Vertical layout: welcome_banner | timeline | hint | separator | input | status_bar
+    // Matches Copilot: thin "··" hint row, single-line separator, 1-row input, status bar
+    let [banner, timeline, hint_row, sep, input, status] =
+        vertical![==12, >=1, ==1, ==1, ==1, ==1].areas(area);
 
     render_welcome_banner(frame, banner, app, tick_ms, &theme);
     render_timeline(frame, timeline, app, &theme);
+    render_hint_row(frame, hint_row, &theme);
     render_separator(frame, sep, &theme);
     render_input(frame, input, app, &theme);
     render_status_bar(frame, status, app, &theme);
@@ -397,47 +399,40 @@ fn marker_style_for(entry: &TimelineEntry, theme: &ChatTheme) -> Style {
 }
 
 fn render_input(frame: &mut Frame, area: Rect, app: &ChatApp, theme: &ChatTheme) {
-    // Render prompt "›" on the left, TextArea takes the rest
     let [prompt_area, composer_area] = horizontal![==2, >=1].areas(area);
 
-    // Prompt character on the first line
     let prompt =
         Paragraph::new(Line::from(Span::styled("› ", theme.input_prompt))).style(theme.timeline_bg);
     frame.render_widget(prompt, prompt_area);
 
-    // Show placeholder if composer is empty, otherwise render the multiline TextArea
     if app.composer_text().is_empty() {
-        let placeholder = Paragraph::new(Line::from(Span::styled(
-            "Type @ to mention files, # for issues/PRs, / for commands, or ? for shortcuts",
-            theme.input_placeholder,
-        )))
-        .wrap(Wrap { trim: false })
-        .style(theme.timeline_bg);
-        frame.render_widget(placeholder, composer_area);
+        // Empty — show nothing, just the cursor position
+        let empty = Paragraph::new("").style(theme.timeline_bg);
+        frame.render_widget(empty, composer_area);
     } else {
         let composer = app.composer();
         frame.render_widget(composer, composer_area);
     }
 }
 
-fn render_separator(frame: &mut Frame, area: Rect, theme: &ChatTheme) {
-    let model_label = "blazar-dev (local)";
-    let model_len = model_label.len();
-    let line_len = (area.width as usize).saturating_sub(model_len + 1);
+fn render_hint_row(frame: &mut Frame, area: Rect, theme: &ChatTheme) {
+    let line = Line::from(vec![Span::styled("··", theme.dim_text)]);
+    let bar = Paragraph::new(line);
+    frame.render_widget(bar, area);
+}
 
-    let line = Line::from(vec![
-        Span::styled("═".repeat(line_len), theme.dim_text),
-        Span::raw(" "),
-        Span::styled(model_label, theme.status_right),
-    ]);
+fn render_separator(frame: &mut Frame, area: Rect, theme: &ChatTheme) {
+    let line = Line::from(Span::styled(
+        "─".repeat(area.width as usize),
+        theme.dim_text,
+    ));
     let bar = Paragraph::new(line);
     frame.render_widget(bar, area);
 }
 
 fn render_status_bar(frame: &mut Frame, area: Rect, _app: &ChatApp, theme: &ChatTheme) {
-    let version = env!("CARGO_PKG_VERSION");
-    let left = format!("v{version} · shift+tab switch mode");
-    let right = "ready";
+    let left = "/ commands · ? help";
+    let right = "blazar-dev (local)";
 
     let available = area.width as usize;
     let gap = available.saturating_sub(left.len() + right.len());
