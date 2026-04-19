@@ -164,3 +164,72 @@ fn workspace_default_view_is_chat() {
         "Chat must be the default home view"
     );
 }
+
+#[test]
+fn digit_shortcuts_from_footer_switch_views_in_non_chat_view() {
+    let mut app = WorkspaceApp::new_for_test(REPO_ROOT);
+
+    // Switch to Git view first (focus becomes Content)
+    app.handle_action(InputAction::from_key_event(KeyEvent::new(
+        KeyCode::Char('2'),
+        KeyModifiers::NONE,
+    )));
+    assert_eq!(app.active_view(), WorkspaceView::Git);
+
+    // Cycle focus to Footer
+    app.handle_action(InputAction::from_key_event(KeyEvent::new(
+        KeyCode::Tab,
+        KeyModifiers::NONE,
+    )));
+    assert_eq!(app.focus(), WorkspaceFocus::Footer);
+
+    // Press '1' while in Git view with Footer focus → should switch to Chat view, not type into composer
+    app.handle_action(InputAction::from_key_event(KeyEvent::new(
+        KeyCode::Char('1'),
+        KeyModifiers::NONE,
+    )));
+    assert_eq!(
+        app.active_view(),
+        WorkspaceView::Chat,
+        "pressing '1' in non-chat footer should switch to Chat view"
+    );
+    assert_eq!(
+        app.chat().composer_text(),
+        "",
+        "pressing '1' in non-chat footer must not type into the composer"
+    );
+}
+
+#[test]
+fn digit_shortcuts_from_footer_in_chat_view_still_type_into_composer() {
+    let mut app = WorkspaceApp::new_for_test(REPO_ROOT);
+    // default is Chat view
+    assert_eq!(app.active_view(), WorkspaceView::Chat);
+
+    // Cycle focus twice to reach Footer
+    app.handle_action(InputAction::from_key_event(KeyEvent::new(
+        KeyCode::Tab,
+        KeyModifiers::NONE,
+    )));
+    app.handle_action(InputAction::from_key_event(KeyEvent::new(
+        KeyCode::Tab,
+        KeyModifiers::NONE,
+    )));
+    assert_eq!(app.focus(), WorkspaceFocus::Footer);
+
+    // Press '2' while in Chat view with Footer focus → should type into composer
+    app.handle_action(InputAction::from_key_event(KeyEvent::new(
+        KeyCode::Char('2'),
+        KeyModifiers::NONE,
+    )));
+    assert_eq!(
+        app.active_view(),
+        WorkspaceView::Chat,
+        "view must not change when typing in chat footer"
+    );
+    assert_eq!(
+        app.chat().composer_text(),
+        "2",
+        "pressing '2' in chat footer must type into the composer"
+    );
+}

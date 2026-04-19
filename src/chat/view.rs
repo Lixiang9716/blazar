@@ -169,15 +169,8 @@ fn render_workspace_narrow(frame: &mut Frame, app: &WorkspaceApp, area: Rect) {
         }
     }
 
-    // Footer / composer
-    let footer_block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(theme.panel_border)
-        .title("Ask Spirit");
-    let footer_inner = footer_block.inner(rows[2]);
-    frame.render_widget(footer_block, rows[2]);
-    let composer = app.chat().composer();
-    frame.render_widget(composer, footer_inner);
+    // Footer
+    render_footer(frame, rows[2], app, &theme);
 }
 
 fn render_workspace_wide(frame: &mut Frame, app: &WorkspaceApp, tick_ms: u64, area: Rect) {
@@ -264,17 +257,8 @@ fn render_workspace_wide(frame: &mut Frame, app: &WorkspaceApp, tick_ms: u64, ar
         }
     }
 
-    // Footer / composer title - render the block, then render the composer into the block's inner area
-    let footer_block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(theme.panel_border)
-        .title("Ask Spirit");
-    // compute inner rect using Block::inner before moving the block into render_widget
-    let footer_inner = footer_block.inner(rows[2]);
-    frame.render_widget(footer_block, rows[2]);
-    // render the actual composer TextArea from the chat app into the footer inner area
-    let composer = app.chat().composer();
-    frame.render_widget(composer, footer_inner);
+    // Footer
+    render_footer(frame, rows[2], app, &theme);
 }
 
 fn render_chat_pane(
@@ -371,23 +355,33 @@ fn render_git_panel(
         summary.ahead, summary.behind, summary.staged, summary.unstaged
     )));
 
-    if !summary.changed_files.is_empty() {
-        lines.push(Line::from(""));
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "Changed files:",
+        Style::default().fg(Color::Cyan),
+    )));
+    if summary.changed_files.is_empty() {
         lines.push(Line::from(Span::styled(
-            "Changed files:",
-            Style::default().fg(Color::Cyan),
+            "  Working tree clean",
+            Style::default().fg(Color::Green),
         )));
+    } else {
         for f in &summary.changed_files {
             lines.push(Line::from(format!("  {f}")));
         }
     }
 
-    if !summary.recent_commits.is_empty() {
-        lines.push(Line::from(""));
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "Recent commits:",
+        Style::default().fg(Color::Cyan),
+    )));
+    if summary.recent_commits.is_empty() {
         lines.push(Line::from(Span::styled(
-            "Recent commits:",
-            Style::default().fg(Color::Cyan),
+            "  No recent commits",
+            Style::default().fg(Color::DarkGray),
         )));
+    } else {
         for c in &summary.recent_commits {
             lines.push(Line::from(format!("  {c}")));
         }
@@ -404,6 +398,32 @@ fn render_git_panel(
 
     frame.render_widget(paragraph, area);
 }
+
+fn render_footer(frame: &mut Frame, area: Rect, app: &WorkspaceApp, theme: &crate::chat::theme::ChatTheme) {
+    if app.active_view() == WorkspaceView::Chat {
+        let footer_block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(theme.panel_border)
+            .title("Ask Spirit");
+        let footer_inner = footer_block.inner(area);
+        frame.render_widget(footer_block, area);
+        let composer = app.chat().composer();
+        frame.render_widget(composer, footer_inner);
+    } else {
+        let hint_text = Line::from(Span::styled(
+            "[1] Chat  [2] Git  [3] Sessions  [Tab] Focus  [Esc] Quit",
+            theme.status_text,
+        ));
+        let footer_block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(theme.panel_border)
+            .title("Workspace Hints");
+        let footer_inner = footer_block.inner(area);
+        frame.render_widget(footer_block, area);
+        frame.render_widget(Paragraph::new(hint_text), footer_inner);
+    }
+}
+
 
 fn render_session_panel(
     frame: &mut Frame,

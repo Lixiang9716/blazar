@@ -85,23 +85,24 @@ impl WorkspaceApp {
     pub fn handle_action(&mut self, action: InputAction) {
         if action == InputAction::CycleFocus {
             self.cycle_focus();
-        } else if self.focus == WorkspaceFocus::Footer && action == InputAction::SelectChatView {
-            self.chat_mut()
-                .handle_action(InputAction::Key(KeyEvent::new(
-                    KeyCode::Char('1'),
-                    KeyModifiers::NONE,
-                )));
-        } else if self.focus == WorkspaceFocus::Footer && action == InputAction::SelectGitView {
-            self.chat_mut()
-                .handle_action(InputAction::Key(KeyEvent::new(
-                    KeyCode::Char('2'),
-                    KeyModifiers::NONE,
-                )));
-        } else if self.focus == WorkspaceFocus::Footer && action == InputAction::SelectSessionsView
+        } else if self.focus == WorkspaceFocus::Footer
+            && self.active_view == WorkspaceView::Chat
+            && matches!(
+                action,
+                InputAction::SelectChatView
+                    | InputAction::SelectGitView
+                    | InputAction::SelectSessionsView
+            )
         {
+            // Chat view footer acts as the live composer: re-encode digit shortcuts as key events
+            let ch = match action {
+                InputAction::SelectChatView => '1',
+                InputAction::SelectGitView => '2',
+                _ => '3',
+            };
             self.chat_mut()
                 .handle_action(InputAction::Key(KeyEvent::new(
-                    KeyCode::Char('3'),
+                    KeyCode::Char(ch),
                     KeyModifiers::NONE,
                 )));
         } else if action == InputAction::SelectChatView {
