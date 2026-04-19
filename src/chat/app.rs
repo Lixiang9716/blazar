@@ -193,6 +193,12 @@ impl ChatApp {
                 }
                 self.composer.input(key);
             }
+            InputAction::Backspace => {
+                self.composer.input(crossterm::event::KeyEvent::new(
+                    crossterm::event::KeyCode::Backspace,
+                    crossterm::event::KeyModifiers::NONE,
+                ));
+            }
             _ => {}
         }
     }
