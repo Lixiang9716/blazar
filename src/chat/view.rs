@@ -1,6 +1,6 @@
 use crate::chat::app::ChatApp;
 use crate::chat::model::{Actor, EntryKind, TimelineEntry};
-use crate::chat::theme::{ChatTheme, build_theme};
+use crate::chat::theme::{ChatTheme, SolarizedStyleSheet, build_theme};
 use crate::welcome::mascot::render_mascot_lines;
 use crate::welcome::state::WelcomeState;
 use core::cmp;
@@ -240,13 +240,24 @@ fn render_entry<'a>(entry: &TimelineEntry, theme: &ChatTheme, _width: u16) -> Ve
                         ]));
                     }
                 } else {
-                    // Assistant messages: render markdown
-                    let md_text = tui_markdown::from_str(&entry.body);
+                    // Assistant messages: render markdown with Solarized theme
+                    let opts = tui_markdown::Options::new(SolarizedStyleSheet);
+                    let md_text = tui_markdown::from_str_with_options(&entry.body, &opts);
                     for (i, md_line) in md_text.lines.into_iter().enumerate() {
                         let owned_spans: Vec<Span<'a>> = md_line
                             .spans
                             .into_iter()
-                            .map(|s| Span::styled(s.content.into_owned(), s.style))
+                            .map(|s| {
+                                // Strip heading `# ` prefixes — tui-markdown keeps them raw
+                                let content = s.content.into_owned();
+                                let trimmed = content.trim_start_matches('#');
+                                if trimmed.len() < content.len() {
+                                    Span::styled(trimmed.trim_start().to_owned(), s.style)
+                                } else {
+                                    Span::styled(content, s.style)
+                                }
+                            })
+                            .filter(|s| !s.content.is_empty())
                             .collect();
 
                         if i == 0 {

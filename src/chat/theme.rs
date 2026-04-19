@@ -19,6 +19,42 @@ pub const BLUE: Color = Color::Rgb(38, 139, 210);
 pub const CYAN: Color = Color::Rgb(42, 161, 152);
 pub const GREEN: Color = Color::Rgb(133, 153, 0);
 
+/// Solarized Dark stylesheet for tui-markdown rendering.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SolarizedStyleSheet;
+
+impl tui_markdown::StyleSheet for SolarizedStyleSheet {
+    fn heading(&self, level: u8) -> Style {
+        match level {
+            1 => Style::new()
+                .fg(BASE2)
+                .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
+            2 => Style::new().fg(BLUE).add_modifier(Modifier::BOLD),
+            _ => Style::new().fg(CYAN).add_modifier(Modifier::BOLD),
+        }
+    }
+
+    fn code(&self) -> Style {
+        Style::new().fg(ORANGE).bg(BASE02)
+    }
+
+    fn link(&self) -> Style {
+        Style::new().fg(BLUE).add_modifier(Modifier::UNDERLINED)
+    }
+
+    fn blockquote(&self) -> Style {
+        Style::new().fg(BASE01)
+    }
+
+    fn heading_meta(&self) -> Style {
+        Style::new().fg(BASE01)
+    }
+
+    fn metadata_block(&self) -> Style {
+        Style::new().fg(YELLOW)
+    }
+}
+
 pub struct ChatTheme {
     pub title_bar: Style,
     pub title_text: Style,
