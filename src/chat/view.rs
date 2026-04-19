@@ -1,6 +1,7 @@
 use crate::chat::app::ChatApp;
 use crate::chat::model::Author;
 use crate::chat::theme::build_theme;
+use crate::chat::workspace::{WorkspaceApp, WorkspaceView};
 use crate::welcome::mascot::render_mascot_lines;
 use crate::welcome::state::WelcomeState;
 use core::cmp;
@@ -29,6 +30,38 @@ pub fn render_to_lines_for_test(app: &ChatApp, width: u16, height: u16) -> Vec<S
     terminal
         .draw(|frame| render_frame(frame, app, 1_200))
         .expect("chat frame should render");
+
+    let buffer = terminal.backend().buffer();
+    buffer
+        .content()
+        .chunks(width as usize)
+        .map(|row| {
+            let mut line = String::new();
+            let mut skip = 0;
+
+            for cell in row {
+                if skip == 0 {
+                    line.push_str(cell.symbol());
+                }
+                skip = cmp::max(skip, cell.symbol().width()).saturating_sub(1);
+            }
+
+            line
+        })
+        .collect()
+}
+
+pub fn render_workspace_to_lines_for_test(app: &WorkspaceApp, width: u16, height: u16) -> Vec<String> {
+    if width == 0 || height == 0 {
+        return Vec::new();
+    }
+
+    let backend = TestBackend::new(width, height);
+    let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
+
+    terminal
+        .draw(|frame| render_workspace(frame, app, 1_200))
+        .expect("workspace frame should render");
 
     let buffer = terminal.backend().buffer();
     buffer
@@ -93,6 +126,101 @@ fn render_spirit_pane(
         .wrap(Wrap { trim: false });
 
     frame.render_widget(paragraph, area);
+}
+
+pub fn render_workspace(frame: &mut Frame, app: &WorkspaceApp, tick_ms: u64) {
+    let theme = build_theme();
+    let area = frame.area();
+
+    // Header, body, footer
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Min(3), Constraint::Length(3)])
+        .split(area);
+
+    // Header
+    let header = Block::default()
+        .borders(Borders::BOTTOM)
+        .border_style(theme.shell_border)
+        .title("Blazar · Spirit Workspace");
+    let header_para = Paragraph::new(Line::from(""))
+        .block(header)
+        .wrap(Wrap { trim: false });
+    frame.render_widget(header_para, rows[0]);
+
+    // Body: rail (left) + content (right)
+    let cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Length(22), Constraint::Min(10)])
+        .split(rows[1]);
+
+    // Rail
+    let mut rail_lines: Vec<Line> = vec![];
+    let state = WelcomeState::new().tick(tick_ms, false);
+    let mut mascot_lines = render_mascot_lines(state, tick_ms);
+    // keep mascot compact
+    mascot_lines.truncate(3);
+
+    rail_lines.push(Line::from(Span::styled("Spirit", theme.status_text)));
+    rail_lines.push(Line::from(""));
+    for line in mascot_lines {
+        rail_lines.push(line);
+    }
+    rail_lines.push(Line::from(""));
+
+    // Navigation items
+    let views = [WorkspaceView::Chat, WorkspaceView::Git, WorkspaceView::Sessions];
+    for v in views.iter() {
+        let label = match v {
+            WorkspaceView::Chat => "Chat",
+            WorkspaceView::Git => "Git",
+            WorkspaceView::Sessions => "Sessions",
+        };
+        let style = if *v == app.active_view() {
+            theme.active_nav
+        } else {
+            theme.inactive_nav
+        };
+        rail_lines.push(Line::from(Span::styled(label, style)));
+    }
+
+    let rail_block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(theme.rail_border)
+        .title("Nav");
+    let rail_para = Paragraph::new(rail_lines).block(rail_block);
+    frame.render_widget(rail_para, cols[0]);
+
+    // Content
+    match app.active_view() {
+        WorkspaceView::Chat => {
+            render_chat_pane(frame, cols[1], app.chat(), &theme);
+        }
+        WorkspaceView::Git => {
+            let block = Block::default()
+                .borders(Borders::ALL)
+                .border_style(theme.panel_border)
+                .title("Git");
+            let paragraph = Paragraph::new(Line::from("View not implemented yet")).block(block);
+            frame.render_widget(paragraph, cols[1]);
+        }
+        WorkspaceView::Sessions => {
+            let block = Block::default()
+                .borders(Borders::ALL)
+                .border_style(theme.panel_border)
+                .title("Sessions");
+            let paragraph = Paragraph::new(Line::from("View not implemented yet")).block(block);
+            frame.render_widget(paragraph, cols[1]);
+        }
+    }
+
+    // Footer / composer title
+    let footer_block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(theme.panel_border)
+        .title("Ask Spirit");
+    let footer_para = Paragraph::new(Line::from(Span::styled("", theme.status_text))).block(footer_block);
+    frame.render_widget(footer_para, rows[2]);
 }
 
 fn render_chat_pane(
