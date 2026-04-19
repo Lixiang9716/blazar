@@ -1,5 +1,4 @@
 use ratatui_core::style::{Color, Style};
-use std::sync::OnceLock;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChatTheme {
@@ -15,8 +14,6 @@ pub struct ChatTheme {
     pub user_bubble: Style,
 }
 
-static CHAT_THEME: OnceLock<ChatTheme> = OnceLock::new();
-
 fn parse_hex_rgb(hex: &str) -> Color {
     let hex = hex.trim_start_matches('#');
     let r = u8::from_str_radix(&hex[0..2], 16).expect("valid red");
@@ -26,32 +23,28 @@ fn parse_hex_rgb(hex: &str) -> Color {
 }
 
 pub fn build_theme() -> ChatTheme {
-    CHAT_THEME
-        .get_or_init(|| {
-            let config = crate::config::load_theme_config().expect("theme config should load");
-            let palette = config
-                .themes
-                .get(&config.active_theme)
-                .expect("active theme must exist");
+    let config = crate::config::load_theme_config().expect("theme config should load");
+    let palette = config
+        .themes
+        .get(&config.active_theme)
+        .expect("active theme must exist");
 
-            ChatTheme {
-                shell_border: Style::default().fg(parse_hex_rgb(&palette.accent)),
-                rail_border: Style::default().fg(parse_hex_rgb(&palette.info)),
-                panel_border: Style::default().fg(parse_hex_rgb(&palette.muted)),
-                active_nav: Style::default()
-                    .fg(parse_hex_rgb(&palette.background))
-                    .bg(parse_hex_rgb(&palette.accent)),
-                inactive_nav: Style::default().fg(parse_hex_rgb(&palette.text)),
-                status_text: Style::default().fg(parse_hex_rgb(&palette.spirit)),
-                spirit_border: Style::default().fg(parse_hex_rgb(&palette.spirit)),
-                chat_border: Style::default().fg(parse_hex_rgb(&palette.accent)),
-                spirit_bubble: Style::default()
-                    .fg(parse_hex_rgb(&palette.text))
-                    .bg(parse_hex_rgb(&palette.surface)),
-                user_bubble: Style::default()
-                    .fg(parse_hex_rgb(&palette.background))
-                    .bg(parse_hex_rgb(&palette.info)),
-            }
-        })
-        .clone()
+    ChatTheme {
+        shell_border: Style::default().fg(parse_hex_rgb(&palette.accent)),
+        rail_border: Style::default().fg(parse_hex_rgb(&palette.info)),
+        panel_border: Style::default().fg(parse_hex_rgb(&palette.muted)),
+        active_nav: Style::default()
+            .fg(parse_hex_rgb(&palette.background))
+            .bg(parse_hex_rgb(&palette.accent)),
+        inactive_nav: Style::default().fg(parse_hex_rgb(&palette.text)),
+        status_text: Style::default().fg(parse_hex_rgb(&palette.spirit)),
+        spirit_border: Style::default().fg(parse_hex_rgb(&palette.spirit)),
+        chat_border: Style::default().fg(parse_hex_rgb(&palette.accent)),
+        spirit_bubble: Style::default()
+            .fg(parse_hex_rgb(&palette.text))
+            .bg(parse_hex_rgb(&palette.surface)),
+        user_bubble: Style::default()
+            .fg(parse_hex_rgb(&palette.background))
+            .bg(parse_hex_rgb(&palette.info)),
+    }
 }

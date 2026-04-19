@@ -67,8 +67,6 @@ pub fn load_theme_config_from_path(path: impl AsRef<Path>) -> Result<ThemeConfig
         source,
     })?;
 
-    validate_theme_config(path, &config)?;
-
     Ok(config)
 }
 
@@ -158,45 +156,6 @@ fn schema_title_from_path<'a>(schema: &'a Value, path: &Path) -> Result<&'a str,
         })
 }
 
-fn validate_theme_config(path: &Path, config: &ThemeConfig) -> Result<(), ConfigError> {
-    if !config.themes.contains_key(&config.active_theme) {
-        return Err(ConfigError::InvalidSchema {
-            path: path.to_path_buf(),
-            message: "activeTheme must reference a theme in themes",
-        });
-    }
-
-    for palette in config.themes.values() {
-        for color in [
-            &palette.background,
-            &palette.surface,
-            &palette.text,
-            &palette.muted,
-            &palette.accent,
-            &palette.success,
-            &palette.warning,
-            &palette.danger,
-            &palette.spirit,
-            &palette.info,
-        ] {
-            if !is_hex_rgb(color) {
-                return Err(ConfigError::InvalidSchema {
-                    path: path.to_path_buf(),
-                    message: "theme colors must use #RRGGBB",
-                });
-            }
-        }
-    }
-
-    Ok(())
-}
-
-fn is_hex_rgb(value: &str) -> bool {
-    value.len() == 7
-        && value.starts_with('#')
-        && value[1..].bytes().all(|byte| byte.is_ascii_hexdigit())
-}
-
 #[derive(Debug)]
 pub enum ConfigError {
     Read {
@@ -220,11 +179,7 @@ impl Display for ConfigError {
                 write!(f, "failed to read config file {}: {source}", path.display())
             }
             Self::Parse { path, source } => {
-                write!(
-                    f,
-                    "failed to parse config file {}: {source}",
-                    path.display()
-                )
+                write!(f, "failed to parse config file {}: {source}", path.display())
             }
             Self::InvalidSchema { path, message } => {
                 write!(f, "invalid config schema {}: {message}", path.display())
