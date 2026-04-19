@@ -1,5 +1,5 @@
 /// A lightweight, read-oriented snapshot of the current session state.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct SessionSummary {
     pub session_label: String,
     pub cwd: String,
@@ -27,21 +27,6 @@ impl SessionSummary {
             ready_todos: 2,
             in_progress_todos: 1,
             done_todos: 4,
-        }
-    }
-}
-
-impl Default for SessionSummary {
-    fn default() -> Self {
-        Self {
-            session_label: String::new(),
-            cwd: String::new(),
-            active_intent: String::new(),
-            plan_status: String::new(),
-            checkpoints: vec![],
-            ready_todos: 0,
-            in_progress_todos: 0,
-            done_todos: 0,
         }
     }
 }
