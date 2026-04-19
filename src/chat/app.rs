@@ -239,13 +239,11 @@ fn detect_branch(repo_path: &str) -> String {
 /// Activated by setting `BLAZAR_DEMO=1` environment variable.
 fn demo_timeline() -> Vec<TimelineEntry> {
     vec![
-        TimelineEntry::warning(
+        TimelineEntry::hint(
             "No blazar instructions found. Run /init to generate a blazar-instructions.md file.",
         ),
         TimelineEntry::warning("Failed to load 2 skills. Run /skills for more details."),
-        TimelineEntry::response(
-            "The fix: switch to a **stacked layout** for narrow terminals instead of\nskipping the mascot. I'll also add a `snapshot test` for width=40.",
-        ),
+        TimelineEntry::response("Environment loaded: 1 MCP server, 4 plugins, 12 skills, 3 agents"),
         TimelineEntry::tool_use(
             "Edit",
             "src/chat/view.rs",

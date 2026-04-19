@@ -17,8 +17,8 @@ expression: "lines.join(\"\\n\")"
                                                             
                                                             
                                                             
-───────────────────────────────────────────────── blazar-dev
+───────────────────────────────────────── blazar-dev (local)
 › Type @ to mention files, # for issues/PRs, / for commands,
                                                             
                                                             
-shift+tab switch mode                                  ready
+v0.1.0 · shift+tab switch mode                        ready

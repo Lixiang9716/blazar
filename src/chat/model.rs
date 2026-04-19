@@ -16,6 +16,7 @@ pub enum Actor {
 pub enum EntryKind {
     Message,
     Warning,
+    Hint,
     ToolUse {
         tool: String,
         target: String,
@@ -120,6 +121,15 @@ impl TimelineEntry {
         Self {
             actor: Actor::System,
             kind: EntryKind::Warning,
+            body: body.into(),
+            details: String::new(),
+        }
+    }
+
+    pub fn hint(body: impl Into<String>) -> Self {
+        Self {
+            actor: Actor::System,
+            kind: EntryKind::Hint,
             body: body.into(),
             details: String::new(),
         }

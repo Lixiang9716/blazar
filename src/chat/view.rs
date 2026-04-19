@@ -315,6 +315,22 @@ fn render_entry<'a>(entry: &TimelineEntry, theme: &ChatTheme, _width: u16) -> Ve
                 ]));
             }
         }
+        EntryKind::Hint => {
+            let mut body_lines = entry.body.lines();
+            let first = body_lines.next().unwrap_or("");
+            lines.push(Line::from(vec![
+                Span::raw(MARGIN),
+                Span::styled("● ", marker_style),
+                Span::styled("💡 ", marker_style),
+                Span::styled(first.to_owned(), theme.body_text),
+            ]));
+            for continuation in body_lines {
+                lines.push(Line::from(vec![
+                    Span::raw(INDENT),
+                    Span::styled(continuation.to_owned(), theme.body_text),
+                ]));
+            }
+        }
         EntryKind::Thinking => {
             let mut body_lines = entry.body.lines();
             let first = body_lines.next().unwrap_or("");
@@ -353,6 +369,7 @@ fn marker_style_for(entry: &TimelineEntry, theme: &ChatTheme) -> Style {
     match (&entry.actor, &entry.kind) {
         (Actor::User, _) => theme.marker_response,
         (_, EntryKind::Warning) => theme.marker_warning,
+        (_, EntryKind::Hint) => theme.marker_hint,
         (_, EntryKind::Thinking) => theme.marker_thinking,
         (_, EntryKind::ToolUse { .. } | EntryKind::Bash { .. }) => theme.marker_tool,
         (_, EntryKind::CodeBlock { .. }) => theme.marker_tool,
@@ -384,7 +401,7 @@ fn render_input(frame: &mut Frame, area: Rect, app: &ChatApp, theme: &ChatTheme)
 }
 
 fn render_separator(frame: &mut Frame, area: Rect, theme: &ChatTheme) {
-    let model_label = "blazar-dev";
+    let model_label = "blazar-dev (local)";
     let model_len = model_label.len();
     let line_len = (area.width as usize).saturating_sub(model_len + 1);
 
@@ -398,13 +415,12 @@ fn render_separator(frame: &mut Frame, area: Rect, theme: &ChatTheme) {
 }
 
 fn render_status_bar(frame: &mut Frame, area: Rect, _app: &ChatApp, theme: &ChatTheme) {
-    let left = "shift+tab switch mode";
+    let version = env!("CARGO_PKG_VERSION");
+    let left = format!("v{version} · shift+tab switch mode");
     let right = "ready";
-    let right_len = right.len();
 
-    // Right-align the status label
     let available = area.width as usize;
-    let gap = available.saturating_sub(left.len() + right_len);
+    let gap = available.saturating_sub(left.len() + right.len());
 
     let line = Line::from(vec![
         Span::styled(left, theme.status_bar),
