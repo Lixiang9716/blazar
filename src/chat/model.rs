@@ -36,6 +36,8 @@ pub struct TimelineEntry {
     pub actor: Actor,
     pub kind: EntryKind,
     pub body: String,
+    /// Expanded detail content shown when Ctrl+O is toggled.
+    pub details: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,6 +52,7 @@ impl TimelineEntry {
             actor: Actor::Assistant,
             kind: EntryKind::Message,
             body: body.into(),
+            details: String::new(),
         }
     }
 
@@ -58,6 +61,7 @@ impl TimelineEntry {
             actor: Actor::User,
             kind: EntryKind::Message,
             body: body.into(),
+            details: String::new(),
         }
     }
 
@@ -77,6 +81,7 @@ impl TimelineEntry {
                 deletions,
             },
             body: body.into(),
+            details: String::new(),
         }
     }
 
@@ -87,6 +92,7 @@ impl TimelineEntry {
                 command: command.into(),
             },
             body: body.into(),
+            details: String::new(),
         }
     }
 
@@ -95,6 +101,7 @@ impl TimelineEntry {
             actor: Actor::Assistant,
             kind: EntryKind::Thinking,
             body: body.into(),
+            details: String::new(),
         }
     }
 
@@ -105,6 +112,7 @@ impl TimelineEntry {
                 language: language.into(),
             },
             body: body.into(),
+            details: String::new(),
         }
     }
 
@@ -113,6 +121,13 @@ impl TimelineEntry {
             actor: Actor::System,
             kind: EntryKind::Warning,
             body: body.into(),
+            details: String::new(),
         }
+    }
+
+    /// Set the expanded detail content.
+    pub fn with_details(mut self, details: impl Into<String>) -> Self {
+        self.details = details.into();
+        self
     }
 }

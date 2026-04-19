@@ -12,6 +12,7 @@ pub struct ChatApp {
     display_path: String,
     branch: String,
     scroll_offset: u16,
+    show_details: bool,
 }
 
 impl ChatApp {
@@ -38,6 +39,7 @@ impl ChatApp {
             display_path,
             branch,
             scroll_offset: u16::MAX, // auto-scroll sentinel
+            show_details: false,
         }
     }
 
@@ -78,6 +80,10 @@ impl ChatApp {
 
     pub fn status_label(&self) -> String {
         "ready".to_owned()
+    }
+
+    pub fn show_details(&self) -> bool {
+        self.show_details
     }
 
     pub fn send_message(&mut self, input: &str) {
@@ -126,6 +132,7 @@ impl ChatApp {
         match action {
             InputAction::Quit => self.should_quit = true,
             InputAction::Submit => self.submit_composer(),
+            InputAction::ToggleDetails => self.show_details = !self.show_details,
             InputAction::ScrollUp => {
                 self.scroll_offset = self.scroll_offset.saturating_sub(3);
             }
@@ -193,8 +200,22 @@ fn demo_timeline() -> Vec<TimelineEntry> {
             18,
             6,
             "Replaced hard guard with stacked layout branch",
+        )
+        .with_details(
+            " 63    let [title, timeline, input, status] =\n\
+             -64        vertical![==1, >=1, ==3, ==1].areas(area);\n\
+             +64        vertical![==6, >=1, ==1, ==3, ==1].areas(area);\n\
+             \n\
+             src/chat/view.rs",
         ),
-        TimelineEntry::bash("cargo test --lib", "77 tests passed, 0 failed (2.4s)"),
+        TimelineEntry::bash("cargo test --lib", "77 tests passed, 0 failed (2.4s)").with_details(
+            "cd /home/lx/blazar && cargo test --lib 2>&1\n\
+                 running 77 tests\n\
+                 test chat_render ... ok\n\
+                 test welcome_view ... ok\n\
+                 ...\n\
+                 test result: ok. 77 passed; 0 failed (2.4s)",
+        ),
         TimelineEntry::response(
             "**Fixed.** Narrow terminals (< 60 cols) now get a stacked layout:\n\n- Row 1: mascot (3 lines, centered)\n- Row 2: chat timeline (remaining space)\n- Row 3: `input` + `status`\n\n77 tests pass including the new `narrow-render` snapshot.",
         ),

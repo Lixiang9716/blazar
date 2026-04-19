@@ -117,10 +117,23 @@ fn render_welcome_banner(frame: &mut Frame, area: Rect, theme: &ChatTheme) {
 
 fn render_timeline(frame: &mut Frame, area: Rect, app: &ChatApp, theme: &ChatTheme) {
     let mut lines: Vec<Line> = Vec::new();
+    let show_details = app.show_details();
 
     for entry in app.timeline() {
         let entry_lines = render_entry(entry, theme, area.width);
         lines.extend(entry_lines);
+
+        // Show expanded details when Ctrl+O is toggled
+        if show_details && !entry.details.is_empty() {
+            lines.push(Line::from(""));
+            for detail_line in entry.details.lines() {
+                lines.push(Line::from(vec![
+                    Span::raw(INDENT),
+                    Span::styled(detail_line.to_owned(), theme.dim_text),
+                ]));
+            }
+        }
+
         lines.push(Line::from("")); // blank separator
     }
 
