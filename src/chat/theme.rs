@@ -15,7 +15,13 @@ pub struct ChatTheme {
 }
 
 fn parse_hex_rgb(hex: &str) -> Color {
+    let original = hex;
     let hex = hex.trim_start_matches('#');
+    assert_eq!(
+        hex.len(),
+        6,
+        "expected #RRGGBB hex color, got {original:?}"
+    );
     let r = u8::from_str_radix(&hex[0..2], 16).expect("valid red");
     let g = u8::from_str_radix(&hex[2..4], 16).expect("valid green");
     let b = u8::from_str_radix(&hex[4..6], 16).expect("valid blue");
