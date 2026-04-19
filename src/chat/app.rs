@@ -149,8 +149,7 @@ impl Drop for TerminalGuard {
     fn drop(&mut self) {
         use crossterm::ExecutableCommand;
         let _ = crossterm::terminal::disable_raw_mode();
-        let _ = std::io::stdout()
-            .execute(crossterm::terminal::LeaveAlternateScreen);
+        let _ = std::io::stdout().execute(crossterm::terminal::LeaveAlternateScreen);
     }
 }
 
