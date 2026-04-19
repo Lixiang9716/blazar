@@ -44,6 +44,10 @@ impl LauncherApp {
         self.selected_index
     }
 
+    pub fn has_workspaces(&self) -> bool {
+        !self.workspaces.is_empty()
+    }
+
     /// Returns the currently selected workspace.
     ///
     /// # Panics
