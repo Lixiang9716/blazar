@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 pub enum RootMode {
     Launcher(LauncherApp),
-    Workspace(WorkspaceApp),
+    Workspace(Box<WorkspaceApp>),
 }
 
 pub struct RootApp {
@@ -18,14 +18,16 @@ pub struct RootApp {
 impl RootApp {
     pub fn from_launch_decision(catalog: WorkspaceCatalog, decision: LaunchDecision) -> Self {
         let mode = match decision {
-            LaunchDecision::ShowLauncher => RootMode::Launcher(LauncherApp::new(catalog.workspaces)),
+            LaunchDecision::ShowLauncher => {
+                RootMode::Launcher(LauncherApp::new(catalog.workspaces))
+            }
             LaunchDecision::Resume {
                 repo_path,
                 initial_view,
-            } => RootMode::Workspace(WorkspaceApp::new_with_view(
+            } => RootMode::Workspace(Box::new(WorkspaceApp::new_with_view(
                 repo_path.to_string_lossy().as_ref(),
                 initial_view.unwrap_or(WorkspaceView::Chat),
-            )),
+            ))),
         };
 
         Self {
@@ -41,7 +43,7 @@ impl RootApp {
 
     pub fn workspace(&self) -> Option<&WorkspaceApp> {
         match &self.mode {
-            RootMode::Workspace(workspace) => Some(workspace),
+            RootMode::Workspace(workspace) => Some(workspace.as_ref()),
             RootMode::Launcher(_) => None,
         }
     }
@@ -60,10 +62,10 @@ impl RootApp {
                     repo_path,
                     initial_view,
                 } => {
-                    self.mode = RootMode::Workspace(WorkspaceApp::new_with_view(
+                    self.mode = RootMode::Workspace(Box::new(WorkspaceApp::new_with_view(
                         repo_path.to_string_lossy().as_ref(),
                         initial_view.unwrap_or(WorkspaceView::Chat),
-                    ));
+                    )));
                     self.opened_workspace = Some(repo_path);
                     None
                 }

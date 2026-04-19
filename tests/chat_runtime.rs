@@ -309,7 +309,10 @@ fn root_app_respects_explicit_initial_view_on_resume() {
     );
 
     assert!(matches!(app.mode(), RootMode::Workspace(_)));
-    assert_eq!(app.workspace().unwrap().active_view(), WorkspaceView::Sessions);
+    assert_eq!(
+        app.workspace().unwrap().active_view(),
+        WorkspaceView::Sessions
+    );
 }
 
 // Live-data gap: new_for_test must be deterministic and not load real repo/session state.

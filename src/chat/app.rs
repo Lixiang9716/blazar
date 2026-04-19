@@ -138,9 +138,7 @@ pub fn run_terminal_chat(
             app.handle_action(action);
             if let Some(opened_repo) = app.take_opened_workspace() {
                 let mut catalog =
-                    crate::chat::workspace_catalog::WorkspaceCatalog::load_from_path(
-                        &catalog_path,
-                    );
+                    crate::chat::workspace_catalog::WorkspaceCatalog::load_from_path(&catalog_path);
                 catalog.record_opened_workspace(&opened_repo)?;
                 catalog.save_to_path(&catalog_path)?;
             }
