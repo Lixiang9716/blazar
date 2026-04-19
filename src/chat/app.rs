@@ -495,7 +495,7 @@ pub fn run_terminal_chat(
     use crate::chat::view::render_frame;
     use crossterm::{
         ExecutableCommand,
-        event::{self, Event},
+        event::{self, EnableMouseCapture, Event, MouseEventKind},
         terminal::{EnterAlternateScreen, enable_raw_mode},
     };
     use ratatui_core::terminal::Terminal;
@@ -509,6 +509,7 @@ pub fn run_terminal_chat(
     // Setup terminal; the guard ensures cleanup on any exit path including `?`.
     enable_raw_mode()?;
     stdout().execute(EnterAlternateScreen)?;
+    stdout().execute(EnableMouseCapture)?;
     let _guard = TerminalGuard;
     let backend = CrosstermBackend::new(stdout());
     let mut terminal = Terminal::new(backend)?;
@@ -522,11 +523,23 @@ pub fn run_terminal_chat(
 
         terminal.draw(|frame| render_frame(frame, &app, tick_ms))?;
 
-        if event::poll(Duration::from_millis(100))?
-            && let Event::Key(key) = event::read()?
-        {
-            let action = InputAction::from_key_event(key);
-            app.handle_action(action);
+        if event::poll(Duration::from_millis(100))? {
+            match event::read()? {
+                Event::Key(key) => {
+                    let action = InputAction::from_key_event(key);
+                    app.handle_action(action);
+                }
+                Event::Mouse(mouse) => match mouse.kind {
+                    MouseEventKind::ScrollUp => {
+                        app.handle_action(InputAction::ScrollUp);
+                    }
+                    MouseEventKind::ScrollDown => {
+                        app.handle_action(InputAction::ScrollDown);
+                    }
+                    _ => {}
+                },
+                _ => {}
+            }
         }
 
         if app.should_quit() {
@@ -547,6 +560,8 @@ pub(crate) struct TerminalGuard;
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
         use crossterm::ExecutableCommand;
+        use crossterm::event::DisableMouseCapture;
+        let _ = std::io::stdout().execute(DisableMouseCapture);
         let _ = crossterm::terminal::disable_raw_mode();
         let _ = std::io::stdout().execute(crossterm::terminal::LeaveAlternateScreen);
     }
