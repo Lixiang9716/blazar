@@ -22,6 +22,7 @@ pub fn run_terminal_chat(
 
     let repo_path = resolve_repo_path(&schema);
     let mut app = ChatApp::new(&repo_path);
+    app.trigger_banner_fade();
 
     // Setup terminal; the guard ensures cleanup on any exit path including `?`.
     enable_raw_mode()?;
@@ -40,7 +41,14 @@ pub fn run_terminal_chat(
 
         terminal.draw(|frame| render_frame(frame, &mut app, tick_ms))?;
 
-        if event::poll(Duration::from_millis(100))? {
+        // Use faster polling during animations for smooth ~30 FPS.
+        let poll_timeout = if app.effects.is_running() || app.demo_active() {
+            Duration::from_millis(33)
+        } else {
+            Duration::from_millis(100)
+        };
+
+        if event::poll(poll_timeout)? {
             match event::read()? {
                 Event::Key(key) => {
                     let action = InputAction::from_key_event(key);

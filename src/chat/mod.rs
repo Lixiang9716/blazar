@@ -1,5 +1,6 @@
 pub mod app;
 pub mod demo;
+pub mod effects;
 pub mod event_loop;
 pub mod git;
 pub mod input;

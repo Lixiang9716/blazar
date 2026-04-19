@@ -21,6 +21,9 @@ pub fn render_to_lines_for_test(app: &mut ChatApp, width: u16, height: u16) -> V
         return Vec::new();
     }
 
+    // Clear pending effects so animations don't alter the test buffer.
+    app.effects = Default::default();
+
     let backend = TestBackend::new(width, height);
     let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
 
@@ -49,6 +52,7 @@ pub fn render_to_lines_for_test(app: &mut ChatApp, width: u16, height: u16) -> V
 }
 
 pub fn render_frame(frame: &mut Frame, app: &mut ChatApp, tick_ms: u64) {
+    let elapsed = app.elapsed_since_last_frame();
     let theme = app.theme().clone();
     let area = frame.area();
 
@@ -74,4 +78,7 @@ pub fn render_frame(frame: &mut Frame, app: &mut ChatApp, tick_ms: u64) {
     if app.picker.is_visible() {
         picker::render_picker(frame, area, app, &theme);
     }
+
+    // Apply tachyonfx animations after all widgets are rendered.
+    app.effects.process(elapsed, frame.buffer_mut(), area);
 }

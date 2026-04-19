@@ -1,3 +1,4 @@
+use crate::chat::effects::BlazarEffects;
 use crate::chat::input::InputAction;
 use crate::chat::model::{Author, ChatMessage, TimelineEntry};
 use crate::chat::picker::{ModalPicker, PickerItem};
@@ -28,6 +29,8 @@ pub struct ChatApp {
     theme_name: String,
     theme: ChatTheme,
     markdown_stylesheet: ThemeStyleSheet,
+    pub effects: BlazarEffects,
+    last_frame_time: Instant,
 }
 
 impl ChatApp {
@@ -71,6 +74,8 @@ impl ChatApp {
             theme_name: crate::chat::theme::DEFAULT_THEME.to_owned(),
             theme,
             markdown_stylesheet,
+            effects: BlazarEffects::default(),
+            last_frame_time: Instant::now(),
         }
     }
 
@@ -133,10 +138,26 @@ impl ChatApp {
         &self.markdown_stylesheet
     }
 
+    /// Returns elapsed time since last frame and resets the timer.
+    pub fn elapsed_since_last_frame(&mut self) -> std::time::Duration {
+        let now = Instant::now();
+        let elapsed = now.duration_since(self.last_frame_time);
+        self.last_frame_time = now;
+        elapsed
+    }
+
+    /// Fire the startup banner fade effect (call once after first render).
+    pub fn trigger_banner_fade(&mut self) {
+        self.effects.trigger_banner_fade(self.theme.backdrop_color);
+    }
+
     pub fn set_theme(&mut self, name: &str) {
+        let old_bg = self.theme.backdrop_color;
         self.theme = crate::chat::theme::build_theme_by_name(name);
         self.markdown_stylesheet = ThemeStyleSheet::from_chat_theme(&self.theme);
         self.theme_name = name.to_owned();
+        self.effects
+            .trigger_theme_transition(old_bg, self.theme.backdrop_color);
     }
 
     pub fn tick(&mut self) {
@@ -156,6 +177,8 @@ impl ChatApp {
                 self.timeline.push(entry);
                 self.scroll_offset = u16::MAX; // auto-scroll
                 self.demo_last_add = Some(Instant::now());
+                self.effects.trigger_new_message();
+                self.effects.trigger_status_pulse(self.theme.backdrop_color);
             }
         }
     }
@@ -205,6 +228,10 @@ impl ChatApp {
         self.timeline
             .push(TimelineEntry::response(format!("I hear you — {trimmed}")));
 
+        // Trigger new-message animation and status pulse
+        self.effects.trigger_new_message();
+        self.effects.trigger_status_pulse(self.theme.backdrop_color);
+
         // Auto-scroll to bottom
         self.scroll_offset = u16::MAX;
     }
@@ -231,7 +258,10 @@ impl ChatApp {
         // When picker is open, route input to it
         if self.picker.is_open() {
             match action {
-                InputAction::Quit => self.picker.close(),
+                InputAction::Quit => {
+                    self.effects.trigger_picker_close(self.theme.backdrop_color);
+                    self.picker.close();
+                }
                 InputAction::Submit => {
                     if let Some(cmd) = self.picker.select_current() {
                         self.picker.close();
@@ -257,6 +287,7 @@ impl ChatApp {
                                     .collect();
                             self.picker = ModalPicker::new("Select Theme", theme_items);
                             self.picker.open();
+                            self.effects.trigger_picker_open(self.theme.backdrop_color);
                             return;
                         }
 
@@ -302,6 +333,7 @@ impl ChatApp {
                     && self.composer_text().is_empty()
                 {
                     self.picker.open();
+                    self.effects.trigger_picker_open(self.theme.backdrop_color);
                     return;
                 }
                 self.composer.input(key);

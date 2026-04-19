@@ -19,6 +19,7 @@ unicode-width = "0.2"
 opaline = "0.4"
 tui-overlay = "0.1"
 tui-widget-list = "0.15"
+tachyonfx = "0.25"
 
 [dev-dependencies]
 insta = "1"
