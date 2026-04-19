@@ -302,6 +302,7 @@ pub fn run_terminal_chat(
     // Event loop
     loop {
         let tick_ms = start_time.elapsed().as_millis() as u64;
+        app.tick();
 
         terminal.draw(|frame| render_frame(frame, &app, tick_ms))?;
 

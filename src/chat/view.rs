@@ -52,7 +52,7 @@ pub fn render_to_lines_for_test(app: &ChatApp, width: u16, height: u16) -> Vec<S
         .collect()
 }
 
-pub fn render_frame(frame: &mut Frame, app: &ChatApp, _tick_ms: u64) {
+pub fn render_frame(frame: &mut Frame, app: &ChatApp, tick_ms: u64) {
     let theme = build_theme();
     let area = frame.area();
 
@@ -64,7 +64,7 @@ pub fn render_frame(frame: &mut Frame, app: &ChatApp, _tick_ms: u64) {
     // Banner: 2 border + 9 slime rows + 1 padding = 12
     let [banner, timeline, sep, input, status] = vertical![==12, >=1, ==1, ==3, ==1].areas(area);
 
-    render_welcome_banner(frame, banner, app, &theme);
+    render_welcome_banner(frame, banner, app, tick_ms, &theme);
     render_timeline(frame, timeline, app, &theme);
     render_separator(frame, sep, &theme);
     render_input(frame, input, app, &theme);
@@ -76,11 +76,17 @@ pub fn render_frame(frame: &mut Frame, app: &ChatApp, _tick_ms: u64) {
     }
 }
 
-fn render_welcome_banner(frame: &mut Frame, area: Rect, app: &ChatApp, theme: &ChatTheme) {
+fn render_welcome_banner(
+    frame: &mut Frame,
+    area: Rect,
+    app: &ChatApp,
+    tick_ms: u64,
+    theme: &ChatTheme,
+) {
     let version = env!("CARGO_PKG_VERSION");
 
-    // Animate mascot: use tick_count to advance frames
-    let mascot_lines = render_mascot_lines(WelcomeState::new(), app.tick_count() * 200);
+    // Animate mascot: use real elapsed time so sprite frames cycle
+    let mascot_lines = render_mascot_lines(WelcomeState::new(), tick_ms);
     let mascot_rows: Vec<Line<'static>> = mascot_lines
         .into_iter()
         .skip_while(|line| {
