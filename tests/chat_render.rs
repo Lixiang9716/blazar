@@ -55,7 +55,7 @@ fn timeline_entries_have_identity_markers() {
 }
 
 #[test]
-fn title_bar_uses_solarized_dark_background() {
+fn title_bar_uses_terminal_default_background() {
     let backend = TestBackend::new(100, 30);
     let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
     let app = ChatApp::new_for_test(REPO_ROOT);
@@ -64,10 +64,11 @@ fn title_bar_uses_solarized_dark_background() {
         .draw(|frame| render_frame(frame, &app, 1_200))
         .expect("chat frame should render");
 
-    // Title bar is row 0 — check it has a non-default background
+    // Title bar is row 0 — background should be the terminal default (no override)
     let first_row_cell = &terminal.backend().buffer().content()[50]; // middle of title
-    assert!(
-        first_row_cell.bg != Color::Reset,
-        "title bar should have a styled background color"
+    assert_eq!(
+        first_row_cell.bg,
+        Color::Reset,
+        "title bar should use the terminal default background"
     );
 }

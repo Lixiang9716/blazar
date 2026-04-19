@@ -43,9 +43,9 @@ pub struct ChatTheme {
 
 pub fn build_theme() -> ChatTheme {
     ChatTheme {
-        title_bar: Style::default().fg(BASE1).bg(Color::Rgb(45, 45, 80)),
+        title_bar: Style::default().fg(BASE1),
         title_text: Style::default().fg(BASE2).add_modifier(Modifier::BOLD),
-        timeline_bg: Style::default().fg(BASE0).bg(BASE03),
+        timeline_bg: Style::default().fg(BASE0),
         body_text: Style::default().fg(BASE0),
         dim_text: Style::default().fg(BASE01),
         bold_text: Style::default().fg(BASE1).add_modifier(Modifier::BOLD),
@@ -57,10 +57,10 @@ pub fn build_theme() -> ChatTheme {
         tool_target: Style::default().fg(CYAN),
         diff_add: Style::default().fg(GREEN),
         diff_del: Style::default().fg(RED),
-        code_block: Style::default().fg(BASE0).bg(BASE02),
+        code_block: Style::default().fg(BASE0),
         input_prompt: Style::default().fg(CYAN),
         input_placeholder: Style::default().fg(BASE01),
-        status_bar: Style::default().fg(BASE1).bg(Color::Rgb(40, 40, 75)),
+        status_bar: Style::default().fg(BASE1),
         status_right: Style::default().fg(BASE01),
     }
 }
