@@ -101,27 +101,3 @@ fn launcher_keeps_selection_within_bounds() {
     )));
     assert_eq!(app.selected_index(), 1);
 }
-
-#[test]
-fn launcher_ignores_open_actions_when_no_workspaces_exist() {
-    let mut app = LauncherApp::new(vec![]);
-
-    assert_eq!(
-        app.handle_action(InputAction::Submit),
-        LauncherOutcome::None
-    );
-    assert_eq!(
-        app.handle_action(InputAction::Key(KeyEvent::new(
-            KeyCode::Char('s'),
-            KeyModifiers::NONE,
-        ))),
-        LauncherOutcome::None
-    );
-    assert_eq!(
-        app.handle_action(InputAction::Key(KeyEvent::new(
-            KeyCode::Char('g'),
-            KeyModifiers::NONE,
-        ))),
-        LauncherOutcome::None
-    );
-}

@@ -89,13 +89,10 @@ impl LauncherApp {
     }
 
     fn open_selected(&self, initial_view: Option<WorkspaceView>) -> LauncherOutcome {
-        if let Some(selected) = self.workspaces.get(self.selected_index) {
-            LauncherOutcome::OpenWorkspace {
-                repo_path: PathBuf::from(&selected.repo_path),
-                initial_view,
-            }
-        } else {
-            LauncherOutcome::None
+        let selected = self.selected_workspace();
+        LauncherOutcome::OpenWorkspace {
+            repo_path: PathBuf::from(&selected.repo_path),
+            initial_view,
         }
     }
 }
