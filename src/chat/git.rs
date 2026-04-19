@@ -43,8 +43,7 @@ impl GitSummary {
         let mut is_dirty = false;
 
         for line in text.lines() {
-            if line.starts_with("## ") {
-                let rest = &line[3..];
+            if let Some(rest) = line.strip_prefix("## ") {
                 // Extract branch name (before "...")
                 branch = if let Some(pos) = rest.find("...") {
                     rest[..pos].to_string()
