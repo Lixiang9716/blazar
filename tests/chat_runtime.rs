@@ -297,3 +297,27 @@ fn new_for_test_session_summary_is_deterministic() {
     assert_eq!(app.session_summary().in_progress_todos, 1);
     assert_eq!(app.session_summary().done_todos, 4);
 }
+
+// Issue 2: repo-path resolution must be testable independently of terminal setup.
+use blazar::chat::app::resolve_repo_path;
+
+#[test]
+fn resolve_repo_path_uses_schema_repopath_default() {
+    let schema = serde_json::json!({
+        "properties": {
+            "workspace": {
+                "properties": {
+                    "repoPath": { "default": "/home/user/myproject" }
+                }
+            }
+        }
+    });
+    assert_eq!(resolve_repo_path(&schema), "/home/user/myproject");
+}
+
+#[test]
+fn resolve_repo_path_falls_back_to_non_empty_string_when_schema_empty() {
+    let schema = serde_json::json!({});
+    let path = resolve_repo_path(&schema);
+    assert!(!path.is_empty(), "fallback must not be empty; got: {path:?}");
+}

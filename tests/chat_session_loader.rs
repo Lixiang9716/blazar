@@ -150,3 +150,24 @@ fn session_loader_fallback_plan_status_when_no_plan_md() {
     );
     std::fs::remove_dir_all(&dir).ok();
 }
+
+// Issue 1: Connection::open must not silently create session.db when it is absent.
+#[test]
+fn load_from_dir_does_not_create_session_db_when_absent() {
+    let dir = unique_dir("blazar-no-create-db");
+    std::fs::create_dir_all(&dir).unwrap();
+    // Provide workspace.yaml so the loader proceeds past the early-exit guards,
+    // but deliberately omit session.db.
+    std::fs::write(dir.join("workspace.yaml"), "label: no-db-session\n").unwrap();
+
+    let db_path = dir.join("session.db");
+    assert!(!db_path.exists(), "session.db must not exist before the call");
+
+    let _summary = SessionSummary::load_from_dir(std::path::Path::new("."), Some(&dir));
+
+    assert!(
+        !db_path.exists(),
+        "load_from_dir must NOT create session.db when the file is absent"
+    );
+    std::fs::remove_dir_all(&dir).ok();
+}

@@ -142,8 +142,19 @@ fn load_checkpoints(index_path: &Path) -> Vec<String> {
 
 /// Queries `session.db` for todo counts grouped by status.
 /// Returns `(pending, in_progress, done)`.
+///
+/// Opens with `SQLITE_OPEN_READ_ONLY` so a missing file is never created.
 fn load_todo_counts(db_path: &Path) -> (usize, usize, usize) {
-    let Ok(conn) = rusqlite::Connection::open(db_path) else {
+    // Explicit existence check: read-only open still fails gracefully on most
+    // systems for a missing file, but the guard makes the intent unambiguous and
+    // prevents any edge-case where the SQLite VFS would create an empty file.
+    if !db_path.exists() {
+        return (0, 0, 0);
+    }
+    let Ok(conn) = rusqlite::Connection::open_with_flags(
+        db_path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    ) else {
         return (0, 0, 0);
     };
     let mut pending = 0usize;

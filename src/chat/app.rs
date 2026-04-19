@@ -103,23 +103,17 @@ pub fn run_terminal_chat(
     use std::io::stdout;
     use std::time::{Duration, Instant};
 
+    // Resolve repo path and initialise the app BEFORE touching the terminal so
+    // that the potentially slow git/session I/O does not run inside raw mode.
+    let repo_path = resolve_repo_path(&_schema);
+    let mut app = WorkspaceApp::new(&repo_path);
+
     // Setup terminal
     enable_raw_mode()?;
     stdout().execute(EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(stdout());
     let mut terminal = Terminal::new(backend)?;
 
-    // Initialize app — extract repo path from schema, fall back to cwd
-    let repo_path: String = _schema
-        .pointer("/properties/workspace/properties/repoPath/default")
-        .and_then(|v| v.as_str())
-        .map(str::to_owned)
-        .unwrap_or_else(|| {
-            std::env::current_dir()
-                .map(|p| p.display().to_string())
-                .unwrap_or_default()
-        });
-    let mut app = WorkspaceApp::new(&repo_path);
     let start_time = Instant::now();
 
     // Event loop
@@ -148,4 +142,19 @@ pub fn run_terminal_chat(
     stdout().execute(LeaveAlternateScreen)?;
 
     Ok(())
+}
+
+/// Extracts the repository path from the schema JSON, falling back to the
+/// current working directory.  Extracted as a standalone function so it can be
+/// unit-tested without running the terminal event loop.
+pub fn resolve_repo_path(schema: &Value) -> String {
+    schema
+        .pointer("/properties/workspace/properties/repoPath/default")
+        .and_then(|v| v.as_str())
+        .map(str::to_owned)
+        .unwrap_or_else(|| {
+            std::env::current_dir()
+                .map(|p| p.display().to_string())
+                .unwrap_or_default()
+        })
 }
