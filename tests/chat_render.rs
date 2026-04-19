@@ -73,7 +73,7 @@ fn title_bar_uses_terminal_default_background() {
     );
 }
 
-/// Simulates the interactive flow: start → type "1" → submit → verify echo response.
+/// Simulates the interactive flow: start → type "hi" → submit → verify echo response.
 #[test]
 fn interactive_send_message_shows_echo_response() {
     use blazar::chat::input::InputAction;
@@ -94,15 +94,19 @@ fn interactive_send_message_shows_echo_response() {
         "no echo response before user input"
     );
 
-    // Step 2: simulate typing "1"
+    // Step 2: simulate typing "hi"
     app.handle_action(InputAction::Key(KeyEvent::new(
-        KeyCode::Char('1'),
+        KeyCode::Char('h'),
+        KeyModifiers::NONE,
+    )));
+    app.handle_action(InputAction::Key(KeyEvent::new(
+        KeyCode::Char('i'),
         KeyModifiers::NONE,
     )));
     let lines_typing = render_to_lines_for_test(&app, 80, 35);
     assert!(
-        lines_typing.iter().any(|l| l.contains('1')),
-        "composer should show typed character"
+        lines_typing.iter().any(|l| l.contains("hi")),
+        "composer should show typed characters"
     );
 
     // Step 3: press Enter to submit
@@ -115,7 +119,7 @@ fn interactive_send_message_shows_echo_response() {
         "echo response should appear after submit"
     );
     assert!(
-        lines_after.iter().any(|l| l.contains('1')),
-        "user message '1' should appear in timeline"
+        lines_after.iter().any(|l| l.contains("hi")),
+        "user message 'hi' should appear in timeline"
     );
 }
