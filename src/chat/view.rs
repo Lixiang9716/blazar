@@ -1,4 +1,5 @@
 use crate::chat::app::ChatApp;
+use crate::chat::git::GitSummary;
 use crate::chat::model::Author;
 use crate::chat::theme::build_theme;
 use crate::chat::workspace::{WorkspaceApp, WorkspaceView};
@@ -198,12 +199,7 @@ pub fn render_workspace(frame: &mut Frame, app: &WorkspaceApp, tick_ms: u64) {
             render_messages_only(frame, cols[1], app.chat(), &theme);
         }
         WorkspaceView::Git => {
-            let block = Block::default()
-                .borders(Borders::ALL)
-                .border_style(theme.panel_border)
-                .title("Git");
-            let paragraph = Paragraph::new(Line::from("View not implemented yet")).block(block);
-            frame.render_widget(paragraph, cols[1]);
+            render_git_panel(frame, cols[1], app.git_summary(), &theme);
         }
         WorkspaceView::Sessions => {
             let block = Block::default()
@@ -292,4 +288,53 @@ fn render_composer(
     // TextArea widget requires immutable reference
     let composer = app.composer();
     frame.render_widget(composer, area);
+}
+
+fn render_git_panel(
+    frame: &mut Frame,
+    area: Rect,
+    summary: &GitSummary,
+    theme: &crate::chat::theme::ChatTheme,
+) {
+    let mut lines: Vec<Line> = vec![];
+
+    let status_label = if summary.is_dirty { "dirty" } else { "clean" };
+    lines.push(Line::from(vec![
+        Span::styled("Branch: ", Style::default()),
+        Span::styled(&summary.branch, theme.active_nav),
+        Span::styled("  ", Style::default()),
+        Span::styled(status_label, if summary.is_dirty { Style::default().fg(Color::Yellow) } else { Style::default().fg(Color::Green) }),
+    ]));
+
+    lines.push(Line::from(format!(
+        "ahead: {}  behind: {}  staged: {}  unstaged: {}",
+        summary.ahead, summary.behind, summary.staged, summary.unstaged
+    )));
+
+    if !summary.changed_files.is_empty() {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled("Changed files:", Style::default().fg(Color::Cyan))));
+        for f in &summary.changed_files {
+            lines.push(Line::from(format!("  {f}")));
+        }
+    }
+
+    if !summary.recent_commits.is_empty() {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled("Recent commits:", Style::default().fg(Color::Cyan))));
+        for c in &summary.recent_commits {
+            lines.push(Line::from(format!("  {c}")));
+        }
+    }
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(theme.panel_border)
+        .title("Git");
+
+    let paragraph = Paragraph::new(lines)
+        .block(block)
+        .wrap(Wrap { trim: false });
+
+    frame.render_widget(paragraph, area);
 }
