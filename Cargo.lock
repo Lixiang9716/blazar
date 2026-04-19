@@ -220,6 +220,8 @@ dependencies = [
  "rusqlite",
  "serde_json",
  "tui-markdown",
+ "tui-overlay",
+ "tui-widget-list",
  "unicode-width",
 ]
 
@@ -2028,6 +2030,26 @@ dependencies = [
  "rstest",
  "syntect",
  "tracing",
+]
+
+[[package]]
+name = "tui-overlay"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "161772deae553f1c92bfd89f3a612a7b628a0b1cc0140720232c5bd9789474eb"
+dependencies = [
+ "ratatui-core",
+ "ratatui-widgets",
+]
+
+[[package]]
+name = "tui-widget-list"
+version = "0.15.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8fbf7f6c7d04beb3602630d83db44e81d7a1de1fea11ca3435d82e094c5c0192"
+dependencies = [
+ "ratatui-core",
+ "ratatui-widgets",
 ]
 
 [[package]]

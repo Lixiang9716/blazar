@@ -75,7 +75,9 @@ fn picker_navigation_reaches_later_commands() {
     let lines = render_to_lines_for_test(&app, 100, 35);
 
     assert!(
-        lines.iter().any(|line| line.contains("/tools") || line.contains("/agents")),
+        lines
+            .iter()
+            .any(|line| line.contains("/tools") || line.contains("/agents")),
         "picker navigation should reach later command entries"
     );
 }

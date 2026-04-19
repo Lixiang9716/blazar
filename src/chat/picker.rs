@@ -1,6 +1,9 @@
 //! Modal picker overlay — a bottom-anchored selection list.
 //! Used for `/` command palette, confirmation dialogs, and setup wizards.
 
+use tui_overlay::OverlayState;
+use tui_widget_list::ListState;
+
 pub const PICKER_PAGE_SIZE: usize = 6;
 
 #[derive(Debug, Clone)]
@@ -22,10 +25,9 @@ impl PickerItem {
 pub struct ModalPicker {
     pub title: String,
     pub items: Vec<PickerItem>,
-    pub selected: usize,
-    pub scroll_offset: usize,
-    pub visible: bool,
     pub filter: String,
+    overlay_state: OverlayState,
+    list_state: ListState,
 }
 
 impl ModalPicker {
@@ -33,10 +35,9 @@ impl ModalPicker {
         Self {
             title: title.into(),
             items,
-            selected: 0,
-            scroll_offset: 0,
-            visible: false,
             filter: String::new(),
+            overlay_state: OverlayState::new(),
+            list_state: ListState::default(),
         }
     }
 
@@ -71,77 +72,99 @@ impl ModalPicker {
     }
 
     pub fn open(&mut self) {
-        self.visible = true;
-        self.selected = 0;
-        self.scroll_offset = 0;
+        self.overlay_state.open();
         self.filter.clear();
+        self.reset_selection();
     }
 
     pub fn close(&mut self) {
-        self.visible = false;
+        self.overlay_state.close();
         self.filter.clear();
+    }
+
+    pub fn is_visible(&self) -> bool {
+        self.overlay_state.is_open() || self.overlay_state.is_animating()
+    }
+
+    pub fn overlay_state(&self) -> &OverlayState {
+        &self.overlay_state
+    }
+
+    pub fn list_state(&self) -> &ListState {
+        &self.list_state
+    }
+
+    pub fn selected_index(&self) -> Option<usize> {
+        self.list_state.selected
     }
 
     pub fn move_up(&mut self) {
         let count = self.filtered_items().len();
         if count == 0 {
+            self.list_state.select(None);
             return;
         }
-        self.selected = self.selected.checked_sub(1).unwrap_or(count - 1);
-        // Wrap to bottom: scroll to end
-        if self.selected == count - 1 && self.scroll_offset == 0 {
-            self.scroll_offset = count.saturating_sub(PICKER_PAGE_SIZE);
-        } else if self.selected < self.scroll_offset {
-            self.scroll_offset = self.selected;
-        }
+        let current = self
+            .list_state
+            .selected
+            .unwrap_or(0)
+            .min(count.saturating_sub(1));
+        let next = current.checked_sub(1).unwrap_or(count - 1);
+        self.list_state.select(Some(next));
     }
 
     pub fn move_down(&mut self) {
         let count = self.filtered_items().len();
         if count == 0 {
+            self.list_state.select(None);
             return;
         }
-        self.selected = (self.selected + 1) % count;
-        // Wrap to top: scroll to start
-        if self.selected == 0 {
-            self.scroll_offset = 0;
-        } else if self.selected >= self.scroll_offset + PICKER_PAGE_SIZE {
-            self.scroll_offset = self.selected + 1 - PICKER_PAGE_SIZE;
-        }
+        let current = self
+            .list_state
+            .selected
+            .unwrap_or(0)
+            .min(count.saturating_sub(1));
+        let next = (current + 1) % count;
+        self.list_state.select(Some(next));
     }
 
     pub fn select_current(&self) -> Option<String> {
         let filtered = self.filtered_items();
-        filtered.get(self.selected).map(|item| item.label.clone())
+        let index = self
+            .list_state
+            .selected
+            .map(|selected| selected.min(filtered.len().saturating_sub(1)))?;
+        filtered.get(index).map(|item| item.label.clone())
     }
 
     pub fn push_filter(&mut self, ch: char) {
         self.filter.push(ch);
-        self.selected = 0;
-        self.scroll_offset = 0;
+        self.reset_selection();
     }
 
     pub fn pop_filter(&mut self) {
         self.filter.pop();
-        self.selected = 0;
-        self.scroll_offset = 0;
+        self.reset_selection();
     }
 
     /// Returns the slice of filtered items visible in the current scroll window.
     pub fn visible_window(&self) -> (Vec<&PickerItem>, usize) {
         let filtered = self.filtered_items();
-        let end = (self.scroll_offset + PICKER_PAGE_SIZE).min(filtered.len());
-        let window: Vec<&PickerItem> = filtered[self.scroll_offset..end].to_vec();
-        (window, self.scroll_offset)
+        let offset = self.window_offset(filtered.len());
+        let end = (offset + PICKER_PAGE_SIZE).min(filtered.len());
+        let window: Vec<&PickerItem> = filtered[offset..end].to_vec();
+        (window, offset)
     }
 
     pub fn has_scroll_up(&self) -> bool {
-        self.scroll_offset > 0
+        let count = self.filtered_items().len();
+        self.window_offset(count) > 0
     }
 
     pub fn has_scroll_down(&self) -> bool {
         let count = self.filtered_items().len();
-        self.scroll_offset + PICKER_PAGE_SIZE < count
+        let offset = self.window_offset(count);
+        offset + PICKER_PAGE_SIZE < count
     }
 
     pub fn filtered_items(&self) -> Vec<&PickerItem> {
@@ -161,5 +184,60 @@ impl ModalPicker {
                 })
                 .collect()
         }
+    }
+
+    fn reset_selection(&mut self) {
+        if self.filtered_items().is_empty() {
+            self.list_state.select(None);
+        } else {
+            self.list_state.select(Some(0));
+        }
+    }
+
+    fn window_offset(&self, count: usize) -> usize {
+        let selected = self
+            .list_state
+            .selected
+            .unwrap_or(0)
+            .min(count.saturating_sub(1));
+        if selected >= PICKER_PAGE_SIZE {
+            selected + 1 - PICKER_PAGE_SIZE
+        } else {
+            0
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ModalPicker, PickerItem};
+
+    #[test]
+    fn open_close_tracks_visibility_with_overlay_state() {
+        let mut picker = ModalPicker::new("Commands", vec![PickerItem::new("/help", "help")]);
+        assert!(!picker.is_visible());
+
+        picker.open();
+        assert!(picker.is_visible());
+
+        picker.close();
+        assert!(!picker.is_visible());
+    }
+
+    #[test]
+    fn filter_updates_reset_selection() {
+        let mut picker = ModalPicker::new(
+            "Commands",
+            vec![
+                PickerItem::new("/help", "help"),
+                PickerItem::new("/clear", "clear"),
+            ],
+        );
+        picker.open();
+        picker.move_down();
+        assert_eq!(picker.selected_index(), Some(1));
+
+        picker.push_filter('h');
+        assert_eq!(picker.selected_index(), Some(0));
     }
 }

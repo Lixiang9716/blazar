@@ -72,7 +72,7 @@ pub fn render_frame(frame: &mut Frame, app: &ChatApp, tick_ms: u64) {
     render_status_bar(frame, status, app, &theme);
 
     // Render modal picker overlay if visible
-    if app.picker.visible {
+    if app.picker.is_visible() {
         render_picker(frame, area, app, &theme);
     }
 }
@@ -506,7 +506,7 @@ fn render_picker(frame: &mut Frame, full_area: Rect, app: &ChatApp, theme: &Chat
 
     for (i, item) in window.iter().enumerate() {
         let global_idx = offset + i;
-        let is_selected = global_idx == app.picker.selected;
+        let is_selected = app.picker.selected_index() == Some(global_idx);
         let marker = if is_selected { "› " } else { "  " };
         let label_style = if is_selected {
             theme.picker_selected
@@ -537,7 +537,7 @@ fn render_picker(frame: &mut Frame, full_area: Rect, app: &ChatApp, theme: &Chat
     // Footer with count info
     let footer_text = format!(
         "↑↓ navigate · enter select · esc cancel  ({}/{})",
-        app.picker.selected + 1,
+        app.picker.selected_index().map_or(0, |index| index + 1),
         total
     );
     let footer = Line::from(Span::styled(footer_text, theme.dim_text));
