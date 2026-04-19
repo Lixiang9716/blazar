@@ -27,6 +27,18 @@ fn startup_prefers_last_opened_path_when_valid_and_launcher_not_forced() {
 }
 
 #[test]
+fn startup_shows_launcher_when_forced() {
+    let catalog = WorkspaceCatalog::default();
+
+    let decision = catalog.decide_startup(StartupPreference {
+        repo_path_hint: Some(PathBuf::from(env!("CARGO_MANIFEST_DIR"))),
+        force_launcher: true,
+    });
+
+    assert_eq!(decision, LaunchDecision::ShowLauncher);
+}
+
+#[test]
 fn startup_prefers_last_opened_before_repo_path_hint_when_both_are_valid() {
     let last_opened = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let repo_path_hint = last_opened
