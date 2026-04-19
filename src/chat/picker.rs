@@ -1,5 +1,5 @@
-/// Modal picker overlay — a bottom-anchored selection list.
-/// Used for `/` command palette, confirmation dialogs, and setup wizards.
+//! Modal picker overlay — a bottom-anchored selection list.
+//! Used for `/` command palette, confirmation dialogs, and setup wizards.
 
 pub const PICKER_PAGE_SIZE: usize = 6;
 
