@@ -78,9 +78,15 @@ pub fn render_frame(frame: &mut Frame, app: &ChatApp, _tick_ms: u64) {
 fn render_welcome_banner(frame: &mut Frame, area: Rect, app: &ChatApp, theme: &ChatTheme) {
     let version = env!("CARGO_PKG_VERSION");
 
-    // Get mascot sprite lines (first idle frame) — take top 4 rows as icon
+    // Get mascot sprite lines — skip leading blank rows, take 4 visible rows
     let mascot_lines = render_mascot_lines(WelcomeState::new(), 0);
-    let mascot_rows: Vec<Line<'static>> = mascot_lines.into_iter().take(4).collect();
+    let mascot_rows: Vec<Line<'static>> = mascot_lines
+        .into_iter()
+        .skip_while(|line| {
+            line.width() == 0 || line.spans.iter().all(|s| s.content.trim().is_empty())
+        })
+        .take(4)
+        .collect();
     let mascot_width = mascot_rows.first().map(|l| l.width()).unwrap_or(0) as u16;
 
     let block = Block::bordered()
