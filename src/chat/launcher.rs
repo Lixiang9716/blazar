@@ -58,6 +58,10 @@ impl LauncherApp {
         self.focus
     }
 
+    /// Handles launcher input actions.
+    ///
+    /// `Submit`, `s`, and `g` require at least one workspace because they
+    /// route through `open_selected()` and `selected_workspace()`.
     pub fn handle_action(&mut self, action: InputAction) -> LauncherOutcome {
         match action {
             InputAction::CycleFocus => {
