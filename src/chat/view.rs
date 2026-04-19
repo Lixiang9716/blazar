@@ -2,7 +2,7 @@ use crate::chat::app::ChatApp;
 use crate::chat::git::GitSummary;
 use crate::chat::model::Author;
 use crate::chat::session::SessionSummary;
-use crate::chat::theme::build_theme;
+use crate::chat::theme::{build_theme, ChatTheme};
 use crate::chat::workspace::{WorkspaceApp, WorkspaceView};
 use crate::welcome::mascot::render_mascot_lines;
 use crate::welcome::state::WelcomeState;
@@ -136,16 +136,15 @@ fn render_spirit_pane(
 
 pub fn render_workspace(frame: &mut Frame, app: &WorkspaceApp, tick_ms: u64) {
     let area = frame.area();
+    let theme = build_theme();
     if area.width < 80 {
-        render_workspace_narrow(frame, app, area);
+        render_workspace_narrow(frame, app, area, &theme);
     } else {
-        render_workspace_wide(frame, app, tick_ms, area);
+        render_workspace_wide(frame, app, tick_ms, area, &theme);
     }
 }
 
-fn render_workspace_narrow(frame: &mut Frame, app: &WorkspaceApp, area: Rect) {
-    let theme = build_theme();
-
+fn render_workspace_narrow(frame: &mut Frame, app: &WorkspaceApp, area: Rect, theme: &ChatTheme) {
     // Compact: nav bar (1 line) + content (fill) + footer (3 lines)
     let rows = Layout::default()
         .direction(Direction::Vertical)
@@ -162,20 +161,24 @@ fn render_workspace_narrow(frame: &mut Frame, app: &WorkspaceApp, area: Rect) {
 
     // Content panel
     match app.active_view() {
-        WorkspaceView::Chat => render_messages_only(frame, rows[1], app.chat(), &theme),
-        WorkspaceView::Git => render_git_panel(frame, rows[1], app.git_summary(), &theme),
+        WorkspaceView::Chat => render_messages_only(frame, rows[1], app.chat(), theme),
+        WorkspaceView::Git => render_git_panel(frame, rows[1], app.git_summary(), theme),
         WorkspaceView::Sessions => {
-            render_session_panel(frame, rows[1], app.session_summary(), &theme)
+            render_session_panel(frame, rows[1], app.session_summary(), theme)
         }
     }
 
     // Footer
-    render_footer(frame, rows[2], app, &theme);
+    render_footer(frame, rows[2], app, theme);
 }
 
-fn render_workspace_wide(frame: &mut Frame, app: &WorkspaceApp, tick_ms: u64, area: Rect) {
-    let theme = build_theme();
-
+fn render_workspace_wide(
+    frame: &mut Frame,
+    app: &WorkspaceApp,
+    tick_ms: u64,
+    area: Rect,
+    theme: &ChatTheme,
+) {
     // Header, body, footer
     let rows = Layout::default()
         .direction(Direction::Vertical)
@@ -247,18 +250,18 @@ fn render_workspace_wide(frame: &mut Frame, app: &WorkspaceApp, tick_ms: u64, ar
     match app.active_view() {
         WorkspaceView::Chat => {
             // render messages only in the main content area; the real composer belongs in the footer
-            render_messages_only(frame, cols[1], app.chat(), &theme);
+            render_messages_only(frame, cols[1], app.chat(), theme);
         }
         WorkspaceView::Git => {
-            render_git_panel(frame, cols[1], app.git_summary(), &theme);
+            render_git_panel(frame, cols[1], app.git_summary(), theme);
         }
         WorkspaceView::Sessions => {
-            render_session_panel(frame, cols[1], app.session_summary(), &theme);
+            render_session_panel(frame, cols[1], app.session_summary(), theme);
         }
     }
 
     // Footer
-    render_footer(frame, rows[2], app, &theme);
+    render_footer(frame, rows[2], app, theme);
 }
 
 fn render_chat_pane(
