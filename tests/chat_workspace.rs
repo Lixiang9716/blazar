@@ -7,8 +7,7 @@ fn workspace_switches_views_and_cycles_focus() {
     assert_eq!(app.active_view(), WorkspaceView::Chat);
     assert_eq!(app.focus(), WorkspaceFocus::Nav);
 
-    app.select_view(WorkspaceView::Git);
-    assert_eq!(app.active_view(), WorkspaceView::Git);
+    app.cycle_focus();
     assert_eq!(app.focus(), WorkspaceFocus::Content);
 
     app.cycle_focus();
@@ -16,4 +15,8 @@ fn workspace_switches_views_and_cycles_focus() {
 
     app.cycle_focus();
     assert_eq!(app.focus(), WorkspaceFocus::Nav);
+
+    app.select_view(WorkspaceView::Git);
+    assert_eq!(app.active_view(), WorkspaceView::Git);
+    assert_eq!(app.focus(), WorkspaceFocus::Content);
 }
