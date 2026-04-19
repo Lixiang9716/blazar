@@ -100,6 +100,12 @@ impl WorkspaceApp {
     }
 
     pub fn handle_action(&mut self, action: InputAction) {
+        // Quit must be handled unconditionally regardless of focus or view so
+        // that Esc / Ctrl-C always works even from a non-Chat footer.
+        if action == InputAction::Quit {
+            self.chat_mut().handle_action(action);
+            return;
+        }
         if action == InputAction::CycleFocus {
             self.cycle_focus();
         } else if self.focus == WorkspaceFocus::Footer

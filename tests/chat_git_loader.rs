@@ -8,7 +8,7 @@ fn unique_dir(prefix: &str) -> PathBuf {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
-        .subsec_nanos();
+        .as_nanos();
     std::env::temp_dir().join(format!("{prefix}-{nanos}"))
 }
 

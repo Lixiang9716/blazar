@@ -324,3 +324,53 @@ fn resolve_repo_path_falls_back_to_non_empty_string_when_schema_empty() {
         "fallback must not be empty; got: {path:?}"
     );
 }
+
+// Issue 1: Quit must still work when focus is Footer and view is non-Chat.
+#[test]
+fn quit_from_git_view_footer_propagates() {
+    let mut app = WorkspaceApp::new_for_test(REPO_ROOT);
+
+    // Switch to Git view (focus becomes Content)
+    app.handle_action(InputAction::from_key_event(KeyEvent::new(
+        KeyCode::Char('2'),
+        KeyModifiers::NONE,
+    )));
+    assert_eq!(app.active_view(), WorkspaceView::Git);
+
+    // Advance focus to Footer
+    app.handle_action(InputAction::from_key_event(KeyEvent::new(
+        KeyCode::Tab,
+        KeyModifiers::NONE,
+    )));
+    assert_eq!(app.focus(), WorkspaceFocus::Footer);
+
+    // Esc → Quit must propagate even though we are in a non-Chat footer
+    app.handle_action(InputAction::Quit);
+    assert!(
+        app.should_quit(),
+        "Quit action from non-Chat footer must propagate; should_quit was false"
+    );
+}
+
+#[test]
+fn quit_from_sessions_view_footer_propagates() {
+    let mut app = WorkspaceApp::new_for_test(REPO_ROOT);
+
+    app.handle_action(InputAction::from_key_event(KeyEvent::new(
+        KeyCode::Char('3'),
+        KeyModifiers::NONE,
+    )));
+    assert_eq!(app.active_view(), WorkspaceView::Sessions);
+
+    app.handle_action(InputAction::from_key_event(KeyEvent::new(
+        KeyCode::Tab,
+        KeyModifiers::NONE,
+    )));
+    assert_eq!(app.focus(), WorkspaceFocus::Footer);
+
+    app.handle_action(InputAction::Quit);
+    assert!(
+        app.should_quit(),
+        "Quit action from Sessions footer must propagate"
+    );
+}

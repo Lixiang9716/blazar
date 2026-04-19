@@ -8,7 +8,7 @@ fn unique_dir(prefix: &str) -> PathBuf {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
-        .subsec_nanos();
+        .as_nanos();
     std::env::temp_dir().join(format!("{prefix}-{nanos}"))
 }
 
@@ -180,6 +180,93 @@ fn load_from_dir_does_not_create_session_db_when_absent() {
     assert!(
         !db_path.exists(),
         "load_from_dir must NOT create session.db when the file is absent"
+    );
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+// Issue 3: active_intent should come from the latest report_intent in events.jsonl.
+#[test]
+fn session_loader_reads_active_intent_from_events_jsonl() {
+    let dir = unique_dir("blazar-session-intent");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("workspace.yaml"), "label: intent-test\n").unwrap();
+
+    // Write events.jsonl: older non-matching line first, then the report_intent.
+    std::fs::write(
+        dir.join("events.jsonl"),
+        "{\"toolName\":\"other_tool\",\"toolArgs\":{\"x\":\"y\"}}\n\
+{\"toolName\":\"report_intent\",\"toolArgs\":{\"intent\":\"Exploring config setup\"}}\n",
+    )
+    .unwrap();
+
+    let summary = SessionSummary::load_from_dir(std::path::Path::new("."), Some(&dir));
+
+    assert_eq!(
+        summary.active_intent, "Exploring config setup",
+        "active_intent must come from the latest report_intent entry; got: {}",
+        summary.active_intent
+    );
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn session_loader_reads_intent_from_tool_result_session_log() {
+    let dir = unique_dir("blazar-session-intent-log");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("workspace.yaml"), "label: log-test\n").unwrap();
+
+    std::fs::write(
+        dir.join("events.jsonl"),
+        "{\"toolName\":\"report_intent\",\"toolResult\":{\"sessionLog\":\"Building parser\"}}\n",
+    )
+    .unwrap();
+
+    let summary = SessionSummary::load_from_dir(std::path::Path::new("."), Some(&dir));
+
+    assert_eq!(
+        summary.active_intent, "Building parser",
+        "active_intent should fall back to toolResult.sessionLog; got: {}",
+        summary.active_intent
+    );
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn session_loader_uses_latest_report_intent_when_multiple_present() {
+    let dir = unique_dir("blazar-session-intent-latest");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("workspace.yaml"), "label: multi-intent\n").unwrap();
+
+    std::fs::write(
+        dir.join("events.jsonl"),
+        "{\"toolName\":\"report_intent\",\"toolArgs\":{\"intent\":\"Earlier intent\"}}\n\
+{\"toolName\":\"report_intent\",\"toolArgs\":{\"intent\":\"Later intent\"}}\n",
+    )
+    .unwrap();
+
+    let summary = SessionSummary::load_from_dir(std::path::Path::new("."), Some(&dir));
+
+    assert_eq!(
+        summary.active_intent, "Later intent",
+        "must pick the LAST report_intent; got: {}",
+        summary.active_intent
+    );
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn session_loader_falls_back_when_no_events_jsonl() {
+    let dir = unique_dir("blazar-session-no-events");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("workspace.yaml"), "label: no-events\n").unwrap();
+    // No events.jsonl
+
+    let summary = SessionSummary::load_from_dir(std::path::Path::new("."), Some(&dir));
+
+    assert_eq!(
+        summary.active_intent, "No active intent recorded",
+        "fallback must be used when events.jsonl is absent; got: {}",
+        summary.active_intent
     );
     std::fs::remove_dir_all(&dir).ok();
 }

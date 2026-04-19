@@ -72,7 +72,8 @@ impl SessionSummary {
         Self {
             session_label,
             cwd,
-            active_intent: "No active intent recorded".to_string(),
+            active_intent: load_active_intent(dir)
+                .unwrap_or_else(|| "No active intent recorded".to_string()),
             plan_status,
             checkpoints,
             ready_todos,
@@ -179,4 +180,27 @@ fn load_todo_counts(db_path: &Path) -> (usize, usize, usize) {
     }
 
     (pending, in_progress, done)
+}
+
+/// Scans `events.jsonl` from newest to oldest and returns the `intent` value
+/// from the most recent `report_intent` tool call.
+///
+/// Tries `toolArgs.intent` first, then `toolResult.sessionLog` as a fallback.
+/// Returns `None` if the file is absent, unreadable, or contains no matching entry.
+fn load_active_intent(session_dir: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(session_dir.join("events.jsonl")).ok()?;
+    text.lines()
+        .rev()
+        .filter(|l| !l.trim().is_empty())
+        .find_map(|line| {
+            let v: serde_json::Value = serde_json::from_str(line).ok()?;
+            if v.get("toolName")?.as_str()? != "report_intent" {
+                return None;
+            }
+            // Prefer toolArgs.intent; fall back to toolResult.sessionLog.
+            v.pointer("/toolArgs/intent")
+                .or_else(|| v.pointer("/toolResult/sessionLog"))
+                .and_then(|val| val.as_str())
+                .map(str::to_owned)
+        })
 }

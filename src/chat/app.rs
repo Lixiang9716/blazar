@@ -96,7 +96,7 @@ pub fn run_terminal_chat(
     use crossterm::{
         ExecutableCommand,
         event::{self, Event},
-        terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
+        terminal::{EnterAlternateScreen, enable_raw_mode},
     };
     use ratatui_core::terminal::Terminal;
     use ratatui_crossterm::CrosstermBackend;
@@ -108,9 +108,10 @@ pub fn run_terminal_chat(
     let repo_path = resolve_repo_path(&_schema);
     let mut app = WorkspaceApp::new(&repo_path);
 
-    // Setup terminal
+    // Setup terminal; the guard ensures cleanup on any exit path including `?`.
     enable_raw_mode()?;
     stdout().execute(EnterAlternateScreen)?;
+    let _guard = TerminalGuard;
     let backend = CrosstermBackend::new(stdout());
     let mut terminal = Terminal::new(backend)?;
 
@@ -120,10 +121,8 @@ pub fn run_terminal_chat(
     loop {
         let tick_ms = start_time.elapsed().as_millis() as u64;
 
-        // Render
         terminal.draw(|frame| render_workspace(frame, &app, tick_ms))?;
 
-        // Handle events with timeout
         if event::poll(Duration::from_millis(100))?
             && let Event::Key(key) = event::read()?
         {
@@ -131,17 +130,28 @@ pub fn run_terminal_chat(
             app.handle_action(action);
         }
 
-        // Check quit
         if app.should_quit() {
             break;
         }
     }
 
-    // Cleanup
-    disable_raw_mode()?;
-    stdout().execute(LeaveAlternateScreen)?;
-
     Ok(())
+    // _guard drops here, restoring raw mode and alternate screen.
+}
+
+/// Restores raw mode and alternate screen when dropped.
+///
+/// Ensures `disable_raw_mode` and `LeaveAlternateScreen` are always called
+/// even when `run_terminal_chat` returns early via a `?`-propagated error.
+pub(crate) struct TerminalGuard;
+
+impl Drop for TerminalGuard {
+    fn drop(&mut self) {
+        use crossterm::ExecutableCommand;
+        let _ = crossterm::terminal::disable_raw_mode();
+        let _ = std::io::stdout()
+            .execute(crossterm::terminal::LeaveAlternateScreen);
+    }
 }
 
 /// Extracts the repository path from the schema JSON, falling back to the
