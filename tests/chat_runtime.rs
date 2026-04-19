@@ -1,5 +1,6 @@
 use blazar::chat::app::ChatApp;
 use blazar::chat::input::InputAction;
+use blazar::chat::workspace::{WorkspaceApp, WorkspaceFocus, WorkspaceView};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 const REPO_ROOT: &str = env!("CARGO_MANIFEST_DIR");
@@ -38,6 +39,18 @@ fn ctrl_c_requests_quit() {
 }
 
 #[test]
+fn digit_shortcuts_switch_workspace_views() {
+    let chat = InputAction::from_key_event(KeyEvent::new(KeyCode::Char('1'), KeyModifiers::NONE));
+    let git = InputAction::from_key_event(KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE));
+    let sessions =
+        InputAction::from_key_event(KeyEvent::new(KeyCode::Char('3'), KeyModifiers::NONE));
+
+    assert_eq!(chat, InputAction::SelectChatView);
+    assert_eq!(git, InputAction::SelectGitView);
+    assert_eq!(sessions, InputAction::SelectSessionsView);
+}
+
+#[test]
 fn character_input_is_forwarded_to_composer() {
     let mut app = ChatApp::new_for_test(REPO_ROOT);
 
@@ -46,6 +59,47 @@ fn character_input_is_forwarded_to_composer() {
 
     // Composer should have received the character
     assert!(app.composer_text().contains('a'));
+}
+
+#[test]
+fn tab_shortcut_cycles_workspace_focus() {
+    let mut app = WorkspaceApp::new_for_test(REPO_ROOT);
+
+    app.handle_action(InputAction::from_key_event(KeyEvent::new(
+        KeyCode::Tab,
+        KeyModifiers::NONE,
+    )));
+    assert_eq!(app.focus(), WorkspaceFocus::Content);
+
+    app.handle_action(InputAction::from_key_event(KeyEvent::new(
+        KeyCode::Tab,
+        KeyModifiers::NONE,
+    )));
+    assert_eq!(app.focus(), WorkspaceFocus::Footer);
+}
+
+#[test]
+fn workspace_routes_shortcuts_and_forwards_other_keys() {
+    let mut app = WorkspaceApp::new_for_test(REPO_ROOT);
+
+    app.handle_action(InputAction::from_key_event(KeyEvent::new(
+        KeyCode::Char('2'),
+        KeyModifiers::NONE,
+    )));
+    assert_eq!(app.active_view(), WorkspaceView::Git);
+    assert_eq!(app.focus(), WorkspaceFocus::Content);
+
+    app.handle_action(InputAction::from_key_event(KeyEvent::new(
+        KeyCode::Char('3'),
+        KeyModifiers::NONE,
+    )));
+    assert_eq!(app.active_view(), WorkspaceView::Sessions);
+
+    app.handle_action(InputAction::from_key_event(KeyEvent::new(
+        KeyCode::Char('a'),
+        KeyModifiers::NONE,
+    )));
+    assert!(app.chat().composer_text().contains('a'));
 }
 
 #[test]

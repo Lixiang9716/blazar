@@ -1,4 +1,5 @@
 use crate::chat::app::ChatApp;
+use crate::chat::input::InputAction;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorkspaceView {
@@ -48,6 +49,20 @@ impl WorkspaceApp {
             WorkspaceFocus::Content => WorkspaceFocus::Footer,
             WorkspaceFocus::Footer => WorkspaceFocus::Nav,
         };
+    }
+
+    pub fn handle_action(&mut self, action: InputAction) {
+        if action == InputAction::CycleFocus {
+            self.cycle_focus();
+        } else if action == InputAction::SelectChatView {
+            self.select_view(WorkspaceView::Chat);
+        } else if action == InputAction::SelectGitView {
+            self.select_view(WorkspaceView::Git);
+        } else if action == InputAction::SelectSessionsView {
+            self.select_view(WorkspaceView::Sessions);
+        } else {
+            self.chat_mut().handle_action(action);
+        }
     }
 
     pub fn chat(&self) -> &ChatApp {
