@@ -37,7 +37,11 @@ impl ChatApp {
                 body: "Spirit: Tell me what you'd like to explore.".to_owned(),
             }],
             timeline,
-            composer: TextArea::default(),
+            composer: {
+                let mut ta = TextArea::default();
+                ta.set_cursor_line_style(ratatui_core::style::Style::default());
+                ta
+            },
             should_quit: false,
             display_path,
             branch,
