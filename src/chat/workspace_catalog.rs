@@ -79,8 +79,8 @@ fn workspace_catalog_path_from_home(
     }
 
     current_dir
-        .or(executable_dir)
         .filter(|path| path.is_absolute())
+        .or(executable_dir.filter(|path| path.is_absolute()))
         .map(|path| {
             path.join(".copilot-home")
                 .join("blazar")
@@ -108,7 +108,7 @@ impl WorkspaceCatalog {
 
         if let Some(last) = &self.last_opened {
             let path = PathBuf::from(last);
-            if Path::new(last).exists() {
+            if path.exists() {
                 return LaunchDecision::Resume {
                     repo_path: path,
                     initial_view: None,
@@ -166,6 +166,23 @@ mod tests {
     #[test]
     fn workspace_catalog_path_uses_executable_dir_when_home_and_cwd_are_unavailable() {
         let path = workspace_catalog_path_from_home(None, None, Some(Path::new("/app/bin")));
+
+        assert_eq!(
+            path,
+            PathBuf::from("/app/bin")
+                .join(".copilot-home")
+                .join("blazar")
+                .join("workspaces.json")
+        );
+    }
+
+    #[test]
+    fn workspace_catalog_path_uses_absolute_executable_dir_when_current_dir_is_relative() {
+        let path = workspace_catalog_path_from_home(
+            None,
+            Some(Path::new("relative-workspace")),
+            Some(Path::new("/app/bin")),
+        );
 
         assert_eq!(
             path,

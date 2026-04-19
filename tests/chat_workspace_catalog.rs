@@ -7,9 +7,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 #[test]
 fn startup_prefers_last_opened_path_when_valid_and_launcher_not_forced() {
     let repo_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let repo_path_text = repo_path.display().to_string();
     let catalog = WorkspaceCatalog {
-        last_opened: Some(repo_path_text.clone()),
+        last_opened: Some(repo_path.display().to_string()),
         workspaces: vec![],
     };
 
