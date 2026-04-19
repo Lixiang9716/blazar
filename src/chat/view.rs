@@ -301,7 +301,7 @@ fn render_git_panel(
     let status_label = if summary.is_dirty { "dirty" } else { "clean" };
     lines.push(Line::from(vec![
         Span::styled("Branch: ", Style::default()),
-        Span::styled(&summary.branch, theme.active_nav),
+        Span::styled(&summary.branch, theme.status_text),
         Span::styled("  ", Style::default()),
         Span::styled(status_label, if summary.is_dirty { Style::default().fg(Color::Yellow) } else { Style::default().fg(Color::Green) }),
     ]));
