@@ -233,3 +233,34 @@ fn digit_shortcuts_from_footer_in_chat_view_still_type_into_composer() {
         "pressing '2' in chat footer must type into the composer"
     );
 }
+
+#[test]
+fn generic_key_input_in_non_chat_footer_does_not_write_to_composer() {
+    let mut app = WorkspaceApp::new_for_test(REPO_ROOT);
+
+    // Switch to Git view (focus becomes Content)
+    app.handle_action(InputAction::from_key_event(KeyEvent::new(
+        KeyCode::Char('2'),
+        KeyModifiers::NONE,
+    )));
+    assert_eq!(app.active_view(), WorkspaceView::Git);
+
+    // Cycle focus from Content → Footer
+    app.handle_action(InputAction::from_key_event(KeyEvent::new(
+        KeyCode::Tab,
+        KeyModifiers::NONE,
+    )));
+    assert_eq!(app.focus(), WorkspaceFocus::Footer);
+
+    // Type an ordinary character — must not reach the hidden composer
+    app.handle_action(InputAction::Key(KeyEvent::new(
+        KeyCode::Char('x'),
+        KeyModifiers::NONE,
+    )));
+
+    assert_eq!(
+        app.chat().composer_text(),
+        "",
+        "generic key input in a non-chat footer must not write into the hidden composer"
+    );
+}
