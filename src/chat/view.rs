@@ -60,16 +60,15 @@ pub fn render_frame(frame: &mut Frame, app: &ChatApp, tick_ms: u64) {
     let bg_block = Block::default().style(theme.timeline_bg);
     frame.render_widget(bg_block, area);
 
-    // Vertical layout: welcome_banner | timeline | hint | separator | input | status_bar
-    // Matches Copilot: thin "··" hint row, single-line separator, 1-row input, status bar
-    let [banner, timeline, hint_row, sep, input, status] =
+    // Vertical layout: welcome_banner | timeline | sep_top | input | sep_bot | status_bar
+    let [banner, timeline, sep_top, input, sep_bot, status] =
         vertical![==12, >=1, ==1, ==1, ==1, ==1].areas(area);
 
     render_welcome_banner(frame, banner, app, tick_ms, &theme);
     render_timeline(frame, timeline, app, &theme);
-    render_hint_row(frame, hint_row, &theme);
-    render_separator(frame, sep, &theme);
+    render_separator(frame, sep_top, &theme);
     render_input(frame, input, app, &theme);
+    render_separator(frame, sep_bot, &theme);
     render_status_bar(frame, status, app, &theme);
 
     // Render modal picker overlay if visible
@@ -413,12 +412,6 @@ fn render_input(frame: &mut Frame, area: Rect, app: &ChatApp, theme: &ChatTheme)
         let composer = app.composer();
         frame.render_widget(composer, composer_area);
     }
-}
-
-fn render_hint_row(frame: &mut Frame, area: Rect, theme: &ChatTheme) {
-    let line = Line::from(vec![Span::styled("··", theme.dim_text)]);
-    let bar = Paragraph::new(line);
-    frame.render_widget(bar, area);
 }
 
 fn render_separator(frame: &mut Frame, area: Rect, theme: &ChatTheme) {
