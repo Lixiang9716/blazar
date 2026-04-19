@@ -1,7 +1,7 @@
 use blazar::chat::git::GitSummary;
+use blazar::chat::session::SessionSummary;
 use blazar::chat::view::render_workspace_to_lines_for_test;
 use blazar::chat::workspace::{WorkspaceApp, WorkspaceView};
-use blazar::chat::session::SessionSummary;
 
 const REPO_ROOT: &str = env!("CARGO_MANIFEST_DIR");
 

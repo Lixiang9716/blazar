@@ -111,9 +111,7 @@ impl WorkspaceApp {
             self.select_view(WorkspaceView::Git);
         } else if action == InputAction::SelectSessionsView {
             self.select_view(WorkspaceView::Sessions);
-        } else if self.focus == WorkspaceFocus::Footer
-            && self.active_view != WorkspaceView::Chat
-        {
+        } else if self.focus == WorkspaceFocus::Footer && self.active_view != WorkspaceView::Chat {
             // Non-chat footer shows only hints; discard all remaining input so it
             // never reaches the hidden composer.
         } else {

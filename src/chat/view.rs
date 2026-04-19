@@ -399,7 +399,12 @@ fn render_git_panel(
     frame.render_widget(paragraph, area);
 }
 
-fn render_footer(frame: &mut Frame, area: Rect, app: &WorkspaceApp, theme: &crate::chat::theme::ChatTheme) {
+fn render_footer(
+    frame: &mut Frame,
+    area: Rect,
+    app: &WorkspaceApp,
+    theme: &crate::chat::theme::ChatTheme,
+) {
     if app.active_view() == WorkspaceView::Chat {
         let footer_block = Block::default()
             .borders(Borders::ALL)
@@ -423,7 +428,6 @@ fn render_footer(frame: &mut Frame, area: Rect, app: &WorkspaceApp, theme: &crat
         frame.render_widget(Paragraph::new(hint_text), footer_inner);
     }
 }
-
 
 fn render_session_panel(
     frame: &mut Frame,
