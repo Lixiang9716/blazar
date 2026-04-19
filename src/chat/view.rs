@@ -131,8 +131,49 @@ fn render_spirit_pane(
 }
 
 pub fn render_workspace(frame: &mut Frame, app: &WorkspaceApp, tick_ms: u64) {
-    let theme = build_theme();
     let area = frame.area();
+    if area.width < 80 {
+        render_workspace_narrow(frame, app, area);
+    } else {
+        render_workspace_wide(frame, app, tick_ms, area);
+    }
+}
+
+fn render_workspace_narrow(frame: &mut Frame, app: &WorkspaceApp, area: Rect) {
+    let theme = build_theme();
+
+    // Compact: nav bar (1 line) + content (fill) + footer (3 lines)
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Min(3), Constraint::Length(3)])
+        .split(area);
+
+    // Compact nav bar
+    let nav_line = Line::from(Span::styled("Chat · Git · Sessions", theme.status_text));
+    frame.render_widget(Paragraph::new(nav_line), rows[0]);
+
+    // Content panel
+    match app.active_view() {
+        WorkspaceView::Chat => render_messages_only(frame, rows[1], app.chat(), &theme),
+        WorkspaceView::Git => render_git_panel(frame, rows[1], app.git_summary(), &theme),
+        WorkspaceView::Sessions => {
+            render_session_panel(frame, rows[1], app.session_summary(), &theme)
+        }
+    }
+
+    // Footer / composer
+    let footer_block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(theme.panel_border)
+        .title("Ask Spirit");
+    let footer_inner = footer_block.inner(rows[2]);
+    frame.render_widget(footer_block, rows[2]);
+    let composer = app.chat().composer();
+    frame.render_widget(composer, footer_inner);
+}
+
+fn render_workspace_wide(frame: &mut Frame, app: &WorkspaceApp, tick_ms: u64, area: Rect) {
+    let theme = build_theme();
 
     // Header, body, footer
     let rows = Layout::default()

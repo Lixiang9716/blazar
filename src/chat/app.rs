@@ -11,7 +11,7 @@ pub struct ChatApp {
 }
 
 impl ChatApp {
-    pub fn new_for_test(_repo_path: &str) -> Self {
+    pub fn new(_repo_path: &str) -> Self {
         Self {
             messages: vec![ChatMessage {
                 author: Author::Spirit,
@@ -20,6 +20,10 @@ impl ChatApp {
             composer: TextArea::default(),
             should_quit: false,
         }
+    }
+
+    pub fn new_for_test(repo_path: &str) -> Self {
+        Self::new(repo_path)
     }
 
     pub fn messages(&self) -> &[ChatMessage] {
@@ -87,7 +91,8 @@ pub fn run_terminal_chat(
     _schema: Value,
     _mascot: MascotConfig,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    use crate::chat::view::render_frame;
+    use crate::chat::view::render_workspace;
+    use crate::chat::workspace::WorkspaceApp;
     use crossterm::{
         ExecutableCommand,
         event::{self, Event},
@@ -105,7 +110,7 @@ pub fn run_terminal_chat(
     let mut terminal = Terminal::new(backend)?;
 
     // Initialize app
-    let mut app = ChatApp::new_for_test("");
+    let mut app = WorkspaceApp::new("");
     let start_time = Instant::now();
 
     // Event loop
@@ -113,7 +118,7 @@ pub fn run_terminal_chat(
         let tick_ms = start_time.elapsed().as_millis() as u64;
 
         // Render
-        terminal.draw(|frame| render_frame(frame, &app, tick_ms))?;
+        terminal.draw(|frame| render_workspace(frame, &app, tick_ms))?;
 
         // Handle events with timeout
         if event::poll(Duration::from_millis(100))?

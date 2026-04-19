@@ -27,14 +27,22 @@ pub struct WorkspaceApp {
 }
 
 impl WorkspaceApp {
-    pub fn new_for_test(repo_path: &str) -> Self {
+    pub fn new(repo_path: &str) -> Self {
         Self {
-            chat: ChatApp::new_for_test(repo_path),
+            chat: ChatApp::new(repo_path),
             active_view: WorkspaceView::Chat,
             focus: WorkspaceFocus::Nav,
             git_summary: GitSummary::default(),
             session_summary: SessionSummary::default(),
         }
+    }
+
+    pub fn new_for_test(repo_path: &str) -> Self {
+        Self::new(repo_path)
+    }
+
+    pub fn should_quit(&self) -> bool {
+        self.chat.should_quit()
     }
 
     pub fn git_summary(&self) -> &GitSummary {

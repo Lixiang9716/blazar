@@ -83,3 +83,21 @@ fn workspace_shell_shows_header_nav_and_chat_footer() {
     assert!(lines.iter().any(|line| line.contains("Sessions")));
     assert!(lines.iter().any(|line| line.contains("Ask Spirit")));
 }
+
+// Task 6: narrow layout responsive fallback
+#[test]
+fn narrow_layout_shows_compact_nav_and_footer() {
+    let app = WorkspaceApp::new_for_test(env!("CARGO_MANIFEST_DIR"));
+    let lines = render_workspace_to_lines_for_test(&app, 60, 20);
+
+    assert!(
+        lines.iter().any(|line| line.contains("Chat · Git · Sessions")),
+        "narrow layout must show compact nav; lines:\n{}",
+        lines.join("\n")
+    );
+    assert!(
+        lines.iter().any(|line| line.contains("Ask Spirit")),
+        "narrow layout must show Ask Spirit footer; lines:\n{}",
+        lines.join("\n")
+    );
+}
