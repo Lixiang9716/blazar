@@ -135,6 +135,21 @@ impl WorkspaceCatalog {
             .unwrap_or_default()
     }
 
+    pub fn record_opened_workspace(&mut self, repo_path: &Path) -> std::io::Result<()> {
+        let repo = repo_path.display().to_string();
+        self.last_opened = Some(repo.clone());
+        if !self.workspaces.iter().any(|entry| entry.repo_path == repo) {
+            self.workspaces.push(WorkspaceRecord::named(
+                repo_path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("workspace"),
+                &repo,
+            ));
+        }
+        Ok(())
+    }
+
     pub fn save_to_path(&self, path: &Path) -> std::io::Result<()> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;

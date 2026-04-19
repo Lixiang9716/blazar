@@ -4,6 +4,7 @@ pub mod input;
 pub mod launcher;
 pub mod launcher_view;
 pub mod model;
+pub mod root;
 pub mod session;
 pub mod theme;
 pub mod view;

@@ -52,6 +52,11 @@
           "title": "Repository Path",
           "default": "/home/lx/blazar"
         },
+        "forceLauncher": {
+          "type": "boolean",
+          "title": "Force Workspace Launcher",
+          "default": false
+        },
         "platform": {
           "type": "string",
           "title": "Platform",

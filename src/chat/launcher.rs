@@ -97,6 +97,9 @@ impl LauncherApp {
     }
 
     fn open_selected(&self, initial_view: Option<WorkspaceView>) -> LauncherOutcome {
+        if !self.has_workspaces() {
+            return LauncherOutcome::None;
+        }
         let selected = self.selected_workspace();
         LauncherOutcome::OpenWorkspace {
             repo_path: PathBuf::from(&selected.repo_path),

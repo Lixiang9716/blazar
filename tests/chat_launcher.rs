@@ -101,3 +101,22 @@ fn launcher_keeps_selection_within_bounds() {
     )));
     assert_eq!(app.selected_index(), 1);
 }
+
+#[test]
+fn launcher_open_shortcuts_are_noops_when_catalog_is_empty() {
+    let mut app = LauncherApp::new(vec![]);
+
+    let enter_outcome = app.handle_action(InputAction::Submit);
+    let sessions_outcome = app.handle_action(InputAction::Key(KeyEvent::new(
+        KeyCode::Char('s'),
+        KeyModifiers::NONE,
+    )));
+    let git_outcome = app.handle_action(InputAction::Key(KeyEvent::new(
+        KeyCode::Char('g'),
+        KeyModifiers::NONE,
+    )));
+
+    assert_eq!(enter_outcome, LauncherOutcome::None);
+    assert_eq!(sessions_outcome, LauncherOutcome::None);
+    assert_eq!(git_outcome, LauncherOutcome::None);
+}

@@ -24,6 +24,10 @@ fn bundled_app_schema_contains_runtime_defaults() {
         schema["properties"]["workspace"]["properties"]["repoPath"]["default"],
         "/home/lx/blazar"
     );
+    assert_eq!(
+        schema["properties"]["workspace"]["properties"]["forceLauncher"]["default"],
+        false
+    );
 }
 
 #[test]

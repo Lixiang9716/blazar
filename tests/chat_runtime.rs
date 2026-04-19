@@ -1,6 +1,8 @@
 use blazar::chat::app::ChatApp;
 use blazar::chat::input::InputAction;
+use blazar::chat::root::{RootApp, RootMode};
 use blazar::chat::workspace::{WorkspaceApp, WorkspaceFocus, WorkspaceView};
+use blazar::chat::workspace_catalog::{LaunchDecision, WorkspaceCatalog, WorkspaceRecord};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 const REPO_ROOT: &str = env!("CARGO_MANIFEST_DIR");
@@ -263,6 +265,51 @@ fn generic_key_input_in_non_chat_footer_does_not_write_to_composer() {
         "",
         "generic key input in a non-chat footer must not write into the hidden composer"
     );
+}
+
+#[test]
+fn root_app_transitions_from_launcher_into_requested_workspace_view() {
+    let catalog = WorkspaceCatalog {
+        last_opened: None,
+        workspaces: vec![WorkspaceRecord::named("blazar", "/tmp/blazar")],
+    };
+    let mut app = RootApp::from_launch_decision(catalog, LaunchDecision::ShowLauncher);
+
+    let outcome = app.handle_action(InputAction::Key(KeyEvent::from(KeyCode::Char('g'))));
+
+    assert!(outcome.is_none());
+    assert!(matches!(app.mode(), RootMode::Workspace(_)));
+    assert_eq!(app.workspace().unwrap().active_view(), WorkspaceView::Git);
+}
+
+#[test]
+fn root_app_resumes_directly_into_chat_workspace_view_by_default() {
+    let catalog = WorkspaceCatalog::default();
+    let app = RootApp::from_launch_decision(
+        catalog,
+        LaunchDecision::Resume {
+            repo_path: REPO_ROOT.into(),
+            initial_view: None,
+        },
+    );
+
+    assert!(matches!(app.mode(), RootMode::Workspace(_)));
+    assert_eq!(app.workspace().unwrap().active_view(), WorkspaceView::Chat);
+}
+
+#[test]
+fn root_app_respects_explicit_initial_view_on_resume() {
+    let catalog = WorkspaceCatalog::default();
+    let app = RootApp::from_launch_decision(
+        catalog,
+        LaunchDecision::Resume {
+            repo_path: REPO_ROOT.into(),
+            initial_view: Some(WorkspaceView::Sessions),
+        },
+    );
+
+    assert!(matches!(app.mode(), RootMode::Workspace(_)));
+    assert_eq!(app.workspace().unwrap().active_view(), WorkspaceView::Sessions);
 }
 
 // Live-data gap: new_for_test must be deterministic and not load real repo/session state.
