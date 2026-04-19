@@ -26,8 +26,14 @@ fn build_theme_maps_one_dark_pro_styles() {
 
     let theme = build_theme();
 
-    assert_eq!(theme.shell_border, Style::default().fg(Color::Rgb(97, 175, 239)));
-    assert_eq!(theme.rail_border, Style::default().fg(Color::Rgb(86, 182, 194)));
+    assert_eq!(
+        theme.shell_border,
+        Style::default().fg(Color::Rgb(97, 175, 239))
+    );
+    assert_eq!(
+        theme.rail_border,
+        Style::default().fg(Color::Rgb(86, 182, 194))
+    );
     assert_eq!(
         theme.active_nav,
         Style::default()

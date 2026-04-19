@@ -179,7 +179,11 @@ impl Display for ConfigError {
                 write!(f, "failed to read config file {}: {source}", path.display())
             }
             Self::Parse { path, source } => {
-                write!(f, "failed to parse config file {}: {source}", path.display())
+                write!(
+                    f,
+                    "failed to parse config file {}: {source}",
+                    path.display()
+                )
             }
             Self::InvalidSchema { path, message } => {
                 write!(f, "invalid config schema {}: {message}", path.display())

@@ -2,7 +2,7 @@ use crate::chat::app::ChatApp;
 use crate::chat::git::GitSummary;
 use crate::chat::model::Author;
 use crate::chat::session::SessionSummary;
-use crate::chat::theme::{build_theme, ChatTheme};
+use crate::chat::theme::{ChatTheme, build_theme};
 use crate::chat::workspace::{WorkspaceApp, WorkspaceView};
 use crate::welcome::mascot::render_mascot_lines;
 use crate::welcome::state::WelcomeState;
