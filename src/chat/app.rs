@@ -249,7 +249,10 @@ impl ChatApp {
                                 crate::chat::theme::available_themes()
                                     .into_iter()
                                     .map(|info| {
-                                        PickerItem::new(info.name.clone(), info.display_name.clone())
+                                        PickerItem::new(
+                                            info.name.clone(),
+                                            info.display_name.clone(),
+                                        )
                                     })
                                     .collect();
                             self.picker = ModalPicker::new("Select Theme", theme_items);
@@ -350,4 +353,3 @@ fn detect_branch(repo_path: &str) -> String {
         })
         .unwrap_or_else(|| "main".to_owned())
 }
- 
