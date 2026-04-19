@@ -214,13 +214,15 @@ pub fn render_workspace(frame: &mut Frame, app: &WorkspaceApp, tick_ms: u64) {
         }
     }
 
-    // Footer / composer title
+    // Footer / composer title - render the block and the real composer inside it
     let footer_block = Block::default()
         .borders(Borders::ALL)
         .border_style(theme.panel_border)
         .title("Ask Spirit");
-    let footer_para = Paragraph::new(Line::from(Span::styled("", theme.status_text))).block(footer_block);
-    frame.render_widget(footer_para, rows[2]);
+    frame.render_widget(footer_block, rows[2]);
+    // render the actual composer TextArea from the chat app into the footer area
+    let composer = app.chat().composer();
+    frame.render_widget(composer, rows[2]);
 }
 
 fn render_chat_pane(
@@ -239,7 +241,8 @@ fn render_chat_pane(
     render_composer(frame, chunks[1], app, theme);
 }
 
-fn render_messages(
+// messages-only renderer (no composer) for workspace content area
+fn render_messages_only(
     frame: &mut Frame,
     area: Rect,
     app: &ChatApp,
@@ -266,6 +269,15 @@ fn render_messages(
         .wrap(Wrap { trim: false });
 
     frame.render_widget(paragraph, area);
+}
+
+fn render_messages(
+    frame: &mut Frame,
+    area: Rect,
+    app: &ChatApp,
+    theme: &crate::chat::theme::ChatTheme,
+) {
+    render_messages_only(frame, area, app, theme);
 }
 
 fn render_composer(
