@@ -1,15 +1,7 @@
 import { joinSession } from "@github/copilot-sdk/extension";
 
-const BLOCKED_PREFIXES = [
-  "cargo fmt",
-  "cargo clippy",
-  "cargo test",
-  "cargo llvm-cov",
-  "cargo deny",
-];
-
-const SUGGESTED_COMMANDS = new Map([
-  ["cargo fmt", "just fmt-check"],
+const BLOCKED_COMMANDS = new Map([
+  ["cargo fmt", "just fmt"],
   ["cargo clippy", "just lint"],
   ["cargo test", "just test"],
   ["cargo llvm-cov", "just cov"],
@@ -20,15 +12,19 @@ function normalizeCommand(command) {
   return typeof command === "string" ? command.trim().replace(/\s+/g, " ") : "";
 }
 
-function matchingPrefix(command) {
-  return BLOCKED_PREFIXES.find((prefix) => command.startsWith(prefix));
+function findBlockedCommand(command) {
+  return [...BLOCKED_COMMANDS.entries()].find(([prefix]) =>
+    command.startsWith(prefix),
+  );
 }
 
-const session = await joinSession({
+const additionalContext =
+  "Use the repository engineering workflow. For formatting, linting, tests, coverage, and audit actions, use the shared commands just fmt, just lint, just test, just cov, and just audit instead of raw cargo commands.";
+
+await joinSession({
   hooks: {
     onUserPromptSubmitted: async () => ({
-      additionalContext:
-        "Use the repository engineering workflow. For formatting, linting, tests, coverage, and audit actions, prefer the shared just commands instead of raw cargo commands.",
+      additionalContext,
     }),
 
     onPreToolUse: async (input) => {
@@ -41,17 +37,16 @@ const session = await joinSession({
         return;
       }
 
-      const blockedPrefix = matchingPrefix(command);
-      if (!blockedPrefix) {
+      const blockedCommand = findBlockedCommand(command);
+      if (!blockedCommand) {
         return;
       }
 
+      const [blockedPrefix, suggestedCommand] = blockedCommand;
       return {
         permissionDecision: "deny",
-        permissionDecisionReason: `Use ${SUGGESTED_COMMANDS.get(blockedPrefix)} instead of raw '${blockedPrefix}'.`,
+        permissionDecisionReason: `Use ${suggestedCommand} instead of raw '${blockedPrefix}'.`,
       };
     },
   },
 });
-
-session.on("session.shutdown", () => {});
