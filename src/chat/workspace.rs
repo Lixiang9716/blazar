@@ -39,6 +39,7 @@ impl WorkspaceApp {
 
     pub fn select_view(&mut self, view: WorkspaceView) {
         self.active_view = view;
+        self.focus = WorkspaceFocus::Content;
     }
 
     pub fn cycle_focus(&mut self) {

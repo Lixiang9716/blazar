@@ -9,10 +9,11 @@ fn workspace_switches_views_and_cycles_focus() {
 
     app.select_view(WorkspaceView::Git);
     assert_eq!(app.active_view(), WorkspaceView::Git);
-
-    app.cycle_focus();
     assert_eq!(app.focus(), WorkspaceFocus::Content);
 
     app.cycle_focus();
     assert_eq!(app.focus(), WorkspaceFocus::Footer);
+
+    app.cycle_focus();
+    assert_eq!(app.focus(), WorkspaceFocus::Nav);
 }
