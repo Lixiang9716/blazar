@@ -21,9 +21,7 @@ pub(super) fn render_timeline(frame: &mut Frame, area: Rect, app: &ChatApp, them
     let mut lines: Vec<Line> = Vec::new();
     let show_details = app.show_details();
 
-    // Cap logical text width for readability on wide terminals.
-    const MAX_CONTENT_WIDTH: u16 = 100;
-    let content_width = area.width.min(MAX_CONTENT_WIDTH);
+    let content_width = area.width;
 
     for entry in app.timeline() {
         let entry_lines = render_entry(entry, theme, content_width);
