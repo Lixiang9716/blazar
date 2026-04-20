@@ -101,10 +101,12 @@ fn render_entry<'a>(entry: &TimelineEntry, theme: &ChatTheme, width: u16) -> Vec
                     }
                 } else {
                     // Assistant messages: render markdown via ratskin (termimad backend)
+                    // Normalize soft breaks first — termimad treats every \n as hard break.
+                    let normalized = normalize_markdown_paragraphs(&entry.body);
                     let rat_skin = ratskin::RatSkin::default();
                     let text_width = width.saturating_sub(INDENT_WIDTH);
                     let md_lines =
-                        rat_skin.parse(ratskin::RatSkin::parse_text(&entry.body), text_width);
+                        rat_skin.parse(ratskin::RatSkin::parse_text(&normalized), text_width);
 
                     if md_lines.is_empty() {
                         lines.push(Line::from(vec![
@@ -306,4 +308,53 @@ fn push_wrapped_lines<'a>(
             ]));
         }
     }
+}
+
+/// Join soft line-breaks within paragraphs so termimad doesn't treat them as
+/// hard breaks.  Preserves structural markdown elements (headings, lists,
+/// code fences, tables, blank lines) and code-block interiors.
+fn normalize_markdown_paragraphs(text: &str) -> String {
+    let mut result = String::with_capacity(text.len());
+    let lines: Vec<&str> = text.split('\n').collect();
+    let mut in_code_block = false;
+
+    for (i, line) in lines.iter().enumerate() {
+        let trimmed = line.trim();
+
+        if trimmed.starts_with("```") {
+            in_code_block = !in_code_block;
+        }
+
+        result.push_str(line);
+
+        if i + 1 < lines.len() {
+            if in_code_block {
+                result.push('\n');
+                continue;
+            }
+            let next_trimmed = lines[i + 1].trim();
+            if is_structural_line(trimmed) || is_structural_line(next_trimmed) {
+                result.push('\n');
+            } else {
+                result.push(' ');
+            }
+        }
+    }
+    result
+}
+
+fn is_structural_line(s: &str) -> bool {
+    s.is_empty()
+        || s.starts_with('#')
+        || s.starts_with("- ")
+        || s.starts_with("* ")
+        || s.starts_with("+ ")
+        || s.starts_with("```")
+        || s.starts_with("> ")
+        || s.starts_with('|')
+        || s.starts_with("---")
+        || s.starts_with("===")
+        || s.chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_digit() && s.contains(". "))
 }
