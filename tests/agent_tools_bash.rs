@@ -169,6 +169,25 @@ fn bash_tool_timeout_stays_bounded_when_descendant_escapes_process_group() {
 }
 
 #[test]
+fn bash_tool_timeout_stays_bounded_with_unbounded_output() {
+    let tool = BashTool::new(manifest_dir());
+    let started = Instant::now();
+    let result = tool.execute(json!({
+        "command": "python - <<'PY'\nimport os, time\nend = time.time() + 2\nchunk = b'x' * 65536\nwhile time.time() < end:\n    os.write(1, chunk)\nPY",
+        "timeout_secs": 1
+    }));
+
+    assert!(result.is_error);
+    assert!(result.output.contains("timed out"));
+    assert!(result.output_truncated);
+    assert!(
+        started.elapsed() < Duration::from_secs(3),
+        "timeout took {:?}",
+        started.elapsed()
+    );
+}
+
+#[test]
 #[cfg(target_os = "linux")]
 fn bash_tool_timeout_does_not_leave_blocked_reader_thread() {
     let before = thread_count();
