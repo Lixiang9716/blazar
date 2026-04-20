@@ -176,7 +176,7 @@ enum TurnOutcome {
 }
 
 /// Classify whether an error is transient (network timeout, 429, 502/503).
-fn is_transient_error(err: &str) -> bool {
+pub(crate) fn is_transient_error(err: &str) -> bool {
     let lower = err.to_lowercase();
     lower.contains("timeout")
         || lower.contains("429")
@@ -244,4 +244,283 @@ fn run_turn(
     });
 
     outcome
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn transient_errors_classified_correctly() {
+        assert!(is_transient_error("connection timeout"));
+        assert!(is_transient_error("HTTP 429 Too Many Requests"));
+        assert!(is_transient_error("502 Bad Gateway"));
+        assert!(is_transient_error("503 Service Unavailable"));
+        assert!(is_transient_error("connection reset by peer"));
+        assert!(is_transient_error("rate limit exceeded"));
+    }
+
+    #[test]
+    fn fatal_errors_classified_correctly() {
+        assert!(!is_transient_error("invalid API key"));
+        assert!(!is_transient_error("400 Bad Request"));
+        assert!(!is_transient_error("model not found"));
+        assert!(!is_transient_error("content policy violation"));
+        assert!(!is_transient_error(""));
+    }
+
+    #[test]
+    fn transient_classification_is_case_insensitive() {
+        assert!(is_transient_error("CONNECTION TIMEOUT"));
+        assert!(is_transient_error("Rate Limit"));
+        assert!(is_transient_error("Timeout Error"));
+    }
+
+    #[test]
+    fn run_turn_completes_with_echo_provider() {
+        let provider = crate::provider::echo::EchoProvider::new(0);
+        let (event_tx, event_rx) = mpsc::channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+
+        let outcome = run_turn("hi", &provider, &event_tx, &cancel);
+        assert!(matches!(outcome, TurnOutcome::Complete));
+
+        let mut got_complete = false;
+        for event in event_rx.try_iter() {
+            if matches!(event, AgentEvent::TurnComplete) {
+                got_complete = true;
+            }
+        }
+        assert!(got_complete);
+    }
+
+    #[test]
+    fn run_turn_stops_on_cancel_flag() {
+        use std::sync::Barrier;
+
+        struct SlowProvider {
+            barrier: Arc<Barrier>,
+        }
+
+        impl LlmProvider for SlowProvider {
+            fn stream_turn(&self, _prompt: &str, tx: Sender<ProviderEvent>) {
+                let _ = tx.send(ProviderEvent::TextDelta("chunk1".into()));
+                self.barrier.wait();
+                // After barrier, keep sending — cancel flag should stop relay
+                for i in 0..100 {
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                    if tx.send(ProviderEvent::TextDelta(format!("c{i}"))).is_err() {
+                        return;
+                    }
+                }
+                let _ = tx.send(ProviderEvent::TurnComplete);
+            }
+        }
+
+        let barrier = Arc::new(Barrier::new(2));
+        let provider = SlowProvider {
+            barrier: Arc::clone(&barrier),
+        };
+        let (event_tx, event_rx) = mpsc::channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let cancel2 = Arc::clone(&cancel);
+
+        std::thread::scope(|s| {
+            s.spawn(|| {
+                run_turn("test", &provider, &event_tx, &cancel2);
+            });
+
+            // Wait until provider has sent at least one chunk
+            barrier.wait();
+            // Set cancel flag
+            cancel.store(true, Ordering::SeqCst);
+        });
+
+        let events: Vec<_> = event_rx.try_iter().collect();
+        let has_cancelled = events
+            .iter()
+            .any(|e| matches!(e, AgentEvent::TurnFailed { error } if error == "cancelled"));
+        assert!(has_cancelled, "should emit TurnFailed with 'cancelled'");
+    }
+
+    #[test]
+    fn run_turn_returns_transient_on_timeout_error() {
+        struct TimeoutProvider;
+
+        impl LlmProvider for TimeoutProvider {
+            fn stream_turn(&self, _prompt: &str, tx: Sender<ProviderEvent>) {
+                let _ = tx.send(ProviderEvent::Error("connection timeout".into()));
+            }
+        }
+
+        let (event_tx, _event_rx) = mpsc::channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let outcome = run_turn("hi", &TimeoutProvider, &event_tx, &cancel);
+        assert!(matches!(outcome, TurnOutcome::TransientError(_)));
+    }
+
+    #[test]
+    fn run_turn_returns_fatal_on_auth_error() {
+        struct AuthErrorProvider;
+
+        impl LlmProvider for AuthErrorProvider {
+            fn stream_turn(&self, _prompt: &str, tx: Sender<ProviderEvent>) {
+                let _ = tx.send(ProviderEvent::Error("invalid API key".into()));
+            }
+        }
+
+        let (event_tx, _event_rx) = mpsc::channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let outcome = run_turn("hi", &AuthErrorProvider, &event_tx, &cancel);
+        assert!(matches!(outcome, TurnOutcome::FatalError(_)));
+    }
+
+    #[test]
+    fn retry_recovers_from_transient_error() {
+        use std::sync::atomic::AtomicU32;
+
+        struct FailOnceProvider {
+            call_count: AtomicU32,
+        }
+
+        impl LlmProvider for FailOnceProvider {
+            fn stream_turn(&self, _prompt: &str, tx: Sender<ProviderEvent>) {
+                let n = self.call_count.fetch_add(1, Ordering::SeqCst);
+                if n == 0 {
+                    let _ = tx.send(ProviderEvent::Error("connection timeout".into()));
+                } else {
+                    let _ = tx.send(ProviderEvent::TextDelta("ok".into()));
+                    let _ = tx.send(ProviderEvent::TurnComplete);
+                }
+            }
+        }
+
+        let provider = FailOnceProvider {
+            call_count: AtomicU32::new(0),
+        };
+        let (event_tx, event_rx) = mpsc::channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+
+        run_turn_with_retry("turn-test", "hi", &provider, &event_tx, &cancel);
+
+        let events: Vec<_> = event_rx.try_iter().collect();
+        let has_complete = events.iter().any(|e| matches!(e, AgentEvent::TurnComplete));
+        assert!(has_complete, "retry should succeed on second attempt");
+
+        assert_eq!(provider.call_count.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn retry_gives_up_after_max_attempts() {
+        struct AlwaysTimeoutProvider;
+
+        impl LlmProvider for AlwaysTimeoutProvider {
+            fn stream_turn(&self, _prompt: &str, tx: Sender<ProviderEvent>) {
+                let _ = tx.send(ProviderEvent::Error("timeout".into()));
+            }
+        }
+
+        let (event_tx, event_rx) = mpsc::channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+
+        run_turn_with_retry(
+            "turn-test",
+            "hi",
+            &AlwaysTimeoutProvider,
+            &event_tx,
+            &cancel,
+        );
+
+        let events: Vec<_> = event_rx.try_iter().collect();
+        let has_failed = events
+            .iter()
+            .any(|e| matches!(e, AgentEvent::TurnFailed { .. }));
+        assert!(
+            has_failed,
+            "should emit TurnFailed after exhausting retries"
+        );
+    }
+
+    #[test]
+    fn fatal_error_skips_retry() {
+        use std::sync::atomic::AtomicU32;
+
+        struct FatalProvider {
+            call_count: AtomicU32,
+        }
+
+        impl LlmProvider for FatalProvider {
+            fn stream_turn(&self, _prompt: &str, tx: Sender<ProviderEvent>) {
+                self.call_count.fetch_add(1, Ordering::SeqCst);
+                let _ = tx.send(ProviderEvent::Error("invalid API key".into()));
+            }
+        }
+
+        let provider = FatalProvider {
+            call_count: AtomicU32::new(0),
+        };
+        let (event_tx, event_rx) = mpsc::channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+
+        run_turn_with_retry("turn-test", "hi", &provider, &event_tx, &cancel);
+
+        assert_eq!(
+            provider.call_count.load(Ordering::SeqCst),
+            1,
+            "fatal error should not retry"
+        );
+
+        let events: Vec<_> = event_rx.try_iter().collect();
+        let has_failed = events
+            .iter()
+            .any(|e| matches!(e, AgentEvent::TurnFailed { .. }));
+        assert!(has_failed);
+    }
+
+    #[test]
+    fn cancel_before_retry_attempt_stops_immediately() {
+        struct TimeoutProvider;
+
+        impl LlmProvider for TimeoutProvider {
+            fn stream_turn(&self, _prompt: &str, tx: Sender<ProviderEvent>) {
+                let _ = tx.send(ProviderEvent::Error("timeout".into()));
+            }
+        }
+
+        let (event_tx, event_rx) = mpsc::channel();
+        let cancel = Arc::new(AtomicBool::new(true)); // pre-cancelled
+
+        run_turn_with_retry("turn-test", "hi", &TimeoutProvider, &event_tx, &cancel);
+
+        let events: Vec<_> = event_rx.try_iter().collect();
+        let has_cancelled = events
+            .iter()
+            .any(|e| matches!(e, AgentEvent::TurnFailed { error } if error == "cancelled"));
+        assert!(
+            has_cancelled,
+            "pre-cancelled flag should abort before first attempt"
+        );
+    }
+
+    #[test]
+    fn provider_that_sends_no_terminal_event_gets_auto_complete() {
+        struct NoTerminalProvider;
+
+        impl LlmProvider for NoTerminalProvider {
+            fn stream_turn(&self, _prompt: &str, tx: Sender<ProviderEvent>) {
+                let _ = tx.send(ProviderEvent::TextDelta("partial".into()));
+                // Channel drops without TurnComplete or Error
+            }
+        }
+
+        let (event_tx, event_rx) = mpsc::channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+
+        let outcome = run_turn("hi", &NoTerminalProvider, &event_tx, &cancel);
+        assert!(matches!(outcome, TurnOutcome::Complete));
+
+        let events: Vec<_> = event_rx.try_iter().collect();
+        let has_complete = events.iter().any(|e| matches!(e, AgentEvent::TurnComplete));
+        assert!(has_complete, "should auto-emit TurnComplete");
+    }
 }
