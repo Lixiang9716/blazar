@@ -127,7 +127,7 @@ fn map_opaline_theme(theme: &opaline::Theme) -> ChatTheme {
             .fg(accent_info)
             .add_modifier(Modifier::BOLD),
         picker_desc: Style::default().fg(text_muted),
-        spinner: Style::default().fg(accent_info),
+        spinner: Style::default().fg(accent_warning),
         tip_command: Style::default().fg(accent_warning),
         code_bg,
         backdrop_color: bg_base,
@@ -176,7 +176,7 @@ fn fallback_theme() -> ChatTheme {
         picker_item: Style::default().fg(BASE0),
         picker_selected: Style::default().fg(CYAN).add_modifier(Modifier::BOLD),
         picker_desc: Style::default().fg(BASE01),
-        spinner: Style::default().fg(CYAN),
+        spinner: Style::default().fg(YELLOW),
         tip_command: Style::default().fg(YELLOW),
         code_bg: BASE02,
         backdrop_color: BASE03,
