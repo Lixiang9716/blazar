@@ -19,8 +19,13 @@ pub(super) fn render_timeline(frame: &mut Frame, area: Rect, app: &ChatApp, them
     let mut lines: Vec<Line> = Vec::new();
     let show_details = app.show_details();
 
+    // Cap content width for readability on wide terminals.
+    const MAX_CONTENT_WIDTH: u16 = 100;
+    let content_width = area.width.min(MAX_CONTENT_WIDTH);
+    let content_area = Rect::new(area.x, area.y, content_width, area.height);
+
     for entry in app.timeline() {
-        let entry_lines = render_entry(entry, theme, area.width);
+        let entry_lines = render_entry(entry, theme, content_width);
         lines.extend(entry_lines);
 
         // Show expanded details when Ctrl+O is toggled
@@ -50,12 +55,12 @@ pub(super) fn render_timeline(frame: &mut Frame, area: Rect, app: &ChatApp, them
         .wrap(Wrap { trim: false });
 
     // Compute actual visual height accounting for line wrapping.
-    let content_height: u16 = if area.width > 0 {
+    let content_height: u16 = if content_width > 0 {
         lines
             .iter()
             .map(|line| {
                 let w = line.width() as u16;
-                if w == 0 { 1 } else { w.div_ceil(area.width) }
+                if w == 0 { 1 } else { w.div_ceil(content_width) }
             })
             .sum()
     } else {
@@ -77,7 +82,7 @@ pub(super) fn render_timeline(frame: &mut Frame, area: Rect, app: &ChatApp, them
 
     let paragraph = paragraph.scroll((scroll_offset, 0));
 
-    frame.render_widget(paragraph, area);
+    frame.render_widget(paragraph, content_area);
 }
 
 fn render_entry<'a>(entry: &TimelineEntry, theme: &ChatTheme, _width: u16) -> Vec<Line<'a>> {
