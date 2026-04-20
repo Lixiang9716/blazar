@@ -8,6 +8,8 @@ use ratatui_core::{
 use ratatui_macros::horizontal;
 use ratatui_widgets::paragraph::Paragraph;
 
+use ratatui_core::layout::Position;
+
 pub(super) fn render_input(frame: &mut Frame, area: Rect, app: &ChatApp, theme: &ChatTheme) {
     let [prompt_area, composer_area] = horizontal![==2, >=1].areas(area);
 
@@ -23,4 +25,12 @@ pub(super) fn render_input(frame: &mut Frame, area: Rect, app: &ChatApp, theme: 
         let composer = app.composer();
         frame.render_widget(composer, composer_area);
     }
+
+    // Place the terminal cursor at the composer position so that IME
+    // popups (e.g. Chinese/Japanese input) appear in the right place.
+    let sc = app.composer().screen_cursor();
+    frame.set_cursor_position(Position::new(
+        composer_area.x + sc.col as u16,
+        composer_area.y + sc.row as u16,
+    ));
 }
