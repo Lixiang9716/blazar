@@ -16,9 +16,22 @@ fn sending_a_user_message_appends_user_and_spirit_messages() {
 
     app.send_message("Help me design a Spirit chat UI");
 
-    assert_eq!(app.messages().len(), 3);
+    // User message is added synchronously.
+    assert_eq!(app.messages().len(), 2);
     assert!(app.messages()[1].body.contains("Help me design"));
-    assert!(app.messages()[2].body.contains("Spirit"));
+
+    // Agent response arrives asynchronously via tick().
+    // Give the background thread time to process, then drain events.
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    app.tick();
+
+    // The timeline should now contain the user message and the echo response.
+    assert!(
+        app.timeline()
+            .iter()
+            .any(|e| e.body.contains("Help me design"))
+    );
+    assert!(app.timeline().iter().any(|e| e.body.contains("Echo:")));
 }
 
 #[test]

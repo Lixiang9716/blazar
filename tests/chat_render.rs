@@ -220,10 +220,14 @@ fn interactive_send_message_shows_echo_response() {
     // Step 3: press Enter to submit
     app.handle_action(InputAction::Submit);
 
+    // Agent response arrives asynchronously — give the background thread time.
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    app.tick();
+
     // Step 4: verify the echo response appeared in the rendered output
     let lines_after = render_to_lines_for_test(&mut app, 80, 35);
     assert!(
-        lines_after.iter().any(|l| l.contains("I hear you")),
+        lines_after.iter().any(|l| l.contains("Echo:")),
         "echo response should appear after submit"
     );
     assert!(

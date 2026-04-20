@@ -1,8 +1,14 @@
-use crate::chat::effects::BlazarEffects;
+use crate::agent::protocol::AgentEvent;
+use crate::agent::runtime::AgentRuntime;
+use crate::agent::state::{AgentRuntimeState, TurnState};
+
 use crate::chat::input::InputAction;
 use crate::chat::model::{Author, ChatMessage, TimelineEntry};
 use crate::chat::picker::{ModalPicker, PickerItem};
 use crate::chat::theme::{ChatTheme, ThemeStyleSheet};
+use crate::provider::LlmProvider;
+use crate::provider::echo::EchoProvider;
+use crate::provider::siliconflow::SiliconFlowConfig;
 use ratatui_textarea::TextArea;
 use std::cell::Cell;
 use std::time::Instant;
@@ -29,8 +35,8 @@ pub struct ChatApp {
     theme_name: String,
     theme: ChatTheme,
     markdown_stylesheet: ThemeStyleSheet,
-    pub effects: BlazarEffects,
-    last_frame_time: Instant,
+    agent_runtime: AgentRuntime,
+    agent_state: AgentRuntimeState,
 }
 
 impl ChatApp {
@@ -48,6 +54,12 @@ impl ChatApp {
 
         let theme = crate::chat::theme::build_theme();
         let markdown_stylesheet = ThemeStyleSheet::from_chat_theme(&theme);
+
+        // Try SiliconFlow provider; fall back to EchoProvider.
+        let provider: Box<dyn LlmProvider> = match SiliconFlowConfig::load(repo_path) {
+            Ok(cfg) => Box::new(crate::provider::siliconflow::SiliconFlowProvider::new(cfg)),
+            Err(_) => Box::new(EchoProvider::default()),
+        };
 
         Self {
             messages: vec![ChatMessage {
@@ -74,8 +86,8 @@ impl ChatApp {
             theme_name: crate::chat::theme::DEFAULT_THEME.to_owned(),
             theme,
             markdown_stylesheet,
-            effects: BlazarEffects::default(),
-            last_frame_time: Instant::now(),
+            agent_runtime: AgentRuntime::new(provider),
+            agent_state: AgentRuntimeState::default(),
         }
     }
 
@@ -83,6 +95,8 @@ impl ChatApp {
         let mut app = Self::new(_repo_path);
         // Use a fixed display path so snapshots are environment-independent.
         app.display_path = "~/blazar".to_owned();
+        // Always use EchoProvider in tests — no network calls.
+        app.agent_runtime = AgentRuntime::new(Box::new(EchoProvider::new(0)));
         app
     }
 
@@ -115,7 +129,12 @@ impl ChatApp {
     }
 
     pub fn status_label(&self) -> String {
-        "ready".to_owned()
+        match &self.agent_state.turn_state {
+            TurnState::Idle => "ready".to_owned(),
+            TurnState::Streaming { .. } => "streaming…".to_owned(),
+            TurnState::Done => "ready".to_owned(),
+            TurnState::Failed { error } => format!("error: {error}"),
+        }
     }
 
     pub fn show_details(&self) -> bool {
@@ -138,26 +157,10 @@ impl ChatApp {
         &self.markdown_stylesheet
     }
 
-    /// Returns elapsed time since last frame and resets the timer.
-    pub fn elapsed_since_last_frame(&mut self) -> std::time::Duration {
-        let now = Instant::now();
-        let elapsed = now.duration_since(self.last_frame_time);
-        self.last_frame_time = now;
-        elapsed
-    }
-
-    /// Fire the startup banner fade effect (call once after first render).
-    pub fn trigger_banner_fade(&mut self) {
-        self.effects.trigger_banner_fade(self.theme.backdrop_color);
-    }
-
     pub fn set_theme(&mut self, name: &str) {
-        let old_bg = self.theme.backdrop_color;
         self.theme = crate::chat::theme::build_theme_by_name(name);
         self.markdown_stylesheet = ThemeStyleSheet::from_chat_theme(&self.theme);
         self.theme_name = name.to_owned();
-        self.effects
-            .trigger_theme_transition(old_bg, self.theme.backdrop_color);
     }
 
     pub fn tick(&mut self) {
@@ -165,6 +168,44 @@ impl ChatApp {
         self.picker
             .overlay_state_mut()
             .tick(std::time::Duration::from_millis(100));
+
+        // Drain agent runtime events
+        while let Some(event) = self.agent_runtime.try_recv() {
+            let state_changed = self.agent_state.apply_event(&event);
+
+            match &event {
+                AgentEvent::TurnStarted { .. } => {
+                    // Push a placeholder response entry for streaming
+                    self.timeline.push(TimelineEntry::response(""));
+                    self.scroll_offset = u16::MAX;
+                }
+                AgentEvent::TextDelta { text } => {
+                    // Append text to the last timeline entry (the streaming response)
+                    if let Some(last) = self.timeline.last_mut() {
+                        last.body.push_str(text);
+                    }
+                    self.scroll_offset = u16::MAX;
+                }
+                AgentEvent::ToolCallRequest { payload } => {
+                    self.timeline.push(TimelineEntry::tool_use(
+                        "function_call",
+                        &payload[..payload.len().min(60)],
+                        0,
+                        0,
+                        payload.clone(),
+                    ));
+                    self.scroll_offset = u16::MAX;
+                }
+                AgentEvent::TurnComplete => {}
+                AgentEvent::TurnFailed { error } => {
+                    self.timeline
+                        .push(TimelineEntry::warning(format!("Agent error: {error}")));
+                    self.scroll_offset = u16::MAX;
+                }
+            }
+
+            let _ = state_changed;
+        }
 
         // Demo playback: add one entry per second
         if !self.demo_queue.is_empty() {
@@ -177,8 +218,6 @@ impl ChatApp {
                 self.timeline.push(entry);
                 self.scroll_offset = u16::MAX; // auto-scroll
                 self.demo_last_add = Some(Instant::now());
-                self.effects.trigger_new_message();
-                self.effects.trigger_status_pulse(self.theme.backdrop_color);
             }
         }
     }
@@ -218,19 +257,12 @@ impl ChatApp {
             author: Author::User,
             body: trimmed.to_owned(),
         });
-        self.messages.push(ChatMessage {
-            author: Author::Spirit,
-            body: format!("Spirit: I hear you — {trimmed}"),
-        });
 
-        // Also append to timeline
+        // Add user message to timeline
         self.timeline.push(TimelineEntry::user_message(trimmed));
-        self.timeline
-            .push(TimelineEntry::response(format!("I hear you — {trimmed}")));
 
-        // Trigger new-message animation and status pulse
-        self.effects.trigger_new_message();
-        self.effects.trigger_status_pulse(self.theme.backdrop_color);
+        // Dispatch to agent runtime — response arrives via events in tick()
+        self.agent_runtime.submit_turn(trimmed);
 
         // Auto-scroll to bottom
         self.scroll_offset = u16::MAX;
@@ -259,7 +291,6 @@ impl ChatApp {
         if self.picker.is_open() {
             match action {
                 InputAction::Quit => {
-                    self.effects.trigger_picker_close(self.theme.backdrop_color);
                     self.picker.close();
                 }
                 InputAction::Submit => {
@@ -287,7 +318,6 @@ impl ChatApp {
                                     .collect();
                             self.picker = ModalPicker::new("Select Theme", theme_items);
                             self.picker.open();
-                            self.effects.trigger_picker_open(self.theme.backdrop_color);
                             return;
                         }
 
@@ -333,7 +363,6 @@ impl ChatApp {
                     && self.composer_text().is_empty()
                 {
                     self.picker.open();
-                    self.effects.trigger_picker_open(self.theme.backdrop_color);
                     return;
                 }
                 self.composer.input(key);
