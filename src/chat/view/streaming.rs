@@ -6,9 +6,9 @@ use ratatui_core::{
 };
 use ratatui_widgets::paragraph::Paragraph;
 
-const BRAILLE_SPINNER: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+const SPARKLE_SPINNER: &[&str] = &["✶", "✸", "✹", "✺", "✹", "✸"];
 
-/// Render a single-line streaming indicator: braille spinner + "streaming…".
+/// Render a single-line streaming indicator: sparkle spinner + "streaming…".
 pub(super) fn render_streaming_indicator(
     frame: &mut Frame,
     area: Rect,
@@ -19,11 +19,11 @@ pub(super) fn render_streaming_indicator(
         return;
     }
 
-    let idx = ((tick_ms / 80) % BRAILLE_SPINNER.len() as u64) as usize;
-    let spinner_char = BRAILLE_SPINNER[idx];
+    let idx = ((tick_ms / 120) % SPARKLE_SPINNER.len() as u64) as usize;
+    let sparkle = SPARKLE_SPINNER[idx];
 
     let label = Line::from(vec![
-        Span::styled(format!(" {spinner_char} "), theme.spinner),
+        Span::styled(format!(" {sparkle} "), theme.spinner),
         Span::styled("streaming…", theme.dim_text),
     ]);
 
