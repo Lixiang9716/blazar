@@ -34,7 +34,7 @@ fn echo_provider_streams_full_response() {
 fn runtime_round_trip() {
     let runtime = AgentRuntime::new(Box::new(EchoProvider::new(0)));
 
-    runtime.submit_turn("hello");
+    runtime.submit_turn("hello").expect("submit should succeed");
 
     // Collect events with a timeout.
     let mut events = Vec::new();

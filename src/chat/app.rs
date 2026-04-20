@@ -143,6 +143,14 @@ impl ChatApp {
         matches!(self.agent_state.turn_state, TurnState::Failed { .. })
     }
 
+    /// Cancel the current streaming turn.
+    pub fn cancel_turn(&mut self) {
+        if self.is_streaming() {
+            info!("cancel_turn: cancelling current turn");
+            self.agent_runtime.cancel();
+        }
+    }
+
     pub fn show_details(&self) -> bool {
         self.show_details
     }
@@ -226,9 +234,14 @@ impl ChatApp {
                     debug!("tick: TurnComplete");
                 }
                 AgentEvent::TurnFailed { error } => {
-                    warn!("tick: TurnFailed error={error}");
-                    self.timeline
-                        .push(TimelineEntry::warning(format!("Agent error: {error}")));
+                    if error == "cancelled" {
+                        debug!("tick: TurnCancelled");
+                        self.timeline.push(TimelineEntry::hint("Turn cancelled."));
+                    } else {
+                        warn!("tick: TurnFailed error={error}");
+                        self.timeline
+                            .push(TimelineEntry::warning(format!("Agent error: {error}")));
+                    }
                     self.scroll_offset = u16::MAX;
                 }
             }
@@ -296,8 +309,18 @@ impl ChatApp {
         // Add user message to timeline
         self.timeline.push(TimelineEntry::user_message(trimmed));
 
+        // Admission control: reject if agent is already busy
+        if self.agent_state.is_busy() {
+            debug!("send_message: rejected — agent busy");
+            return;
+        }
+
         // Dispatch to agent runtime — response arrives via events in tick()
-        self.agent_runtime.submit_turn(trimmed);
+        if let Err(e) = self.agent_runtime.submit_turn(trimmed) {
+            warn!("send_message: submit_turn failed: {e}");
+            self.timeline
+                .push(TimelineEntry::warning(format!("Runtime error: {e}")));
+        }
 
         // Auto-scroll to bottom
         self.scroll_offset = u16::MAX;
@@ -381,7 +404,13 @@ impl ChatApp {
         }
 
         match action {
-            InputAction::Quit => self.should_quit = true,
+            InputAction::Quit => {
+                if self.is_streaming() {
+                    self.cancel_turn();
+                } else {
+                    self.should_quit = true;
+                }
+            }
             InputAction::Submit => self.submit_composer(),
             InputAction::ToggleDetails => self.show_details = !self.show_details,
             InputAction::ScrollUp => {
