@@ -3,6 +3,7 @@
 use crate::chat::app::ChatApp;
 use crate::chat::input::InputAction;
 use crate::config::MascotConfig;
+use log::{debug, info, trace};
 use serde_json::Value;
 
 pub fn run_terminal_chat(
@@ -21,6 +22,7 @@ pub fn run_terminal_chat(
     use std::time::{Duration, Instant};
 
     let repo_path = resolve_repo_path(&schema);
+    info!("event_loop: repo_path={repo_path}");
     let mut app = ChatApp::new(&repo_path);
 
     // Setup terminal; the guard ensures cleanup on any exit path including `?`.
@@ -30,6 +32,7 @@ pub fn run_terminal_chat(
     let _guard = TerminalGuard;
     let backend = CrosstermBackend::new(stdout());
     let mut terminal = Terminal::new(backend)?;
+    info!("event_loop: terminal initialized");
 
     let start_time = Instant::now();
 
@@ -51,22 +54,32 @@ pub fn run_terminal_chat(
             match event::read()? {
                 Event::Key(key) => {
                     let action = InputAction::from_key_event(key);
+                    debug!(
+                        "event_loop: key={:?} modifiers={:?} → action={:?}",
+                        key.code, key.modifiers, action
+                    );
                     app.handle_action(action);
                 }
                 Event::Mouse(mouse) => match mouse.kind {
                     MouseEventKind::ScrollUp => {
+                        trace!("event_loop: mouse scroll_up");
                         app.handle_action(InputAction::ScrollUp);
                     }
                     MouseEventKind::ScrollDown => {
+                        trace!("event_loop: mouse scroll_down");
                         app.handle_action(InputAction::ScrollDown);
                     }
                     _ => {}
                 },
+                Event::Resize(w, h) => {
+                    debug!("event_loop: terminal resized to {w}x{h}");
+                }
                 _ => {}
             }
         }
 
         if app.should_quit() {
+            info!("event_loop: quit requested");
             break;
         }
     }

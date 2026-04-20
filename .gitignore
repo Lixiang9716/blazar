@@ -5,3 +5,4 @@ graphify-out/
 src/graphify-out/
 .graphify_*
 config/provider.json
+logs/

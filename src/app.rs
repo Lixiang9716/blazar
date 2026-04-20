@@ -333,9 +333,37 @@ fn run_app_with_io<R: BufRead, W: Write>(input: &mut R, output: &mut W) -> AppRe
 }
 
 pub fn run() -> AppResult<()> {
+    init_logger();
+    log::info!("Blazar starting");
     let schema = build_schema()?;
     let mascot = config::load_mascot_config()?;
     chat::event_loop::run_terminal_chat(schema, mascot)
+}
+
+/// Initialize file-based logger.  Logs go to `logs/blazar.log` in the repo
+/// root.  The TUI owns stdout/stderr so all logging must go to a file.
+fn init_logger() {
+    use flexi_logger::{FileSpec, Logger, WriteMode};
+
+    let log_dir = std::env::current_dir().unwrap_or_default().join("logs");
+    let _ = std::fs::create_dir_all(&log_dir);
+
+    let level = std::env::var("BLAZAR_LOG").unwrap_or_else(|_| "debug".to_owned());
+
+    if let Err(e) = Logger::try_with_str(&level).and_then(|logger| {
+        logger
+            .log_to_file(
+                FileSpec::default()
+                    .directory(log_dir)
+                    .basename("blazar")
+                    .suppress_timestamp(),
+            )
+            .write_mode(WriteMode::BufferAndFlush)
+            .format(flexi_logger::detailed_format)
+            .start()
+    }) {
+        eprintln!("Failed to init logger: {e}");
+    }
 }
 
 #[cfg(test)]

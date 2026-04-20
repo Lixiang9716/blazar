@@ -9,6 +9,7 @@ use crate::chat::theme::ChatTheme;
 use crate::provider::LlmProvider;
 use crate::provider::echo::EchoProvider;
 use crate::provider::siliconflow::SiliconFlowConfig;
+use log::{debug, info, trace, warn};
 use ratatui_textarea::TextArea;
 use std::cell::Cell;
 use std::time::Instant;
@@ -167,9 +168,11 @@ impl ChatApp {
 
             match &event {
                 AgentEvent::TurnStarted { .. } => {
+                    debug!("tick: TurnStarted");
                     self.scroll_offset = u16::MAX;
                 }
                 AgentEvent::ThinkingDelta { text } => {
+                    trace!("tick: ThinkingDelta len={}", text.len());
                     let needs_new = self
                         .timeline
                         .last()
@@ -185,6 +188,7 @@ impl ChatApp {
                     self.scroll_offset = u16::MAX;
                 }
                 AgentEvent::TextDelta { text } => {
+                    trace!("tick: TextDelta len={}", text.len());
                     // Append to the current assistant response entry; create one if
                     // the last entry is not an assistant Message (could be user msg,
                     // thinking, tool_use, etc.)
@@ -200,6 +204,7 @@ impl ChatApp {
                     self.scroll_offset = u16::MAX;
                 }
                 AgentEvent::ToolCallRequest { payload } => {
+                    debug!("tick: ToolCallRequest payload_len={}", payload.len());
                     self.timeline.push(TimelineEntry::tool_use(
                         "function_call",
                         &payload[..payload.len().min(60)],
@@ -209,8 +214,11 @@ impl ChatApp {
                     ));
                     self.scroll_offset = u16::MAX;
                 }
-                AgentEvent::TurnComplete => {}
+                AgentEvent::TurnComplete => {
+                    debug!("tick: TurnComplete");
+                }
                 AgentEvent::TurnFailed { error } => {
+                    warn!("tick: TurnFailed error={error}");
                     self.timeline
                         .push(TimelineEntry::warning(format!("Agent error: {error}")));
                     self.scroll_offset = u16::MAX;
@@ -256,6 +264,12 @@ impl ChatApp {
         if trimmed.is_empty() {
             return;
         }
+
+        info!(
+            "send_message: len={} preview={:.60}",
+            trimmed.len(),
+            trimmed
+        );
 
         // Trigger demo playback when user types "1"
         if trimmed == "1" {

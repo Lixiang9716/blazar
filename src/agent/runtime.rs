@@ -1,6 +1,8 @@
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::JoinHandle;
 
+use log::{debug, info, warn};
+
 use super::protocol::{AgentCommand, AgentEvent};
 use crate::provider::{LlmProvider, ProviderEvent};
 
@@ -70,6 +72,10 @@ fn runtime_loop(
             AgentCommand::SubmitTurn { prompt } => {
                 turn_counter += 1;
                 let turn_id = format!("turn-{turn_counter}");
+                info!(
+                    "runtime: SubmitTurn id={turn_id} prompt_len={}",
+                    prompt.len()
+                );
 
                 if event_tx
                     .send(AgentEvent::TurnStarted {
@@ -83,9 +89,12 @@ fn runtime_loop(
                 run_turn(&prompt, &*provider, &event_tx);
             }
             AgentCommand::Cancel => {
-                // Future: signal the provider sub-thread to stop.
+                debug!("runtime: Cancel received");
             }
-            AgentCommand::Shutdown => break,
+            AgentCommand::Shutdown => {
+                info!("runtime: Shutdown");
+                break;
+            }
         }
     }
 }
@@ -98,12 +107,10 @@ fn run_turn(prompt: &str, provider: &dyn LlmProvider, event_tx: &Sender<AgentEve
     let (chunk_tx, chunk_rx) = mpsc::channel::<ProviderEvent>();
 
     std::thread::scope(|s| {
-        // Provider streams chunks in a scoped sub-thread.
         s.spawn(|| {
             provider.stream_turn(prompt, chunk_tx);
         });
 
-        // Relay provider events → agent events in real time.
         let mut got_terminal = false;
         for prov_event in &chunk_rx {
             let agent_event = match prov_event {
@@ -112,10 +119,12 @@ fn run_turn(prompt: &str, provider: &dyn LlmProvider, event_tx: &Sender<AgentEve
                 ProviderEvent::ToolCallRequest(payload) => AgentEvent::ToolCallRequest { payload },
                 ProviderEvent::TurnComplete => {
                     got_terminal = true;
+                    debug!("run_turn: provider sent TurnComplete");
                     AgentEvent::TurnComplete
                 }
                 ProviderEvent::Error(err) => {
                     got_terminal = true;
+                    warn!("run_turn: provider error: {err}");
                     AgentEvent::TurnFailed { error: err }
                 }
             };
@@ -124,8 +133,8 @@ fn run_turn(prompt: &str, provider: &dyn LlmProvider, event_tx: &Sender<AgentEve
             }
         }
 
-        // Safety net: if provider didn't send a terminal event, emit one.
         if !got_terminal {
+            debug!("run_turn: no terminal event from provider, emitting TurnComplete");
             let _ = event_tx.send(AgentEvent::TurnComplete);
         }
     });

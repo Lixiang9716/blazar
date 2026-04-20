@@ -1,6 +1,8 @@
 use std::io::BufRead;
 use std::sync::mpsc::Sender;
 
+use log::{debug, info, trace, warn};
+
 use super::{LlmProvider, ProviderEvent};
 
 // ── Configuration ──────────────────────────────────────────────────
@@ -364,11 +366,21 @@ impl SiliconFlowClient {
         let mut request = req.clone();
         request.stream = Some(true);
 
+        info!(
+            "chat_stream: model={} messages={}",
+            request.model,
+            request.messages.len()
+        );
+
         let resp: ureq::Response = ureq::post(&self.url("/chat/completions"))
             .set("Authorization", &self.auth_header())
             .send_json(serde_json::to_value(&request).map_err(|e| e.to_string())?)
-            .map_err(|e| format!("HTTP error: {e}"))?;
+            .map_err(|e| {
+                warn!("chat_stream: HTTP error: {e}");
+                format!("HTTP error: {e}")
+            })?;
 
+        debug!("chat_stream: response received, streaming SSE");
         let reader = resp.into_reader();
         let buf = std::io::BufReader::new(reader);
 
@@ -387,7 +399,10 @@ impl SiliconFlowClient {
 
             let chunk: StreamChunk = match serde_json::from_str(data) {
                 Ok(v) => v,
-                Err(_) => continue,
+                Err(e) => {
+                    trace!("chat_stream: skip unparseable chunk: {e}");
+                    continue;
+                }
             };
 
             for choice in &chunk.choices {
@@ -536,8 +551,10 @@ impl SiliconFlowProvider {
 
 impl LlmProvider for SiliconFlowProvider {
     fn stream_turn(&self, prompt: &str, tx: Sender<ProviderEvent>) {
+        info!("stream_turn: prompt_len={}", prompt.len());
         let req = self.build_request(prompt);
         if let Err(e) = self.client.chat_stream(&req, &tx) {
+            warn!("stream_turn: error={e}");
             let _ = tx.send(ProviderEvent::Error(e));
         }
     }
