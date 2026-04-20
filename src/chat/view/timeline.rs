@@ -221,19 +221,14 @@ fn render_entry<'a>(entry: &TimelineEntry, theme: &ChatTheme, _width: u16) -> Ve
             }
         }
         EntryKind::Thinking => {
-            let mut body_lines = entry.body.lines();
-            let first = body_lines.next().unwrap_or("");
+            // Collapse newlines into spaces so thinking renders as a single
+            // wrapped paragraph instead of breaking at every SSE chunk boundary.
+            let collapsed = entry.body.replace('\n', " ");
             lines.push(Line::from(vec![
                 Span::raw(MARGIN),
                 Span::styled("● ", marker_style),
-                Span::styled(first.to_owned(), theme.dim_text),
+                Span::styled(collapsed, theme.dim_text),
             ]));
-            for continuation in body_lines {
-                lines.push(Line::from(vec![
-                    Span::raw(INDENT),
-                    Span::styled(continuation.to_owned(), theme.dim_text),
-                ]));
-            }
         }
         EntryKind::CodeBlock { language } => {
             if !language.is_empty() {
