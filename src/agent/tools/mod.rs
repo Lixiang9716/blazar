@@ -3,6 +3,7 @@ pub mod read_file;
 pub mod write_file;
 
 use serde_json::Value;
+use std::fs;
 use std::path::{Component, Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -101,4 +102,64 @@ pub fn validate_workspace_relative_path(requested: &str) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+pub fn canonical_workspace_root(workspace_root: &Path) -> Result<PathBuf, String> {
+    fs::canonicalize(workspace_root).map_err(|error| {
+        format!(
+            "cannot resolve workspace root {}: {error}",
+            workspace_root.display()
+        )
+    })
+}
+
+fn ensure_path_is_within_workspace(path: &Path, workspace_root: &Path) -> Result<(), String> {
+    if path.starts_with(workspace_root) {
+        Ok(())
+    } else {
+        Err("path must stay inside workspace root".into())
+    }
+}
+
+fn canonicalize_existing_ancestor(path: &Path) -> Result<PathBuf, String> {
+    for ancestor in path.ancestors() {
+        if ancestor.exists() {
+            return fs::canonicalize(ancestor)
+                .map_err(|error| format!("cannot resolve {}: {error}", ancestor.display()));
+        }
+    }
+
+    Err(format!("cannot resolve {}: no existing ancestor", path.display()))
+}
+
+pub fn resolve_workspace_path(workspace_root: &Path, requested: &str) -> Result<PathBuf, String> {
+    validate_workspace_relative_path(requested)?;
+
+    let canonical_root = canonical_workspace_root(workspace_root)?;
+    let canonical_path = fs::canonicalize(workspace_root.join(requested))
+        .map_err(|error| format!("cannot resolve {}: {error}", workspace_root.join(requested).display()))?;
+    ensure_path_is_within_workspace(&canonical_path, &canonical_root)?;
+    Ok(canonical_path)
+}
+
+pub fn resolve_workspace_write_path(
+    workspace_root: &Path,
+    requested: &str,
+) -> Result<(PathBuf, PathBuf), String> {
+    validate_workspace_relative_path(requested)?;
+
+    let canonical_root = canonical_workspace_root(workspace_root)?;
+    let full_path = workspace_root.join(requested);
+    let parent = full_path.parent().unwrap_or(workspace_root);
+
+    let canonical_parent = canonicalize_existing_ancestor(parent)?;
+    ensure_path_is_within_workspace(&canonical_parent, &canonical_root)?;
+
+    if full_path.exists() {
+        let canonical_path = fs::canonicalize(&full_path)
+            .map_err(|error| format!("cannot resolve {}: {error}", full_path.display()))?;
+        ensure_path_is_within_workspace(&canonical_path, &canonical_root)?;
+    }
+
+    Ok((full_path, canonical_root))
 }

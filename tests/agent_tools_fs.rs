@@ -6,6 +6,8 @@ use serde_json::json;
 use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
+#[cfg(unix)]
+use std::{ffi::OsString, os::unix::fs as unix_fs};
 
 fn fresh_workspace(label: &str) -> PathBuf {
     let suffix = SystemTime::now()
@@ -43,6 +45,19 @@ fn read_file_reads_utf8_up_to_100kb() {
 
     assert!(!result.is_error);
     assert_eq!(result.output.len(), 100 * 1024);
+}
+
+#[test]
+fn read_file_rejects_files_over_100kb() {
+    let workspace = fresh_workspace("read-too-large");
+    let content = "a".repeat(100 * 1024 + 1);
+    fs::write(workspace.join("too-large.txt"), &content).unwrap();
+
+    let tool = ReadFileTool::new(workspace.clone());
+    let result = tool.execute(json!({ "path": "too-large.txt" }));
+
+    assert!(result.is_error);
+    assert_eq!(result.output, "file exceeds 100KB limit");
 }
 
 #[test]
@@ -94,6 +109,7 @@ fn list_dir_stops_after_two_hundred_entries() {
 
     assert!(!result.is_error);
     assert!(result.output.ends_with("[list truncated]"));
+    assert!(result.output_truncated);
     assert_eq!(result.output.lines().count(), 201);
     assert!(!result.output.contains("file-200.txt"));
 }
@@ -110,7 +126,18 @@ fn list_dir_does_not_truncate_exactly_two_hundred_entries() {
 
     assert!(!result.is_error);
     assert!(!result.output.ends_with("[list truncated]"));
+    assert!(!result.output_truncated);
     assert_eq!(result.output.lines().count(), 200);
+}
+
+#[test]
+fn list_dir_requires_path_argument() {
+    let workspace = fresh_workspace("list-missing-path");
+    let tool = ListDirTool::new(workspace.clone());
+
+    let result = tool.execute(json!({}));
+
+    assert!(result.is_error);
 }
 
 #[test]
@@ -130,4 +157,38 @@ fn file_tools_reject_parent_escape() {
     assert!(read.is_error);
     assert!(write.is_error);
     assert!(list.is_error);
+}
+
+#[cfg(unix)]
+#[test]
+fn file_tools_reject_symlink_escapes() {
+    let workspace = fresh_workspace("symlink-escape");
+    let suffix = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let outside = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target")
+        .join("test-workspaces")
+        .join(OsString::from(format!("outside-{suffix}")));
+    fs::create_dir_all(&outside).unwrap();
+    fs::write(outside.join("secret.txt"), "secret").unwrap();
+    unix_fs::symlink(&outside, workspace.join("escape-dir")).unwrap();
+    unix_fs::symlink(outside.join("secret.txt"), workspace.join("escape-file.txt")).unwrap();
+
+    let read_tool = ReadFileTool::new(workspace.clone());
+    let write_tool = WriteFileTool::new(workspace.clone());
+    let list_tool = ListDirTool::new(workspace.clone());
+
+    let read = read_tool.execute(json!({ "path": "escape-file.txt" }));
+    let write = write_tool.execute(json!({
+        "path": "escape-dir/new.txt",
+        "content": "nope"
+    }));
+    let list = list_tool.execute(json!({ "path": "escape-dir" }));
+
+    assert!(read.is_error);
+    assert!(write.is_error);
+    assert!(list.is_error);
+    assert!(!outside.join("new.txt").exists());
 }

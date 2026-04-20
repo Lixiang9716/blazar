@@ -1,4 +1,4 @@
-use super::{Tool, ToolResult, ToolSpec, validate_workspace_relative_path};
+use super::{Tool, ToolResult, ToolSpec, resolve_workspace_path};
 use serde_json::{Value, json};
 use std::fs;
 use std::path::PathBuf;
@@ -36,18 +36,23 @@ impl Tool for ReadFileTool {
             return ToolResult::failure("read_file requires a string path");
         };
 
-        if let Err(error) = validate_workspace_relative_path(path) {
-            return ToolResult::failure(error);
-        }
+        let full_path = match resolve_workspace_path(&self.workspace_root, path) {
+            Ok(path) => path,
+            Err(error) => return ToolResult::failure(error),
+        };
 
-        let full_path = self.workspace_root.join(path);
-        match fs::read(&full_path) {
-            Ok(bytes) if bytes.len() > MAX_FILE_BYTES => {
+        match fs::metadata(&full_path) {
+            Ok(metadata) if metadata.len() > MAX_FILE_BYTES as u64 => {
                 ToolResult::failure("file exceeds 100KB limit")
             }
-            Ok(bytes) => match String::from_utf8(bytes) {
-                Ok(text) => ToolResult::success(text),
-                Err(error) => ToolResult::failure(format!("file is not valid UTF-8: {error}")),
+            Ok(_) => match fs::read(&full_path) {
+                Ok(bytes) => match String::from_utf8(bytes) {
+                    Ok(text) => ToolResult::success(text),
+                    Err(error) => ToolResult::failure(format!("file is not valid UTF-8: {error}")),
+                },
+                Err(error) => {
+                    ToolResult::failure(format!("cannot read {}: {error}", full_path.display()))
+                }
             },
             Err(error) => {
                 ToolResult::failure(format!("cannot read {}: {error}", full_path.display()))

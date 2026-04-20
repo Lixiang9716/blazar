@@ -1,4 +1,4 @@
-use super::{Tool, ToolResult, ToolSpec, validate_workspace_relative_path};
+use super::{Tool, ToolResult, ToolSpec, resolve_workspace_write_path};
 use serde_json::{Value, json};
 use std::fs;
 use std::path::PathBuf;
@@ -38,11 +38,10 @@ impl Tool for WriteFileTool {
             return ToolResult::failure("write_file requires string content");
         };
 
-        if let Err(error) = validate_workspace_relative_path(path) {
-            return ToolResult::failure(error);
-        }
-
-        let full_path = self.workspace_root.join(path);
+        let (full_path, canonical_root) = match resolve_workspace_write_path(&self.workspace_root, path) {
+            Ok(values) => values,
+            Err(error) => return ToolResult::failure(error),
+        };
         if let Some(parent) = full_path.parent()
             && let Err(error) = fs::create_dir_all(parent)
         {
@@ -50,6 +49,20 @@ impl Tool for WriteFileTool {
                 "cannot create parent directory {}: {error}",
                 parent.display()
             ));
+        }
+        if let Some(parent) = full_path.parent() {
+            match fs::canonicalize(parent) {
+                Ok(canonical_parent) if !canonical_parent.starts_with(&canonical_root) => {
+                    return ToolResult::failure("path must stay inside workspace root");
+                }
+                Err(error) => {
+                    return ToolResult::failure(format!(
+                        "cannot resolve {}: {error}",
+                        parent.display()
+                    ));
+                }
+                _ => {}
+            }
         }
 
         match fs::write(&full_path, content) {

@@ -1,4 +1,6 @@
-use super::{Tool, ToolResult, ToolSpec, validate_workspace_relative_path};
+use super::{
+    Tool, ToolResult, ToolSpec, canonical_workspace_root, resolve_workspace_path,
+};
 use serde_json::{Value, json};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -15,7 +17,13 @@ impl ListDirTool {
         Self { workspace_root }
     }
 
-    fn visit(path: &Path, prefix: &str, depth: usize, lines: &mut Vec<String>) -> bool {
+    fn visit(
+        path: &Path,
+        workspace_root: &Path,
+        prefix: &str,
+        depth: usize,
+        lines: &mut Vec<String>,
+    ) -> bool {
         if depth >= MAX_DEPTH {
             return false;
         }
@@ -34,11 +42,24 @@ impl ListDirTool {
 
             let file_name = entry.file_name().to_string_lossy().to_string();
             let child_path = entry.path();
+            let Ok(canonical_child_path) = fs::canonicalize(&child_path) else {
+                continue;
+            };
+            if !canonical_child_path.starts_with(workspace_root) {
+                continue;
+            }
+
             if child_path.is_dir() {
                 let rendered = format!("{prefix}{file_name}/");
                 lines.push(rendered.clone());
 
-                if Self::visit(&child_path, &rendered, depth + 1, lines) {
+                if Self::visit(
+                    &canonical_child_path,
+                    workspace_root,
+                    &rendered,
+                    depth + 1,
+                    lines,
+                ) {
                     return true;
                 }
             } else {
@@ -67,16 +88,18 @@ impl Tool for ListDirTool {
     }
 
     fn execute(&self, args: Value) -> ToolResult {
-        let path = args
-            .get("path")
-            .and_then(|value| value.as_str())
-            .unwrap_or(".");
+        let Some(path) = args.get("path").and_then(|value| value.as_str()) else {
+            return ToolResult::failure("list_dir requires a string path");
+        };
 
-        if let Err(error) = validate_workspace_relative_path(path) {
-            return ToolResult::failure(error);
-        }
-
-        let full_path = self.workspace_root.join(path);
+        let canonical_root = match canonical_workspace_root(&self.workspace_root) {
+            Ok(root) => root,
+            Err(error) => return ToolResult::failure(error),
+        };
+        let full_path = match resolve_workspace_path(&self.workspace_root, path) {
+            Ok(path) => path,
+            Err(error) => return ToolResult::failure(error),
+        };
         if !full_path.is_dir() {
             return ToolResult::failure(format!(
                 "cannot list {}: not a directory",
@@ -85,12 +108,17 @@ impl Tool for ListDirTool {
         }
 
         let mut lines = Vec::new();
-        let truncated = Self::visit(&full_path, "", 0, &mut lines);
+        let truncated = Self::visit(&full_path, &canonical_root, "", 0, &mut lines);
 
         let mut output = lines.join("\n");
         if truncated {
             output.push_str("\n[list truncated]");
         }
-        ToolResult::success(output)
+        ToolResult {
+            output,
+            exit_code: None,
+            is_error: false,
+            output_truncated: truncated,
+        }
     }
 }
