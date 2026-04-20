@@ -433,7 +433,8 @@ impl ChatApp {
                 arguments,
             } => {
                 debug!(
-                    "tick: ToolCallStarted tool={} arguments_len={}",
+                    "tick: ToolCallStarted call_id={} tool={} arguments_len={}",
+                    call_id,
                     tool_name,
                     arguments.len()
                 );
@@ -451,6 +452,12 @@ impl ChatApp {
                 output,
                 is_error,
             } => {
+                debug!(
+                    "tick: ToolCallCompleted call_id={} is_error={} output_len={}",
+                    call_id,
+                    is_error,
+                    output.len()
+                );
                 if let Some(entry) = self.timeline.iter_mut().rev().find(|entry| {
                     matches!(
                         &entry.kind,

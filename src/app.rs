@@ -343,12 +343,14 @@ pub fn run() -> AppResult<()> {
 /// Initialize file-based logger.  Logs go to `logs/blazar.log` in the repo
 /// root.  The TUI owns stdout/stderr so all logging must go to a file.
 fn init_logger() {
-    use flexi_logger::{FileSpec, Logger, WriteMode};
+    use flexi_logger::{Cleanup, Criterion, FileSpec, Logger, Naming, WriteMode};
 
     let log_dir = std::env::current_dir().unwrap_or_default().join("logs");
     let _ = std::fs::create_dir_all(&log_dir);
 
-    let level = std::env::var("BLAZAR_LOG").unwrap_or_else(|_| "debug".to_owned());
+    // Default: blazar=debug, third-party libs=warn to suppress TLS/HTTP noise.
+    // Override with BLAZAR_LOG env var (e.g. "trace" or "blazar=trace,ureq=debug").
+    let level = std::env::var("BLAZAR_LOG").unwrap_or_else(|_| "warn, blazar=debug".to_owned());
 
     if let Err(e) = Logger::try_with_str(&level).and_then(|logger| {
         logger
@@ -357,6 +359,11 @@ fn init_logger() {
                     .directory(log_dir)
                     .basename("blazar")
                     .suppress_timestamp(),
+            )
+            .rotate(
+                Criterion::Size(5_000_000), // rotate at 5 MB
+                Naming::Numbers,
+                Cleanup::KeepLogFiles(3),
             )
             .write_mode(WriteMode::BufferAndFlush)
             .format(flexi_logger::detailed_format)

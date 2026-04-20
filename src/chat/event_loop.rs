@@ -54,7 +54,7 @@ pub fn run_terminal_chat(
             match event::read()? {
                 Event::Key(key) => {
                     let action = InputAction::from_key_event(key);
-                    debug!(
+                    trace!(
                         "event_loop: key={:?} modifiers={:?} → action={:?}",
                         key.code, key.modifiers, action
                     );
