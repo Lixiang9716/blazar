@@ -1,6 +1,8 @@
 use std::sync::mpsc::Sender;
 
-use super::{LlmProvider, ProviderEvent};
+use crate::agent::tools::ToolSpec;
+
+use super::{LlmProvider, ProviderEvent, ProviderMessage};
 
 /// A provider that echoes the user prompt back, one character at a time.
 ///
@@ -22,7 +24,21 @@ impl Default for EchoProvider {
 }
 
 impl LlmProvider for EchoProvider {
-    fn stream_turn(&self, prompt: &str, tx: Sender<ProviderEvent>) {
+    fn stream_turn(
+        &self,
+        messages: &[ProviderMessage],
+        _tools: &[ToolSpec],
+        tx: Sender<ProviderEvent>,
+    ) {
+        let prompt = messages
+            .iter()
+            .rev()
+            .find_map(|message| match message {
+                ProviderMessage::User { content } => Some(content.as_str()),
+                _ => None,
+            })
+            .unwrap_or("");
+
         let response = format!("Echo: {prompt}");
         let delay = std::time::Duration::from_millis(self.delay_ms);
         for ch in response.chars() {

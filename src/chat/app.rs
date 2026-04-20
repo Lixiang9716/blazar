@@ -84,7 +84,7 @@ impl ChatApp {
             timeline_visible_height: Cell::new(0),
             theme_name: crate::chat::theme::DEFAULT_THEME.to_owned(),
             theme,
-            agent_runtime: AgentRuntime::new(provider),
+            agent_runtime: AgentRuntime::new(provider, std::path::PathBuf::from(repo_path)),
             agent_state: AgentRuntimeState::default(),
         }
     }
@@ -94,7 +94,10 @@ impl ChatApp {
         // Use a fixed display path so snapshots are environment-independent.
         app.display_path = "~/blazar".to_owned();
         // Always use EchoProvider in tests — no network calls.
-        app.agent_runtime = AgentRuntime::new(Box::new(EchoProvider::new(0)));
+        app.agent_runtime = AgentRuntime::new(
+            Box::new(EchoProvider::new(0)),
+            std::path::PathBuf::from(_repo_path),
+        );
         app
     }
 
@@ -219,14 +222,32 @@ impl ChatApp {
                     }
                     self.scroll_offset = u16::MAX;
                 }
-                AgentEvent::ToolCallRequest { payload } => {
-                    debug!("tick: ToolCallRequest payload_len={}", payload.len());
+                AgentEvent::ToolCallStarted {
+                    tool_name,
+                    arguments,
+                    ..
+                } => {
+                    debug!(
+                        "tick: ToolCallStarted tool={} arguments_len={}",
+                        tool_name,
+                        arguments.len()
+                    );
                     self.timeline.push(TimelineEntry::tool_use(
-                        "function_call",
-                        &payload[..payload.len().min(60)],
+                        tool_name,
+                        &arguments[..arguments.len().min(60)],
                         0,
                         0,
-                        payload.clone(),
+                        arguments.clone(),
+                    ));
+                    self.scroll_offset = u16::MAX;
+                }
+                AgentEvent::ToolCallCompleted { output, .. } => {
+                    self.timeline.push(TimelineEntry::tool_use(
+                        "tool_result",
+                        &output[..output.len().min(60)],
+                        0,
+                        0,
+                        output.clone(),
                     ));
                     self.scroll_offset = u16::MAX;
                 }

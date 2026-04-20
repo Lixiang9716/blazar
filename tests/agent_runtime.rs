@@ -1,7 +1,9 @@
 use blazar::agent::protocol::AgentEvent;
 use blazar::agent::runtime::AgentRuntime;
+use blazar::agent::tools::ToolSpec;
 use blazar::provider::echo::EchoProvider;
-use blazar::provider::{LlmProvider, ProviderEvent};
+use blazar::provider::{LlmProvider, ProviderEvent, ProviderMessage};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Barrier};
@@ -43,7 +45,12 @@ struct SlowProvider {
 }
 
 impl LlmProvider for SlowProvider {
-    fn stream_turn(&self, _prompt: &str, tx: Sender<ProviderEvent>) {
+    fn stream_turn(
+        &self,
+        _messages: &[ProviderMessage],
+        _tools: &[ToolSpec],
+        tx: Sender<ProviderEvent>,
+    ) {
         let _ = tx.send(ProviderEvent::TextDelta("before-barrier".into()));
         self.barrier.wait();
         for i in 0..self.post_barrier_chunks {
@@ -63,7 +70,12 @@ struct TransientThenSucceedProvider {
 }
 
 impl LlmProvider for TransientThenSucceedProvider {
-    fn stream_turn(&self, _prompt: &str, tx: Sender<ProviderEvent>) {
+    fn stream_turn(
+        &self,
+        _messages: &[ProviderMessage],
+        _tools: &[ToolSpec],
+        tx: Sender<ProviderEvent>,
+    ) {
         let n = self.fail_count.fetch_add(1, Ordering::SeqCst);
         if n < self.fail_times {
             let _ = tx.send(ProviderEvent::Error("connection timeout".into()));
@@ -80,22 +92,51 @@ struct FatalErrorProvider {
 }
 
 impl LlmProvider for FatalErrorProvider {
-    fn stream_turn(&self, _prompt: &str, tx: Sender<ProviderEvent>) {
+    fn stream_turn(
+        &self,
+        _messages: &[ProviderMessage],
+        _tools: &[ToolSpec],
+        tx: Sender<ProviderEvent>,
+    ) {
         self.call_count.fetch_add(1, Ordering::SeqCst);
         let _ = tx.send(ProviderEvent::Error("invalid API key".into()));
     }
 }
 
-/// Provider that emits thinking + text + tool_call + complete for full event coverage.
-struct FullEventProvider;
+/// Provider that emits thinking + tool call first, then completes after tool replay.
+struct FullEventProvider {
+    calls: AtomicU32,
+}
 
 impl LlmProvider for FullEventProvider {
-    fn stream_turn(&self, _prompt: &str, tx: Sender<ProviderEvent>) {
+    fn stream_turn(
+        &self,
+        messages: &[ProviderMessage],
+        _tools: &[ToolSpec],
+        tx: Sender<ProviderEvent>,
+    ) {
         let _ = tx.send(ProviderEvent::ThinkingDelta("thinking...".into()));
-        let _ = tx.send(ProviderEvent::TextDelta("answer".into()));
-        let _ = tx.send(ProviderEvent::ToolCallRequest(r#"{"name":"test"}"#.into()));
+        let pass = self.calls.fetch_add(1, Ordering::SeqCst);
+        if pass == 0 {
+            let _ = tx.send(ProviderEvent::ToolCall {
+                call_id: "call-1".into(),
+                name: "read_file".into(),
+                arguments: "{\"path\":\"Cargo.toml\"}".into(),
+            });
+        } else {
+            let tool_seen = messages.iter().any(|message| {
+                matches!(message, ProviderMessage::ToolResult { tool_call_id, .. } if tool_call_id == "call-1")
+            });
+            if tool_seen {
+                let _ = tx.send(ProviderEvent::TextDelta("answer".into()));
+            }
+        }
         let _ = tx.send(ProviderEvent::TurnComplete);
     }
+}
+
+fn workspace_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
 // ---------------------------------------------------------------------------
@@ -107,7 +148,13 @@ fn echo_provider_streams_full_response() {
     let provider = EchoProvider::new(0);
     let (tx, rx) = std::sync::mpsc::channel();
 
-    provider.stream_turn("hi", tx);
+    provider.stream_turn(
+        &[ProviderMessage::User {
+            content: "hi".into(),
+        }],
+        &[],
+        tx,
+    );
 
     let mut text = String::new();
     let mut completed = false;
@@ -120,7 +167,7 @@ fn echo_provider_streams_full_response() {
                 break;
             }
             ProviderEvent::Error(_) => panic!("unexpected error"),
-            ProviderEvent::ToolCallRequest(_) => {}
+            ProviderEvent::ToolCall { .. } => {}
         }
     }
 
@@ -130,7 +177,7 @@ fn echo_provider_streams_full_response() {
 
 #[test]
 fn runtime_round_trip() {
-    let runtime = AgentRuntime::new(Box::new(EchoProvider::new(0)));
+    let runtime = AgentRuntime::new(Box::new(EchoProvider::new(0)), workspace_root());
 
     runtime.submit_turn("hello").expect("submit should succeed");
 
@@ -155,7 +202,7 @@ fn runtime_round_trip() {
 
 #[test]
 fn submit_turn_returns_ok_when_channel_open() {
-    let runtime = AgentRuntime::new(Box::new(EchoProvider::new(0)));
+    let runtime = AgentRuntime::new(Box::new(EchoProvider::new(0)), workspace_root());
     let result = runtime.submit_turn("test");
     assert!(result.is_ok());
     // Drain events to let the runtime finish cleanly
@@ -164,7 +211,7 @@ fn submit_turn_returns_ok_when_channel_open() {
 
 #[test]
 fn submit_turn_returns_err_after_shutdown() {
-    let runtime = AgentRuntime::new(Box::new(EchoProvider::new(0)));
+    let runtime = AgentRuntime::new(Box::new(EchoProvider::new(0)), workspace_root());
     // Drop sends Shutdown command, closing the channel
     drop(runtime);
 
@@ -183,7 +230,7 @@ fn cancel_stops_streaming_turn() {
         barrier: Arc::clone(&barrier),
         post_barrier_chunks: 50,
     };
-    let runtime = AgentRuntime::new(Box::new(provider));
+    let runtime = AgentRuntime::new(Box::new(provider), workspace_root());
 
     runtime.submit_turn("test").expect("submit should succeed");
 
@@ -216,7 +263,7 @@ fn transient_error_retries_and_recovers() {
         fail_count: AtomicU32::new(0),
         fail_times: 1, // fail once, then succeed
     };
-    let runtime = AgentRuntime::new(Box::new(provider));
+    let runtime = AgentRuntime::new(Box::new(provider), workspace_root());
 
     runtime.submit_turn("test").expect("submit should succeed");
 
@@ -246,7 +293,7 @@ fn fatal_error_does_not_retry() {
         call_count: AtomicU32::new(0),
     };
 
-    let runtime = AgentRuntime::new(Box::new(provider));
+    let runtime = AgentRuntime::new(Box::new(provider), workspace_root());
     runtime.submit_turn("test").expect("submit should succeed");
 
     let events = collect_events(&runtime, Duration::from_secs(2));
@@ -267,7 +314,12 @@ fn fatal_error_does_not_retry() {
 
 #[test]
 fn full_event_types_relayed_correctly() {
-    let runtime = AgentRuntime::new(Box::new(FullEventProvider));
+    let runtime = AgentRuntime::new(
+        Box::new(FullEventProvider {
+            calls: AtomicU32::new(0),
+        }),
+        workspace_root(),
+    );
 
     runtime.submit_turn("test").expect("submit should succeed");
 
@@ -284,13 +336,13 @@ fn full_event_types_relayed_correctly() {
         .any(|e| matches!(e, AgentEvent::TextDelta { .. }));
     let has_tool = events
         .iter()
-        .any(|e| matches!(e, AgentEvent::ToolCallRequest { .. }));
+        .any(|e| matches!(e, AgentEvent::ToolCallStarted { .. }));
     let has_complete = events.iter().any(|e| matches!(e, AgentEvent::TurnComplete));
 
     assert!(has_started, "missing TurnStarted");
     assert!(has_thinking, "missing ThinkingDelta");
     assert!(has_text, "missing TextDelta");
-    assert!(has_tool, "missing ToolCallRequest");
+    assert!(has_tool, "missing ToolCallStarted");
     assert!(has_complete, "missing TurnComplete");
 }
 
@@ -300,7 +352,7 @@ fn full_event_types_relayed_correctly() {
 
 #[test]
 fn multiple_sequential_turns_complete() {
-    let runtime = AgentRuntime::new(Box::new(EchoProvider::new(0)));
+    let runtime = AgentRuntime::new(Box::new(EchoProvider::new(0)), workspace_root());
 
     for i in 0..3 {
         runtime
@@ -321,7 +373,7 @@ fn multiple_sequential_turns_complete() {
 
 #[test]
 fn drop_joins_thread_cleanly() {
-    let runtime = AgentRuntime::new(Box::new(EchoProvider::new(0)));
+    let runtime = AgentRuntime::new(Box::new(EchoProvider::new(0)), workspace_root());
     runtime.submit_turn("hello").expect("submit should succeed");
     collect_events(&runtime, Duration::from_secs(2));
     // Drop should join the thread without panic or hang
@@ -335,7 +387,7 @@ fn drop_during_streaming_does_not_hang() {
         barrier: Arc::clone(&barrier),
         post_barrier_chunks: 100,
     };
-    let runtime = AgentRuntime::new(Box::new(provider));
+    let runtime = AgentRuntime::new(Box::new(provider), workspace_root());
     runtime.submit_turn("test").expect("submit should succeed");
 
     // Let provider start
@@ -353,7 +405,7 @@ fn drop_during_streaming_does_not_hang() {
 fn state_machine_tracks_runtime_events() {
     use blazar::agent::state::AgentRuntimeState;
 
-    let runtime = AgentRuntime::new(Box::new(EchoProvider::new(0)));
+    let runtime = AgentRuntime::new(Box::new(EchoProvider::new(0)), workspace_root());
     let mut state = AgentRuntimeState::default();
 
     runtime.submit_turn("hello").expect("submit should succeed");

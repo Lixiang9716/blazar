@@ -6,6 +6,8 @@ fn idle_by_default() {
     let state = AgentRuntimeState::default();
     assert_eq!(state.turn_state, TurnState::Idle);
     assert_eq!(state.turn_count, 0);
+    assert_eq!(state.active_tool_name, None);
+    assert_eq!(state.tool_call_count, 0);
     assert!(!state.is_busy());
 }
 
@@ -111,15 +113,28 @@ fn thinking_delta_does_not_change_state() {
 }
 
 #[test]
-fn tool_call_request_does_not_change_state() {
+fn tool_call_events_track_active_tool_name() {
     let mut state = AgentRuntimeState::default();
     state.apply_event(&AgentEvent::TurnStarted {
         turn_id: "turn-1".into(),
     });
-    let changed = state.apply_event(&AgentEvent::ToolCallRequest {
-        payload: r#"{"name":"bash"}"#.into(),
+
+    let changed = state.apply_event(&AgentEvent::ToolCallStarted {
+        call_id: "call-1".into(),
+        tool_name: "read_file".into(),
+        arguments: "{\"path\":\"Cargo.toml\"}".into(),
     });
-    assert!(!changed, "ToolCallRequest should not change turn_state");
+    assert!(!changed, "ToolCallStarted should not change turn_state");
+    assert_eq!(state.active_tool_name.as_deref(), Some("read_file"));
+    assert_eq!(state.tool_call_count, 1);
+
+    let changed = state.apply_event(&AgentEvent::ToolCallCompleted {
+        call_id: "call-1".into(),
+        output: "package".into(),
+        is_error: false,
+    });
+    assert!(!changed, "ToolCallCompleted should not change turn_state");
+    assert_eq!(state.active_tool_name, None);
     assert!(state.is_busy());
 }
 

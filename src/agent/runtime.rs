@@ -1,12 +1,20 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::JoinHandle;
 
 use log::{debug, info, warn};
+use serde_json::Value;
 
 use super::protocol::{AgentCommand, AgentEvent};
-use crate::provider::{LlmProvider, ProviderEvent};
+use super::tools::ToolRegistry;
+use crate::agent::tools::ToolResult;
+use crate::agent::tools::bash::BashTool;
+use crate::agent::tools::list_dir::ListDirTool;
+use crate::agent::tools::read_file::ReadFileTool;
+use crate::agent::tools::write_file::WriteFileTool;
+use crate::provider::{LlmProvider, ProviderEvent, ProviderMessage};
 
 /// The agent runtime bridges the synchronous TUI render loop and
 /// the (potentially blocking) LLM provider.
@@ -26,10 +34,11 @@ pub struct AgentRuntime {
 
 /// Maximum number of transient-error retries per turn.
 const MAX_TRANSIENT_RETRIES: u32 = 1;
+const MAX_TOOL_ITERATIONS: usize = 10;
 
 impl AgentRuntime {
     /// Create a new runtime with the given provider.
-    pub fn new(provider: Box<dyn LlmProvider>) -> Self {
+    pub fn new(provider: Box<dyn LlmProvider>, workspace_root: PathBuf) -> Self {
         let (cmd_tx, cmd_rx) = mpsc::channel();
         let (event_tx, event_rx) = mpsc::channel();
         let cancel_flag = Arc::new(AtomicBool::new(false));
@@ -37,7 +46,14 @@ impl AgentRuntime {
 
         let handle = std::thread::Builder::new()
             .name("blazar-agent".into())
-            .spawn(move || runtime_loop(cmd_rx, event_tx, provider, flag_clone))
+            .spawn(move || {
+                let mut tools = ToolRegistry::new(workspace_root.clone());
+                tools.register(Box::new(ReadFileTool::new(workspace_root.clone())));
+                tools.register(Box::new(WriteFileTool::new(workspace_root.clone())));
+                tools.register(Box::new(ListDirTool::new(workspace_root.clone())));
+                tools.register(Box::new(BashTool::new(workspace_root)));
+                runtime_loop(cmd_rx, event_tx, provider, tools, flag_clone)
+            })
             .expect("failed to spawn agent runtime thread");
 
         Self {
@@ -88,6 +104,7 @@ fn runtime_loop(
     cmd_rx: Receiver<AgentCommand>,
     event_tx: Sender<AgentEvent>,
     provider: Box<dyn LlmProvider>,
+    tools: ToolRegistry,
     cancel_flag: Arc<AtomicBool>,
 ) {
     let mut turn_counter = 0u64;
@@ -113,7 +130,14 @@ fn runtime_loop(
                     break;
                 }
 
-                run_turn_with_retry(&turn_id, &prompt, &*provider, &event_tx, &cancel_flag);
+                run_turn_with_retry(
+                    &turn_id,
+                    &prompt,
+                    &*provider,
+                    &tools,
+                    &event_tx,
+                    &cancel_flag,
+                );
             }
             AgentCommand::Cancel => {
                 debug!("runtime: Cancel received");
@@ -132,6 +156,7 @@ fn run_turn_with_retry(
     turn_id: &str,
     prompt: &str,
     provider: &dyn LlmProvider,
+    tools: &ToolRegistry,
     event_tx: &Sender<AgentEvent>,
     cancel_flag: &Arc<AtomicBool>,
 ) {
@@ -144,10 +169,14 @@ fn run_turn_with_retry(
             return;
         }
 
-        let result = run_turn(prompt, provider, event_tx, cancel_flag);
+        let result = run_turn(prompt, provider, tools, event_tx, cancel_flag);
 
         match result {
-            TurnOutcome::Complete | TurnOutcome::Cancelled => return,
+            TurnOutcome::Complete => {
+                let _ = event_tx.send(AgentEvent::TurnComplete);
+                return;
+            }
+            TurnOutcome::Cancelled => return,
             TurnOutcome::TransientError(err) => {
                 if attempt < MAX_TRANSIENT_RETRIES {
                     warn!(
@@ -175,6 +204,18 @@ enum TurnOutcome {
     FatalError(String),
 }
 
+struct PendingToolCall {
+    call_id: String,
+    name: String,
+    arguments: String,
+}
+
+struct ProviderPass {
+    outcome: TurnOutcome,
+    assistant_text: String,
+    tool_calls: Vec<PendingToolCall>,
+}
+
 /// Classify whether an error is transient (network timeout, 429, 502/503).
 pub(crate) fn is_transient_error(err: &str) -> bool {
     let lower = err.to_lowercase();
@@ -186,69 +227,184 @@ pub(crate) fn is_transient_error(err: &str) -> bool {
         || lower.contains("rate limit")
 }
 
-/// Execute a single ReAct turn: stream provider output and relay events.
+/// Execute a single turn, including bounded tool-call re-entry.
 fn run_turn(
     prompt: &str,
     provider: &dyn LlmProvider,
+    tools: &ToolRegistry,
     event_tx: &Sender<AgentEvent>,
     cancel_flag: &Arc<AtomicBool>,
 ) -> TurnOutcome {
+    let mut messages = vec![ProviderMessage::User {
+        content: prompt.to_string(),
+    }];
+    let tool_specs = tools.specs();
+    let mut tool_iterations = 0usize;
+
+    loop {
+        if cancel_flag.load(Ordering::SeqCst) {
+            let _ = event_tx.send(AgentEvent::TurnFailed {
+                error: "cancelled".to_string(),
+            });
+            return TurnOutcome::Cancelled;
+        }
+
+        let pass = stream_provider_pass(provider, &messages, &tool_specs, event_tx, cancel_flag);
+
+        match pass.outcome {
+            TurnOutcome::Complete => {
+                if pass.tool_calls.is_empty() {
+                    return TurnOutcome::Complete;
+                }
+
+                if !pass.assistant_text.is_empty() {
+                    messages.push(ProviderMessage::Assistant {
+                        content: pass.assistant_text,
+                    });
+                }
+
+                for pending in pass.tool_calls {
+                    if cancel_flag.load(Ordering::SeqCst) {
+                        let _ = event_tx.send(AgentEvent::TurnFailed {
+                            error: "cancelled".to_string(),
+                        });
+                        return TurnOutcome::Cancelled;
+                    }
+
+                    if tool_iterations >= MAX_TOOL_ITERATIONS {
+                        return TurnOutcome::FatalError("tool iteration limit exceeded".into());
+                    }
+
+                    let _ = event_tx.send(AgentEvent::ToolCallStarted {
+                        call_id: pending.call_id.clone(),
+                        tool_name: pending.name.clone(),
+                        arguments: pending.arguments.clone(),
+                    });
+
+                    let result = match serde_json::from_str::<Value>(&pending.arguments) {
+                        Ok(args) => execute_tool_call(tools, &pending.name, args),
+                        Err(error) => {
+                            ToolResult::failure(format!("invalid tool arguments: {error}"))
+                        }
+                    };
+
+                    let _ = event_tx.send(AgentEvent::ToolCallCompleted {
+                        call_id: pending.call_id.clone(),
+                        output: result.output.clone(),
+                        is_error: result.is_error,
+                    });
+
+                    messages.push(ProviderMessage::ToolCall {
+                        id: pending.call_id.clone(),
+                        name: pending.name.clone(),
+                        arguments: pending.arguments.clone(),
+                    });
+                    messages.push(ProviderMessage::ToolResult {
+                        tool_call_id: pending.call_id,
+                        output: result.output,
+                        is_error: result.is_error,
+                    });
+                    tool_iterations += 1;
+                }
+            }
+            TurnOutcome::Cancelled => return TurnOutcome::Cancelled,
+            TurnOutcome::TransientError(err) => return TurnOutcome::TransientError(err),
+            TurnOutcome::FatalError(err) => return TurnOutcome::FatalError(err),
+        }
+    }
+}
+
+fn execute_tool_call(tools: &ToolRegistry, name: &str, args: Value) -> ToolResult {
+    match tools.execute(name, args) {
+        Ok(result) => result,
+        Err(error) => ToolResult::failure(error),
+    }
+}
+
+fn stream_provider_pass(
+    provider: &dyn LlmProvider,
+    messages: &[ProviderMessage],
+    tool_specs: &[crate::agent::tools::ToolSpec],
+    event_tx: &Sender<AgentEvent>,
+    cancel_flag: &Arc<AtomicBool>,
+) -> ProviderPass {
     let (chunk_tx, chunk_rx) = mpsc::channel::<ProviderEvent>();
+    let mut pass = ProviderPass {
+        outcome: TurnOutcome::Complete,
+        assistant_text: String::new(),
+        tool_calls: Vec::new(),
+    };
 
-    let mut outcome = TurnOutcome::Complete;
+    std::thread::scope(|scope| {
+        scope.spawn(|| provider.stream_turn(messages, tool_specs, chunk_tx));
 
-    std::thread::scope(|s| {
-        s.spawn(|| {
-            provider.stream_turn(prompt, chunk_tx);
-        });
-
-        let mut got_terminal = false;
-        for prov_event in &chunk_rx {
+        for event in &chunk_rx {
             if cancel_flag.load(Ordering::SeqCst) {
-                info!("run_turn: cancel flag observed, stopping relay");
+                info!("stream_provider_pass: cancel flag observed, stopping relay");
                 let _ = event_tx.send(AgentEvent::TurnFailed {
                     error: "cancelled".to_string(),
                 });
-                outcome = TurnOutcome::Cancelled;
+                pass.outcome = TurnOutcome::Cancelled;
                 return;
             }
 
-            let agent_event = match prov_event {
-                ProviderEvent::TextDelta(text) => AgentEvent::TextDelta { text },
-                ProviderEvent::ThinkingDelta(text) => AgentEvent::ThinkingDelta { text },
-                ProviderEvent::ToolCallRequest(payload) => AgentEvent::ToolCallRequest { payload },
+            match event {
+                ProviderEvent::TextDelta(text) => {
+                    pass.assistant_text.push_str(&text);
+                    if event_tx.send(AgentEvent::TextDelta { text }).is_err() {
+                        break;
+                    }
+                }
+                ProviderEvent::ThinkingDelta(text) => {
+                    if event_tx.send(AgentEvent::ThinkingDelta { text }).is_err() {
+                        break;
+                    }
+                }
+                ProviderEvent::ToolCall {
+                    call_id,
+                    name,
+                    arguments,
+                } => {
+                    pass.tool_calls.push(PendingToolCall {
+                        call_id,
+                        name,
+                        arguments,
+                    });
+                }
                 ProviderEvent::TurnComplete => {
-                    got_terminal = true;
-                    debug!("run_turn: provider sent TurnComplete");
-                    AgentEvent::TurnComplete
+                    debug!("stream_provider_pass: provider sent TurnComplete");
+                    break;
                 }
                 ProviderEvent::Error(err) => {
-                    warn!("run_turn: provider error: {err}");
-                    if is_transient_error(&err) {
-                        outcome = TurnOutcome::TransientError(err);
+                    warn!("stream_provider_pass: provider error: {err}");
+                    pass.outcome = if is_transient_error(&err) {
+                        TurnOutcome::TransientError(err)
                     } else {
-                        outcome = TurnOutcome::FatalError(err);
-                    }
+                        TurnOutcome::FatalError(err)
+                    };
                     return;
                 }
-            };
-            if event_tx.send(agent_event).is_err() {
-                break;
             }
-        }
-
-        if !got_terminal && !matches!(outcome, TurnOutcome::Cancelled) {
-            debug!("run_turn: no terminal event from provider, emitting TurnComplete");
-            let _ = event_tx.send(AgentEvent::TurnComplete);
         }
     });
 
-    outcome
+    pass
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agent::tools::ToolSpec;
+
+    fn empty_registry() -> ToolRegistry {
+        ToolRegistry::new(PathBuf::from(env!("CARGO_MANIFEST_DIR")))
+    }
+
+    fn user_messages(prompt: &str) -> Vec<ProviderMessage> {
+        vec![ProviderMessage::User {
+            content: prompt.to_string(),
+        }]
+    }
 
     #[test]
     fn transient_errors_classified_correctly() {
@@ -282,16 +438,17 @@ mod tests {
         let (event_tx, event_rx) = mpsc::channel();
         let cancel = Arc::new(AtomicBool::new(false));
 
-        let outcome = run_turn("hi", &provider, &event_tx, &cancel);
+        let outcome = run_turn("hi", &provider, &empty_registry(), &event_tx, &cancel);
         assert!(matches!(outcome, TurnOutcome::Complete));
 
-        let mut got_complete = false;
-        for event in event_rx.try_iter() {
-            if matches!(event, AgentEvent::TurnComplete) {
-                got_complete = true;
-            }
-        }
-        assert!(got_complete);
+        let text: String = event_rx
+            .try_iter()
+            .filter_map(|event| match event {
+                AgentEvent::TextDelta { text } => Some(text),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(text, "Echo: hi");
     }
 
     #[test]
@@ -303,10 +460,14 @@ mod tests {
         }
 
         impl LlmProvider for SlowProvider {
-            fn stream_turn(&self, _prompt: &str, tx: Sender<ProviderEvent>) {
+            fn stream_turn(
+                &self,
+                _messages: &[ProviderMessage],
+                _tools: &[ToolSpec],
+                tx: Sender<ProviderEvent>,
+            ) {
                 let _ = tx.send(ProviderEvent::TextDelta("chunk1".into()));
                 self.barrier.wait();
-                // After barrier, keep sending — cancel flag should stop relay
                 for i in 0..100 {
                     std::thread::sleep(std::time::Duration::from_millis(5));
                     if tx.send(ProviderEvent::TextDelta(format!("c{i}"))).is_err() {
@@ -325,21 +486,19 @@ mod tests {
         let cancel = Arc::new(AtomicBool::new(false));
         let cancel2 = Arc::clone(&cancel);
 
-        std::thread::scope(|s| {
-            s.spawn(|| {
-                run_turn("test", &provider, &event_tx, &cancel2);
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                run_turn("test", &provider, &empty_registry(), &event_tx, &cancel2);
             });
 
-            // Wait until provider has sent at least one chunk
             barrier.wait();
-            // Set cancel flag
             cancel.store(true, Ordering::SeqCst);
         });
 
         let events: Vec<_> = event_rx.try_iter().collect();
         let has_cancelled = events
             .iter()
-            .any(|e| matches!(e, AgentEvent::TurnFailed { error } if error == "cancelled"));
+            .any(|event| matches!(event, AgentEvent::TurnFailed { error } if error == "cancelled"));
         assert!(has_cancelled, "should emit TurnFailed with 'cancelled'");
     }
 
@@ -348,14 +507,25 @@ mod tests {
         struct TimeoutProvider;
 
         impl LlmProvider for TimeoutProvider {
-            fn stream_turn(&self, _prompt: &str, tx: Sender<ProviderEvent>) {
+            fn stream_turn(
+                &self,
+                _messages: &[ProviderMessage],
+                _tools: &[ToolSpec],
+                tx: Sender<ProviderEvent>,
+            ) {
                 let _ = tx.send(ProviderEvent::Error("connection timeout".into()));
             }
         }
 
         let (event_tx, _event_rx) = mpsc::channel();
         let cancel = Arc::new(AtomicBool::new(false));
-        let outcome = run_turn("hi", &TimeoutProvider, &event_tx, &cancel);
+        let outcome = run_turn(
+            "hi",
+            &TimeoutProvider,
+            &empty_registry(),
+            &event_tx,
+            &cancel,
+        );
         assert!(matches!(outcome, TurnOutcome::TransientError(_)));
     }
 
@@ -364,14 +534,25 @@ mod tests {
         struct AuthErrorProvider;
 
         impl LlmProvider for AuthErrorProvider {
-            fn stream_turn(&self, _prompt: &str, tx: Sender<ProviderEvent>) {
+            fn stream_turn(
+                &self,
+                _messages: &[ProviderMessage],
+                _tools: &[ToolSpec],
+                tx: Sender<ProviderEvent>,
+            ) {
                 let _ = tx.send(ProviderEvent::Error("invalid API key".into()));
             }
         }
 
         let (event_tx, _event_rx) = mpsc::channel();
         let cancel = Arc::new(AtomicBool::new(false));
-        let outcome = run_turn("hi", &AuthErrorProvider, &event_tx, &cancel);
+        let outcome = run_turn(
+            "hi",
+            &AuthErrorProvider,
+            &empty_registry(),
+            &event_tx,
+            &cancel,
+        );
         assert!(matches!(outcome, TurnOutcome::FatalError(_)));
     }
 
@@ -384,7 +565,12 @@ mod tests {
         }
 
         impl LlmProvider for FailOnceProvider {
-            fn stream_turn(&self, _prompt: &str, tx: Sender<ProviderEvent>) {
+            fn stream_turn(
+                &self,
+                _messages: &[ProviderMessage],
+                _tools: &[ToolSpec],
+                tx: Sender<ProviderEvent>,
+            ) {
                 let n = self.call_count.fetch_add(1, Ordering::SeqCst);
                 if n == 0 {
                     let _ = tx.send(ProviderEvent::Error("connection timeout".into()));
@@ -401,12 +587,20 @@ mod tests {
         let (event_tx, event_rx) = mpsc::channel();
         let cancel = Arc::new(AtomicBool::new(false));
 
-        run_turn_with_retry("turn-test", "hi", &provider, &event_tx, &cancel);
+        run_turn_with_retry(
+            "turn-test",
+            "hi",
+            &provider,
+            &empty_registry(),
+            &event_tx,
+            &cancel,
+        );
 
         let events: Vec<_> = event_rx.try_iter().collect();
-        let has_complete = events.iter().any(|e| matches!(e, AgentEvent::TurnComplete));
+        let has_complete = events
+            .iter()
+            .any(|event| matches!(event, AgentEvent::TurnComplete));
         assert!(has_complete, "retry should succeed on second attempt");
-
         assert_eq!(provider.call_count.load(Ordering::SeqCst), 2);
     }
 
@@ -415,7 +609,12 @@ mod tests {
         struct AlwaysTimeoutProvider;
 
         impl LlmProvider for AlwaysTimeoutProvider {
-            fn stream_turn(&self, _prompt: &str, tx: Sender<ProviderEvent>) {
+            fn stream_turn(
+                &self,
+                _messages: &[ProviderMessage],
+                _tools: &[ToolSpec],
+                tx: Sender<ProviderEvent>,
+            ) {
                 let _ = tx.send(ProviderEvent::Error("timeout".into()));
             }
         }
@@ -427,6 +626,7 @@ mod tests {
             "turn-test",
             "hi",
             &AlwaysTimeoutProvider,
+            &empty_registry(),
             &event_tx,
             &cancel,
         );
@@ -434,7 +634,7 @@ mod tests {
         let events: Vec<_> = event_rx.try_iter().collect();
         let has_failed = events
             .iter()
-            .any(|e| matches!(e, AgentEvent::TurnFailed { .. }));
+            .any(|event| matches!(event, AgentEvent::TurnFailed { .. }));
         assert!(
             has_failed,
             "should emit TurnFailed after exhausting retries"
@@ -450,7 +650,12 @@ mod tests {
         }
 
         impl LlmProvider for FatalProvider {
-            fn stream_turn(&self, _prompt: &str, tx: Sender<ProviderEvent>) {
+            fn stream_turn(
+                &self,
+                _messages: &[ProviderMessage],
+                _tools: &[ToolSpec],
+                tx: Sender<ProviderEvent>,
+            ) {
                 self.call_count.fetch_add(1, Ordering::SeqCst);
                 let _ = tx.send(ProviderEvent::Error("invalid API key".into()));
             }
@@ -462,7 +667,14 @@ mod tests {
         let (event_tx, event_rx) = mpsc::channel();
         let cancel = Arc::new(AtomicBool::new(false));
 
-        run_turn_with_retry("turn-test", "hi", &provider, &event_tx, &cancel);
+        run_turn_with_retry(
+            "turn-test",
+            "hi",
+            &provider,
+            &empty_registry(),
+            &event_tx,
+            &cancel,
+        );
 
         assert_eq!(
             provider.call_count.load(Ordering::SeqCst),
@@ -473,7 +685,7 @@ mod tests {
         let events: Vec<_> = event_rx.try_iter().collect();
         let has_failed = events
             .iter()
-            .any(|e| matches!(e, AgentEvent::TurnFailed { .. }));
+            .any(|event| matches!(event, AgentEvent::TurnFailed { .. }));
         assert!(has_failed);
     }
 
@@ -482,20 +694,32 @@ mod tests {
         struct TimeoutProvider;
 
         impl LlmProvider for TimeoutProvider {
-            fn stream_turn(&self, _prompt: &str, tx: Sender<ProviderEvent>) {
+            fn stream_turn(
+                &self,
+                _messages: &[ProviderMessage],
+                _tools: &[ToolSpec],
+                tx: Sender<ProviderEvent>,
+            ) {
                 let _ = tx.send(ProviderEvent::Error("timeout".into()));
             }
         }
 
         let (event_tx, event_rx) = mpsc::channel();
-        let cancel = Arc::new(AtomicBool::new(true)); // pre-cancelled
+        let cancel = Arc::new(AtomicBool::new(true));
 
-        run_turn_with_retry("turn-test", "hi", &TimeoutProvider, &event_tx, &cancel);
+        run_turn_with_retry(
+            "turn-test",
+            "hi",
+            &TimeoutProvider,
+            &empty_registry(),
+            &event_tx,
+            &cancel,
+        );
 
         let events: Vec<_> = event_rx.try_iter().collect();
         let has_cancelled = events
             .iter()
-            .any(|e| matches!(e, AgentEvent::TurnFailed { error } if error == "cancelled"));
+            .any(|event| matches!(event, AgentEvent::TurnFailed { error } if error == "cancelled"));
         assert!(
             has_cancelled,
             "pre-cancelled flag should abort before first attempt"
@@ -507,20 +731,33 @@ mod tests {
         struct NoTerminalProvider;
 
         impl LlmProvider for NoTerminalProvider {
-            fn stream_turn(&self, _prompt: &str, tx: Sender<ProviderEvent>) {
+            fn stream_turn(
+                &self,
+                _messages: &[ProviderMessage],
+                _tools: &[ToolSpec],
+                tx: Sender<ProviderEvent>,
+            ) {
                 let _ = tx.send(ProviderEvent::TextDelta("partial".into()));
-                // Channel drops without TurnComplete or Error
             }
         }
 
         let (event_tx, event_rx) = mpsc::channel();
         let cancel = Arc::new(AtomicBool::new(false));
 
-        let outcome = run_turn("hi", &NoTerminalProvider, &event_tx, &cancel);
-        assert!(matches!(outcome, TurnOutcome::Complete));
+        let pass = stream_provider_pass(
+            &NoTerminalProvider,
+            &user_messages("hi"),
+            &[],
+            &event_tx,
+            &cancel,
+        );
+        assert!(matches!(pass.outcome, TurnOutcome::Complete));
+        assert_eq!(pass.assistant_text, "partial");
 
         let events: Vec<_> = event_rx.try_iter().collect();
-        let has_complete = events.iter().any(|e| matches!(e, AgentEvent::TurnComplete));
-        assert!(has_complete, "should auto-emit TurnComplete");
+        let has_text = events
+            .iter()
+            .any(|event| matches!(event, AgentEvent::TextDelta { text } if text == "partial"));
+        assert!(has_text, "should relay text even without terminal event");
     }
 }

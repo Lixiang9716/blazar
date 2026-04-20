@@ -17,8 +17,18 @@ pub enum AgentEvent {
     TextDelta { text: String },
     /// A chunk of chain-of-thought reasoning (thinking mode).
     ThinkingDelta { text: String },
-    /// The model requests tool/function calls (JSON-serialized).
-    ToolCallRequest { payload: String },
+    /// A tool call is about to execute.
+    ToolCallStarted {
+        call_id: String,
+        tool_name: String,
+        arguments: String,
+    },
+    /// A tool call finished executing.
+    ToolCallCompleted {
+        call_id: String,
+        output: String,
+        is_error: bool,
+    },
     /// The current turn completed successfully.
     TurnComplete,
     /// The current turn failed.
