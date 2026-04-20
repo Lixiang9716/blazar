@@ -1,4 +1,5 @@
 use std::io::BufRead;
+use std::process::Command;
 use std::sync::mpsc::Sender;
 
 use log::{debug, info, trace, warn};
@@ -210,7 +211,16 @@ pub struct ChatCompletionRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<Tool>>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_choice: Option<ToolChoice>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub n: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolChoice {
+    Auto,
+    None,
 }
 
 /// Non-streaming response from `/v1/chat/completions`.
@@ -544,21 +554,23 @@ impl SiliconFlowProvider {
         tools: &[ToolSpec],
     ) -> ChatCompletionRequest {
         let cfg = self.client.config();
+        let truncated_messages = truncate_provider_messages(messages);
         let mut request_messages = Vec::new();
 
         if let Some(ref sys) = cfg.system_prompt {
-            request_messages.push(ChatMessage::system(sys.clone()));
+            request_messages.push(ChatMessage::system(render_system_prompt(sys)));
         }
 
         let mut index = 0usize;
-        while index < messages.len() {
-            match &messages[index] {
+        while index < truncated_messages.len() {
+            match &truncated_messages[index] {
                 ProviderMessage::User { content } => {
                     request_messages.push(ChatMessage::user(content.clone()));
                     index += 1;
                 }
                 ProviderMessage::Assistant { content } => {
-                    let (tool_calls, next_index) = collect_tool_call_batch(messages, index + 1);
+                    let (tool_calls, next_index) =
+                        collect_tool_call_batch(&truncated_messages, index + 1);
                     if tool_calls.is_empty() {
                         request_messages.push(ChatMessage::assistant(content.clone()));
                     } else {
@@ -572,7 +584,8 @@ impl SiliconFlowProvider {
                     index = next_index;
                 }
                 ProviderMessage::ToolCall { .. } => {
-                    let (tool_calls, next_index) = collect_tool_call_batch(messages, index);
+                    let (tool_calls, next_index) =
+                        collect_tool_call_batch(&truncated_messages, index);
                     request_messages.push(ChatMessage {
                         role: Role::Assistant,
                         content: None,
@@ -612,6 +625,7 @@ impl SiliconFlowProvider {
                     .collect(),
             )
         };
+        let tool_choice = determine_tool_choice(&truncated_messages, request_tools.is_some());
 
         ChatCompletionRequest {
             model: cfg.model.clone(),
@@ -626,8 +640,64 @@ impl SiliconFlowProvider {
             thinking_budget: cfg.thinking_budget,
             stop: None,
             tools: request_tools,
+            tool_choice,
             n: None,
         }
+    }
+}
+
+fn render_system_prompt(base: &str) -> String {
+    match build_runtime_context_block() {
+        Some(context) => format!("{base}\n\n{context}"),
+        None => base.to_owned(),
+    }
+}
+
+fn build_runtime_context_block() -> Option<String> {
+    let cwd = std::env::current_dir().ok()?;
+    let platform = format!("{} {}", std::env::consts::OS, std::env::consts::ARCH);
+    let git_branch = run_git_command(&cwd, &["rev-parse", "--abbrev-ref", "HEAD"])
+        .unwrap_or_else(|| "unknown".to_owned());
+    let git_status = run_git_command(
+        &cwd,
+        &["status", "--short", "--branch", "--untracked-files=no"],
+    );
+
+    let mut block = vec![
+        "## Runtime Context".to_owned(),
+        format!("- Working directory: {}", cwd.display()),
+        format!("- Platform: {platform}"),
+        format!("- Git branch: {git_branch}"),
+    ];
+
+    if let Some(status) = git_status
+        && !status.is_empty()
+    {
+        block.push("- Git status:".to_owned());
+        block.push("```text".to_owned());
+        block.push(status);
+        block.push("```".to_owned());
+    }
+
+    Some(block.join("\n"))
+}
+
+fn run_git_command(cwd: &std::path::Path, args: &[&str]) -> Option<String> {
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(cwd)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    let text = String::from_utf8(output.stdout).ok()?;
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_owned())
     }
 }
 
@@ -657,6 +727,81 @@ fn collect_tool_call_batch(messages: &[ProviderMessage], start: usize) -> (Vec<T
     }
 
     (collected, index)
+}
+
+const MAX_CONTEXT_USER_TURNS: usize = 6;
+const MAX_CONTEXT_PROVIDER_MESSAGES: usize = 80;
+
+fn truncate_provider_messages(messages: &[ProviderMessage]) -> Vec<ProviderMessage> {
+    if messages.is_empty() {
+        return Vec::new();
+    }
+
+    let user_indices: Vec<usize> = messages
+        .iter()
+        .enumerate()
+        .filter_map(|(index, message)| match message {
+            ProviderMessage::User { .. } => Some(index),
+            _ => None,
+        })
+        .collect();
+
+    let mut start = 0usize;
+    if user_indices.len() > MAX_CONTEXT_USER_TURNS {
+        start = user_indices[user_indices.len() - MAX_CONTEXT_USER_TURNS];
+    }
+
+    if messages.len().saturating_sub(start) > MAX_CONTEXT_PROVIDER_MESSAGES {
+        let tail_start = messages.len() - MAX_CONTEXT_PROVIDER_MESSAGES;
+        start = user_indices
+            .iter()
+            .copied()
+            .find(|idx| *idx >= tail_start)
+            .unwrap_or(tail_start)
+            .max(start);
+    }
+
+    messages[start..].to_vec()
+}
+
+fn determine_tool_choice(messages: &[ProviderMessage], has_tools: bool) -> Option<ToolChoice> {
+    if !has_tools {
+        return None;
+    }
+    if has_repeated_successful_tool_calls(messages) {
+        Some(ToolChoice::None)
+    } else {
+        Some(ToolChoice::Auto)
+    }
+}
+
+fn has_repeated_successful_tool_calls(messages: &[ProviderMessage]) -> bool {
+    let mut successful_pairs: Vec<(String, String, String)> = Vec::new();
+    for pair in messages.windows(2) {
+        let (
+            ProviderMessage::ToolCall {
+                name, arguments, ..
+            },
+            ProviderMessage::ToolResult {
+                output,
+                is_error: false,
+                ..
+            },
+        ) = (&pair[0], &pair[1])
+        else {
+            continue;
+        };
+
+        successful_pairs.push((name.clone(), arguments.clone(), output.clone()));
+    }
+
+    if successful_pairs.len() < 2 {
+        return false;
+    }
+
+    let previous = &successful_pairs[successful_pairs.len() - 2];
+    let latest = &successful_pairs[successful_pairs.len() - 1];
+    previous == latest
 }
 
 impl LlmProvider for SiliconFlowProvider {

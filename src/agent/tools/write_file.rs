@@ -47,8 +47,14 @@ impl Tool for WriteFileTool {
             parameters: json!({
                 "type": "object",
                 "properties": {
-                    "path": { "type": "string" },
-                    "content": { "type": "string" }
+                    "path": {
+                        "type": "string",
+                        "description": "Relative destination path inside the workspace."
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Complete UTF-8 file contents to write."
+                    }
                 },
                 "required": ["path", "content"],
                 "additionalProperties": false

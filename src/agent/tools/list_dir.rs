@@ -82,7 +82,10 @@ impl Tool for ListDirTool {
             parameters: json!({
                 "type": "object",
                 "properties": {
-                    "path": { "type": "string" }
+                    "path": {
+                        "type": "string",
+                        "description": "Relative directory path inside the workspace to list."
+                    }
                 },
                 "required": ["path"],
                 "additionalProperties": false

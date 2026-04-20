@@ -23,7 +23,10 @@ impl Tool for ReadFileTool {
             parameters: json!({
                 "type": "object",
                 "properties": {
-                    "path": { "type": "string" }
+                    "path": {
+                        "type": "string",
+                        "description": "Relative path to a UTF-8 text file inside the workspace."
+                    }
                 },
                 "required": ["path"],
                 "additionalProperties": false

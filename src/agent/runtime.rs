@@ -36,6 +36,10 @@ pub struct AgentRuntime {
 /// Maximum number of transient-error retries per turn.
 const MAX_TRANSIENT_RETRIES: u32 = 1;
 const MAX_TOOL_ITERATIONS: usize = 10;
+const REPEATED_SUCCESS_GUIDANCE: &str = "REPEATED SUCCESS: identical tool call already succeeded in this turn. \
+     Stop repeating it and continue with the next step or final answer.";
+const JSON_REPAIR_NOTE: &str = "[NOTE] Tool arguments had malformed JSON and were auto-repaired. \
+Use escaped double quotes (\\\") inside JSON string values.";
 
 impl AgentRuntime {
     /// Create a new runtime with the given provider.
@@ -109,6 +113,7 @@ fn runtime_loop(
     cancel_flag: Arc<AtomicBool>,
 ) {
     let mut turn_counter = 0u64;
+    let mut conversation_history: Vec<ProviderMessage> = Vec::new();
 
     while let Ok(cmd) = cmd_rx.recv() {
         match cmd {
@@ -131,14 +136,17 @@ fn runtime_loop(
                     break;
                 }
 
-                run_turn_with_retry(
+                if let Some(updated_history) = run_turn_with_retry(
                     &turn_id,
                     &prompt,
+                    &conversation_history,
                     &*provider,
                     &tools,
                     &event_tx,
                     &cancel_flag,
-                );
+                ) {
+                    conversation_history = updated_history;
+                }
             }
             AgentCommand::Cancel => {
                 debug!("runtime: Cancel received");
@@ -156,28 +164,33 @@ fn runtime_loop(
 fn run_turn_with_retry(
     turn_id: &str,
     prompt: &str,
+    history: &[ProviderMessage],
     provider: &dyn LlmProvider,
     tools: &ToolRegistry,
     event_tx: &Sender<AgentEvent>,
     cancel_flag: &Arc<AtomicBool>,
-) {
+) -> Option<Vec<ProviderMessage>> {
     for attempt in 0..=MAX_TRANSIENT_RETRIES {
         if cancel_flag.load(Ordering::SeqCst) {
             info!("runtime: turn {turn_id} cancelled before attempt {attempt}");
             let _ = event_tx.send(AgentEvent::TurnFailed {
                 error: "cancelled".to_string(),
             });
-            return;
+            return None;
         }
 
-        let result = run_turn(prompt, provider, tools, event_tx, cancel_flag);
+        let mut messages = history.to_vec();
+        messages.push(ProviderMessage::User {
+            content: prompt.to_string(),
+        });
+        let result = run_turn(&mut messages, provider, tools, event_tx, cancel_flag);
 
         match result {
             TurnOutcome::Complete => {
                 let _ = event_tx.send(AgentEvent::TurnComplete);
-                return;
+                return Some(messages);
             }
-            TurnOutcome::Cancelled => return,
+            TurnOutcome::Cancelled => return None,
             TurnOutcome::TransientError(err) => {
                 if attempt < MAX_TRANSIENT_RETRIES {
                     warn!(
@@ -187,15 +200,18 @@ fn run_turn_with_retry(
                 } else {
                     warn!("runtime: turn {turn_id} failed after {attempt} retries: {err}");
                     let _ = event_tx.send(AgentEvent::TurnFailed { error: err });
+                    return None;
                 }
             }
             TurnOutcome::FatalError(err) => {
                 warn!("runtime: turn {turn_id} fatal error: {err}");
                 let _ = event_tx.send(AgentEvent::TurnFailed { error: err });
-                return;
+                return None;
             }
         }
     }
+
+    None
 }
 
 enum TurnOutcome {
@@ -217,6 +233,11 @@ struct ProviderPass {
     tool_calls: Vec<PendingToolCall>,
 }
 
+struct ParsedToolArgs {
+    value: Value,
+    was_repaired: bool,
+}
+
 /// Classify whether an error is transient (network timeout, 429, 502/503).
 pub(crate) fn is_transient_error(err: &str) -> bool {
     let lower = err.to_lowercase();
@@ -230,19 +251,17 @@ pub(crate) fn is_transient_error(err: &str) -> bool {
 
 /// Execute a single turn, including bounded tool-call re-entry.
 fn run_turn(
-    prompt: &str,
+    messages: &mut Vec<ProviderMessage>,
     provider: &dyn LlmProvider,
     tools: &ToolRegistry,
     event_tx: &Sender<AgentEvent>,
     cancel_flag: &Arc<AtomicBool>,
 ) -> TurnOutcome {
-    let mut messages = vec![ProviderMessage::User {
-        content: prompt.to_string(),
-    }];
     let tool_specs = tools.specs();
     let mut tool_iterations = 0usize;
     // Track (tool_name, raw_args) → consecutive failure count for duplicate detection.
     let mut consecutive_failures: HashMap<(String, String), usize> = HashMap::new();
+    let mut last_success_signature: Option<(String, String)> = None;
 
     loop {
         if cancel_flag.load(Ordering::SeqCst) {
@@ -252,11 +271,16 @@ fn run_turn(
             return TurnOutcome::Cancelled;
         }
 
-        let pass = stream_provider_pass(provider, &messages, &tool_specs, event_tx, cancel_flag);
+        let pass = stream_provider_pass(provider, messages, &tool_specs, event_tx, cancel_flag);
 
         match pass.outcome {
             TurnOutcome::Complete => {
                 if pass.tool_calls.is_empty() {
+                    if !pass.assistant_text.is_empty() {
+                        messages.push(ProviderMessage::Assistant {
+                            content: pass.assistant_text,
+                        });
+                    }
                     return TurnOutcome::Complete;
                 }
 
@@ -295,19 +319,35 @@ fn run_turn(
 
                     let cleaned_args = strip_thinking_tags(&pending.arguments);
                     let result = match parse_or_repair_json(&cleaned_args) {
-                        Ok(args) => {
+                        Ok(parsed) => {
                             // Successful parse — clear any tracked failure for this tool.
-                            consecutive_failures.remove(&(
+                            consecutive_failures
+                                .remove(&(pending.name.clone(), pending.arguments.clone()));
+                            let signature = (
                                 pending.name.clone(),
-                                pending.arguments.clone(),
-                            ));
-                            execute_tool_call(tools, &pending.name, args)
+                                canonical_tool_args(&parsed.value, &cleaned_args),
+                            );
+                            if last_success_signature.as_ref() == Some(&signature) {
+                                ToolResult::failure(REPEATED_SUCCESS_GUIDANCE)
+                            } else {
+                                let mut result =
+                                    execute_tool_call(tools, &pending.name, parsed.value);
+                                if parsed.was_repaired {
+                                    result.output =
+                                        format!("{}\n\n{}", JSON_REPAIR_NOTE, result.output);
+                                }
+                                if result.is_error {
+                                    last_success_signature = None;
+                                } else {
+                                    last_success_signature = Some(signature);
+                                }
+                                result
+                            }
                         }
                         Err(error) => {
-                            let fail_key =
-                                (pending.name.clone(), pending.arguments.clone());
-                            let count =
-                                consecutive_failures.entry(fail_key).or_insert(0);
+                            last_success_signature = None;
+                            let fail_key = (pending.name.clone(), pending.arguments.clone());
+                            let count = consecutive_failures.entry(fail_key).or_insert(0);
                             *count += 1;
 
                             warn!(
@@ -466,30 +506,40 @@ fn strip_thinking_tags(raw: &str) -> String {
 /// Try standard JSON parse first. On failure, attempt targeted repair of
 /// unescaped interior quotes (common with Qwen3 models that embed code
 /// containing `"` inside JSON string values).
-fn parse_or_repair_json(raw: &str) -> Result<Value, serde_json::Error> {
+fn parse_or_repair_json(raw: &str) -> Result<ParsedToolArgs, serde_json::Error> {
     let first_try = serde_json::from_str::<Value>(raw);
-    if first_try.is_ok() {
-        return first_try;
+    if let Ok(value) = &first_try {
+        return Ok(ParsedToolArgs {
+            value: value.clone(),
+            was_repaired: false,
+        });
     }
 
     // Attempt iterative repair — escape the likely-problematic quote
     // near each successive parse-error position.
-    if let Some(repaired) = repair_json_arguments(raw) {
-        match serde_json::from_str::<Value>(&repaired) {
-            Ok(val) => {
-                warn!(
-                    "runtime: repaired malformed JSON arguments\n  before: {}\n  after:  {}",
-                    preview_text(raw, 200),
-                    preview_text(&repaired, 200),
-                );
-                return Ok(val);
-            }
-            Err(_) => {} // repair didn't produce valid JSON either
-        }
+    if let Some(repaired) = repair_json_arguments(raw)
+        && let Ok(val) = serde_json::from_str::<Value>(&repaired)
+    {
+        warn!(
+            "runtime: repaired malformed JSON arguments\n  before: {}\n  after:  {}",
+            preview_text(raw, 200),
+            preview_text(&repaired, 200),
+        );
+        return Ok(ParsedToolArgs {
+            value: val,
+            was_repaired: true,
+        });
     }
 
     // Return the original error for a meaningful message.
-    first_try
+    first_try.map(|value| ParsedToolArgs {
+        value,
+        was_repaired: false,
+    })
+}
+
+fn canonical_tool_args(value: &Value, fallback: &str) -> String {
+    serde_json::to_string(value).unwrap_or_else(|_| fallback.to_string())
 }
 
 /// Iterative targeted repair: find the unescaped `"` just before each
@@ -527,7 +577,7 @@ fn repair_json_arguments(raw: &str) -> Option<String> {
                     bs += 1;
                     j -= 1;
                 }
-                if bs % 2 == 0 {
+                if bs.is_multiple_of(2) {
                     // This `"` is NOT escaped — candidate for repair.
                     found = Some(i);
                     break;
@@ -630,8 +680,19 @@ mod tests {
         let (event_tx, event_rx) = mpsc::channel();
         let cancel = Arc::new(AtomicBool::new(false));
 
-        let outcome = run_turn("hi", &provider, &empty_registry(), &event_tx, &cancel);
+        let mut messages = user_messages("hi");
+        let outcome = run_turn(
+            &mut messages,
+            &provider,
+            &empty_registry(),
+            &event_tx,
+            &cancel,
+        );
         assert!(matches!(outcome, TurnOutcome::Complete));
+        assert!(messages.iter().any(|message| matches!(
+            message,
+            ProviderMessage::Assistant { content } if content == "Echo: hi"
+        )));
 
         let text: String = event_rx
             .try_iter()
@@ -680,7 +741,14 @@ mod tests {
 
         std::thread::scope(|scope| {
             scope.spawn(|| {
-                run_turn("test", &provider, &empty_registry(), &event_tx, &cancel2);
+                let mut messages = user_messages("test");
+                run_turn(
+                    &mut messages,
+                    &provider,
+                    &empty_registry(),
+                    &event_tx,
+                    &cancel2,
+                );
             });
 
             barrier.wait();
@@ -711,8 +779,9 @@ mod tests {
 
         let (event_tx, _event_rx) = mpsc::channel();
         let cancel = Arc::new(AtomicBool::new(false));
+        let mut messages = user_messages("hi");
         let outcome = run_turn(
-            "hi",
+            &mut messages,
             &TimeoutProvider,
             &empty_registry(),
             &event_tx,
@@ -738,8 +807,9 @@ mod tests {
 
         let (event_tx, _event_rx) = mpsc::channel();
         let cancel = Arc::new(AtomicBool::new(false));
+        let mut messages = user_messages("hi");
         let outcome = run_turn(
-            "hi",
+            &mut messages,
             &AuthErrorProvider,
             &empty_registry(),
             &event_tx,
@@ -779,9 +849,10 @@ mod tests {
         let (event_tx, event_rx) = mpsc::channel();
         let cancel = Arc::new(AtomicBool::new(false));
 
-        run_turn_with_retry(
+        let _ = run_turn_with_retry(
             "turn-test",
             "hi",
+            &[],
             &provider,
             &empty_registry(),
             &event_tx,
@@ -814,9 +885,10 @@ mod tests {
         let (event_tx, event_rx) = mpsc::channel();
         let cancel = Arc::new(AtomicBool::new(false));
 
-        run_turn_with_retry(
+        let _ = run_turn_with_retry(
             "turn-test",
             "hi",
+            &[],
             &AlwaysTimeoutProvider,
             &empty_registry(),
             &event_tx,
@@ -859,9 +931,10 @@ mod tests {
         let (event_tx, event_rx) = mpsc::channel();
         let cancel = Arc::new(AtomicBool::new(false));
 
-        run_turn_with_retry(
+        let _ = run_turn_with_retry(
             "turn-test",
             "hi",
+            &[],
             &provider,
             &empty_registry(),
             &event_tx,
@@ -899,9 +972,10 @@ mod tests {
         let (event_tx, event_rx) = mpsc::channel();
         let cancel = Arc::new(AtomicBool::new(true));
 
-        run_turn_with_retry(
+        let _ = run_turn_with_retry(
             "turn-test",
             "hi",
+            &[],
             &TimeoutProvider,
             &empty_registry(),
             &event_tx,
@@ -970,9 +1044,10 @@ mod tests {
         let (event_tx, event_rx) = mpsc::channel();
         let cancel = Arc::new(AtomicBool::new(false));
 
-        run_turn_with_retry(
+        let _ = run_turn_with_retry(
             "turn-test",
             "count once",
+            &[],
             &provider,
             &registry,
             &event_tx,
@@ -1022,8 +1097,9 @@ mod tests {
         let (event_tx, _event_rx) = mpsc::channel();
         let cancel = Arc::new(AtomicBool::new(false));
 
+        let mut messages = user_messages("count forever");
         let outcome = run_turn(
-            "count forever",
+            &mut messages,
             &InfiniteToolProvider,
             &registry,
             &event_tx,
@@ -1034,7 +1110,133 @@ mod tests {
             outcome,
             TurnOutcome::FatalError(ref err) if err == "tool iteration limit exceeded"
         ));
-        assert_eq!(counter.load(Ordering::SeqCst), MAX_TOOL_ITERATIONS as u32);
+        assert_eq!(
+            counter.load(Ordering::SeqCst),
+            1,
+            "duplicate success guard should prevent rerunning identical side effects"
+        );
+    }
+
+    #[test]
+    fn run_turn_blocks_repeated_identical_successful_tool_calls() {
+        struct DuplicateSuccessProvider;
+
+        impl LlmProvider for DuplicateSuccessProvider {
+            fn stream_turn(
+                &self,
+                messages: &[ProviderMessage],
+                _tools: &[ToolSpec],
+                tx: Sender<ProviderEvent>,
+            ) {
+                let last_tool_result = messages.iter().rev().find_map(|message| match message {
+                    ProviderMessage::ToolResult {
+                        output, is_error, ..
+                    } => Some((output.as_str(), *is_error)),
+                    _ => None,
+                });
+
+                match last_tool_result {
+                    None => {
+                        let _ = tx.send(ProviderEvent::ToolCall {
+                            call_id: "call-1".into(),
+                            name: "count".into(),
+                            arguments: "{}".into(),
+                        });
+                        let _ = tx.send(ProviderEvent::TurnComplete);
+                    }
+                    Some((output, true)) if output.contains("REPEATED SUCCESS") => {
+                        let _ = tx.send(ProviderEvent::TextDelta("done".into()));
+                        let _ = tx.send(ProviderEvent::TurnComplete);
+                    }
+                    Some(_) => {
+                        let _ = tx.send(ProviderEvent::ToolCall {
+                            call_id: "call-2".into(),
+                            name: "count".into(),
+                            arguments: "{}".into(),
+                        });
+                        let _ = tx.send(ProviderEvent::TurnComplete);
+                    }
+                }
+            }
+        }
+
+        let counter = Arc::new(AtomicU32::new(0));
+        let mut registry = empty_registry();
+        registry.register(Box::new(CountingTool {
+            calls: Arc::clone(&counter),
+        }));
+
+        let (event_tx, _event_rx) = mpsc::channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let mut messages = user_messages("count once");
+
+        let outcome = run_turn(
+            &mut messages,
+            &DuplicateSuccessProvider,
+            &registry,
+            &event_tx,
+            &cancel,
+        );
+
+        assert!(matches!(outcome, TurnOutcome::Complete));
+        assert_eq!(counter.load(Ordering::SeqCst), 1);
+        assert!(messages.iter().any(|message| {
+            matches!(message, ProviderMessage::ToolResult { output, is_error, .. }
+                if *is_error && output.contains("REPEATED SUCCESS"))
+        }));
+    }
+
+    #[test]
+    fn run_turn_surfaces_json_repair_note_in_tool_result() {
+        struct RepairedArgsProvider;
+
+        impl LlmProvider for RepairedArgsProvider {
+            fn stream_turn(
+                &self,
+                messages: &[ProviderMessage],
+                _tools: &[ToolSpec],
+                tx: Sender<ProviderEvent>,
+            ) {
+                let has_tool_result = messages
+                    .iter()
+                    .any(|message| matches!(message, ProviderMessage::ToolResult { .. }));
+                if has_tool_result {
+                    let _ = tx.send(ProviderEvent::TextDelta("done".into()));
+                    let _ = tx.send(ProviderEvent::TurnComplete);
+                } else {
+                    let _ = tx.send(ProviderEvent::ToolCall {
+                        call_id: "call-1".into(),
+                        name: "count".into(),
+                        arguments: r#"{"content":"print("hello world!\")"}"#.into(),
+                    });
+                    let _ = tx.send(ProviderEvent::TurnComplete);
+                }
+            }
+        }
+
+        let counter = Arc::new(AtomicU32::new(0));
+        let mut registry = empty_registry();
+        registry.register(Box::new(CountingTool {
+            calls: Arc::clone(&counter),
+        }));
+
+        let (event_tx, _event_rx) = mpsc::channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let mut messages = user_messages("run repaired args");
+
+        let outcome = run_turn(
+            &mut messages,
+            &RepairedArgsProvider,
+            &registry,
+            &event_tx,
+            &cancel,
+        );
+        assert!(matches!(outcome, TurnOutcome::Complete));
+        assert_eq!(counter.load(Ordering::SeqCst), 1);
+        assert!(messages.iter().any(|message| {
+            matches!(message, ProviderMessage::ToolResult { output, is_error, .. }
+                if !*is_error && output.contains(JSON_REPAIR_NOTE))
+        }));
     }
 
     #[test]
@@ -1139,15 +1341,17 @@ mod tests {
     #[test]
     fn parse_or_repair_succeeds_on_valid_json() {
         let raw = r#"{"command": "ls"}"#;
-        let val = parse_or_repair_json(raw).expect("should parse");
-        assert_eq!(val["command"], "ls");
+        let parsed = parse_or_repair_json(raw).expect("should parse");
+        assert!(!parsed.was_repaired);
+        assert_eq!(parsed.value["command"], "ls");
     }
 
     #[test]
     fn parse_or_repair_recovers_from_unescaped_quotes() {
         let raw = r#"{"path": "hello.py", "content": "print("hello world!\")"}"#;
-        let val = parse_or_repair_json(raw).expect("should recover via repair");
-        assert_eq!(val["path"], "hello.py");
+        let parsed = parse_or_repair_json(raw).expect("should recover via repair");
+        assert!(parsed.was_repaired);
+        assert_eq!(parsed.value["path"], "hello.py");
     }
 
     #[test]

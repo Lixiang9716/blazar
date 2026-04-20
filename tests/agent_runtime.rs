@@ -135,6 +135,46 @@ impl LlmProvider for FullEventProvider {
     }
 }
 
+struct HistoryCarryProvider {
+    turn: AtomicU32,
+}
+
+impl LlmProvider for HistoryCarryProvider {
+    fn stream_turn(
+        &self,
+        messages: &[ProviderMessage],
+        _tools: &[ToolSpec],
+        tx: Sender<ProviderEvent>,
+    ) {
+        let turn = self.turn.fetch_add(1, Ordering::SeqCst);
+        if turn == 0 {
+            let _ = tx.send(ProviderEvent::TextDelta("first-response".into()));
+            let _ = tx.send(ProviderEvent::TurnComplete);
+            return;
+        }
+
+        let saw_first_user = messages.iter().any(|message| {
+            matches!(
+                message,
+                ProviderMessage::User { content } if content == "first"
+            )
+        });
+        let saw_first_assistant = messages.iter().any(|message| {
+            matches!(
+                message,
+                ProviderMessage::Assistant { content } if content == "first-response"
+            )
+        });
+
+        if saw_first_user && saw_first_assistant {
+            let _ = tx.send(ProviderEvent::TextDelta("history-ok".into()));
+            let _ = tx.send(ProviderEvent::TurnComplete);
+        } else {
+            let _ = tx.send(ProviderEvent::Error("missing cross-turn history".into()));
+        }
+    }
+}
+
 fn workspace_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
@@ -365,6 +405,45 @@ fn multiple_sequential_turns_complete() {
             "turn {i} should complete"
         );
     }
+}
+
+#[test]
+fn runtime_persists_history_across_turns() {
+    let runtime = AgentRuntime::new(
+        Box::new(HistoryCarryProvider {
+            turn: AtomicU32::new(0),
+        }),
+        workspace_root(),
+    );
+
+    runtime.submit_turn("first").expect("submit should succeed");
+    let first_events = collect_events(&runtime, Duration::from_secs(2));
+    assert!(
+        first_events
+            .iter()
+            .any(|event| matches!(event, AgentEvent::TurnComplete)),
+        "first turn should complete"
+    );
+
+    runtime
+        .submit_turn("second")
+        .expect("submit should succeed");
+    let second_events = collect_events(&runtime, Duration::from_secs(2));
+    let second_text: String = second_events
+        .iter()
+        .filter_map(|event| match event {
+            AgentEvent::TextDelta { text } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(second_text, "history-ok");
+    assert!(
+        second_events
+            .iter()
+            .any(|event| matches!(event, AgentEvent::TurnComplete)),
+        "second turn should complete"
+    );
 }
 
 // ---------------------------------------------------------------------------

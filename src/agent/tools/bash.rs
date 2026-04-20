@@ -120,8 +120,15 @@ where
             parameters: json!({
                 "type": "object",
                 "properties": {
-                    "command": { "type": "string" },
-                    "timeout_secs": { "type": "integer", "minimum": 1 }
+                    "command": {
+                        "type": "string",
+                        "description": "Shell command to execute in the workspace root."
+                    },
+                    "timeout_secs": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "Optional timeout in seconds (must be >= 1)."
+                    }
                 },
                 "required": ["command"],
                 "additionalProperties": false

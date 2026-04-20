@@ -2,7 +2,7 @@ use blazar::agent::tools::ToolSpec;
 use blazar::provider::ProviderMessage;
 use blazar::provider::siliconflow::{
     DeltaFunction, DeltaToolCall, FunctionCall, SiliconFlowConfig, SiliconFlowProvider, ToolCall,
-    merge_tool_call_fragment,
+    ToolChoice, merge_tool_call_fragment,
 };
 use serde_json::json;
 
@@ -136,6 +136,39 @@ fn build_request_preserves_assistant_text_on_tool_turn() {
 }
 
 #[test]
+fn build_request_injects_runtime_context_into_system_prompt() {
+    let provider = SiliconFlowProvider::new(SiliconFlowConfig {
+        api_key: "test".into(),
+        base_url: "https://example.com/v1".into(),
+        model: "Qwen/Qwen3-8B".into(),
+        max_tokens: 256,
+        temperature: 0.0,
+        top_p: None,
+        top_k: None,
+        frequency_penalty: None,
+        enable_thinking: None,
+        thinking_budget: None,
+        system_prompt: Some("base system".into()),
+        system_prompt_file: None,
+    });
+
+    let request = provider.build_request_for_test(
+        &[ProviderMessage::User {
+            content: "hello".into(),
+        }],
+        &[],
+    );
+
+    let system_content = request.messages[0]
+        .content
+        .as_deref()
+        .expect("system message should have content");
+    assert!(system_content.contains("base system"));
+    assert!(system_content.contains("## Runtime Context"));
+    assert!(system_content.contains("Working directory:"));
+}
+
+#[test]
 fn merge_tool_call_fragment_concatenates_streamed_arguments() {
     let mut tool_calls = vec![ToolCall {
         id: String::new(),
@@ -177,4 +210,137 @@ fn merge_tool_call_fragment_concatenates_streamed_arguments() {
         tool_calls[0].function.arguments,
         "{\"path\":\"Cargo.toml\"}"
     );
+}
+
+#[test]
+fn build_request_uses_auto_tool_choice_when_tools_available() {
+    let provider = SiliconFlowProvider::new(SiliconFlowConfig {
+        api_key: "test".into(),
+        base_url: "https://example.com/v1".into(),
+        model: "Qwen/Qwen3-8B".into(),
+        max_tokens: 256,
+        temperature: 0.0,
+        top_p: None,
+        top_k: None,
+        frequency_penalty: None,
+        enable_thinking: None,
+        thinking_budget: None,
+        system_prompt: Some("system".into()),
+        system_prompt_file: None,
+    });
+
+    let request = provider.build_request_for_test(
+        &[ProviderMessage::User {
+            content: "read file".into(),
+        }],
+        &[ToolSpec {
+            name: "read_file".into(),
+            description: "Read a file".into(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string" }
+                },
+                "required": ["path"],
+                "additionalProperties": false
+            }),
+        }],
+    );
+
+    assert_eq!(request.tool_choice, Some(ToolChoice::Auto));
+}
+
+#[test]
+fn build_request_switches_tool_choice_to_none_after_repeated_success() {
+    let provider = SiliconFlowProvider::new(SiliconFlowConfig {
+        api_key: "test".into(),
+        base_url: "https://example.com/v1".into(),
+        model: "Qwen/Qwen3-8B".into(),
+        max_tokens: 256,
+        temperature: 0.0,
+        top_p: None,
+        top_k: None,
+        frequency_penalty: None,
+        enable_thinking: None,
+        thinking_budget: None,
+        system_prompt: Some("system".into()),
+        system_prompt_file: None,
+    });
+
+    let request = provider.build_request_for_test(
+        &[
+            ProviderMessage::User {
+                content: "write hello".into(),
+            },
+            ProviderMessage::ToolCall {
+                id: "call-1".into(),
+                name: "write_file".into(),
+                arguments: "{\"path\":\"hello.py\",\"content\":\"print('hello')\"}".into(),
+            },
+            ProviderMessage::ToolResult {
+                tool_call_id: "call-1".into(),
+                output: "Wrote 26 bytes to hello.py".into(),
+                is_error: false,
+            },
+            ProviderMessage::ToolCall {
+                id: "call-2".into(),
+                name: "write_file".into(),
+                arguments: "{\"path\":\"hello.py\",\"content\":\"print('hello')\"}".into(),
+            },
+            ProviderMessage::ToolResult {
+                tool_call_id: "call-2".into(),
+                output: "Wrote 26 bytes to hello.py".into(),
+                is_error: false,
+            },
+        ],
+        &[ToolSpec {
+            name: "write_file".into(),
+            description: "Write file".into(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string" },
+                    "content": { "type": "string" }
+                },
+                "required": ["path", "content"],
+                "additionalProperties": false
+            }),
+        }],
+    );
+
+    assert_eq!(request.tool_choice, Some(ToolChoice::None));
+}
+
+#[test]
+fn build_request_truncates_old_context_to_recent_user_turns() {
+    let provider = SiliconFlowProvider::new(SiliconFlowConfig {
+        api_key: "test".into(),
+        base_url: "https://example.com/v1".into(),
+        model: "Qwen/Qwen3-8B".into(),
+        max_tokens: 256,
+        temperature: 0.0,
+        top_p: None,
+        top_k: None,
+        frequency_penalty: None,
+        enable_thinking: None,
+        thinking_budget: None,
+        system_prompt: Some("system".into()),
+        system_prompt_file: None,
+    });
+
+    let mut messages = Vec::new();
+    for turn in 0..10 {
+        messages.push(ProviderMessage::User {
+            content: format!("user-{turn}"),
+        });
+        messages.push(ProviderMessage::Assistant {
+            content: format!("assistant-{turn}"),
+        });
+    }
+
+    let request = provider.build_request_for_test(&messages, &[]);
+
+    assert_eq!(request.messages.len(), 13);
+    assert_eq!(request.messages[1].content.as_deref(), Some("user-4"));
+    assert_eq!(request.messages[12].content.as_deref(), Some("assistant-9"));
 }
