@@ -241,6 +241,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
+ "termimad",
  "tui-overlay",
  "tui-widget-list",
  "unicode-width 0.2.0",

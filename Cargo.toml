@@ -23,6 +23,7 @@ ureq = { version = "2", features = ["json"] }
 ratskin = "0.3.1"
 log = "0.4.29"
 flexi_logger = "0.31.8"
+termimad = "0.34.1"
 
 [dev-dependencies]
 insta = "1"

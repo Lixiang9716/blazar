@@ -112,7 +112,9 @@ fn render_entry<'a>(entry: &TimelineEntry, theme: &ChatTheme, width: u16) -> Vec
                         ]));
                     } else {
                         let normalized = normalize_markdown_paragraphs(body);
-                        let rat_skin = ratskin::RatSkin::default();
+                        let rat_skin = ratskin::RatSkin {
+                            skin: theme.mad_skin.clone(),
+                        };
                         let text_width = width.saturating_sub(INDENT_WIDTH);
                         let md_lines =
                             rat_skin.parse(ratskin::RatSkin::parse_text(&normalized), text_width);

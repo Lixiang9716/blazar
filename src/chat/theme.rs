@@ -2,6 +2,8 @@
 
 use opaline::{OpalineColor, ThemeInfo, list_available_themes, load_by_name};
 use ratatui_core::style::{Color, Modifier, Style};
+use termimad::crossterm::style::Color as CrossColor;
+use termimad::{CompoundStyle, MadSkin, StyledChar};
 
 /// Default theme name.
 pub const DEFAULT_THEME: &str = "one-dark";
@@ -45,6 +47,8 @@ pub struct ChatTheme {
     pub code_bg: Color,
     /// Background color for overlays (picker backdrop etc.).
     pub backdrop_color: Color,
+    /// termimad skin for ratskin markdown rendering.
+    pub mad_skin: MadSkin,
 }
 
 /// Build `ChatTheme` using the default theme.
@@ -77,6 +81,15 @@ fn map_opaline_theme(theme: &opaline::Theme) -> ChatTheme {
     let accent_success = to_color(theme.color("accent.success"));
     let code_plain = to_color(theme.color("code.plain"));
     let code_bg = to_color(theme.color("code.background"));
+
+    let mad_skin = build_mad_skin(
+        theme.color("text.primary"),
+        theme.color("text.muted"),
+        theme.color("accent.info"),
+        theme.color("accent.primary"),
+        theme.color("code.plain"),
+        theme.color("code.background"),
+    );
 
     ChatTheme {
         title_bar: Style::default().fg(text_secondary),
@@ -118,6 +131,7 @@ fn map_opaline_theme(theme: &opaline::Theme) -> ChatTheme {
         tip_command: Style::default().fg(accent_warning),
         code_bg,
         backdrop_color: bg_base,
+        mad_skin,
     }
 }
 
@@ -166,7 +180,112 @@ fn fallback_theme() -> ChatTheme {
         tip_command: Style::default().fg(YELLOW),
         code_bg: BASE02,
         backdrop_color: BASE03,
+        mad_skin: build_mad_skin(
+            OpalineColor {
+                r: 131,
+                g: 148,
+                b: 150,
+            }, // BASE0
+            OpalineColor {
+                r: 88,
+                g: 110,
+                b: 117,
+            }, // BASE01
+            OpalineColor {
+                r: 42,
+                g: 161,
+                b: 152,
+            }, // CYAN
+            OpalineColor {
+                r: 38,
+                g: 139,
+                b: 210,
+            }, // BLUE
+            OpalineColor {
+                r: 131,
+                g: 148,
+                b: 150,
+            }, // BASE0
+            OpalineColor { r: 7, g: 54, b: 66 }, // BASE02
+        ),
     }
+}
+
+/// Convert an OpalineColor to a crossterm Color (used by termimad).
+fn to_cross(c: OpalineColor) -> CrossColor {
+    CrossColor::Rgb {
+        r: c.r,
+        g: c.g,
+        b: c.b,
+    }
+}
+
+/// Build a `MadSkin` for ratskin markdown rendering, themed to match
+/// the current Blazar palette.
+fn build_mad_skin(
+    text: OpalineColor,
+    muted: OpalineColor,
+    accent: OpalineColor,
+    heading: OpalineColor,
+    code_fg: OpalineColor,
+    code_bg: OpalineColor,
+) -> MadSkin {
+    use termimad::crossterm::style::Attribute;
+    use termimad::minimad::Alignment;
+
+    let mut skin = MadSkin::default();
+
+    // Paragraph / body text
+    skin.paragraph.compound_style.set_fg(to_cross(text));
+
+    // Bold — bright white, stands out
+    skin.bold = CompoundStyle::new(Some(CrossColor::White), None, Attribute::Bold.into());
+
+    // Italic
+    skin.italic = CompoundStyle::new(Some(to_cross(text)), None, Attribute::Italic.into());
+
+    // Inline code — code fg on code bg
+    skin.inline_code
+        .set_fgbg(to_cross(code_fg), to_cross(code_bg));
+
+    // Code blocks — same colors, no underline
+    skin.code_block
+        .compound_style
+        .set_fgbg(to_cross(code_fg), to_cross(code_bg));
+
+    // Headers — accent colored, bold, left-aligned (not centered)
+    for (i, h) in skin.headers.iter_mut().enumerate() {
+        h.compound_style =
+            CompoundStyle::new(Some(to_cross(heading)), None, Attribute::Bold.into());
+        h.align = Alignment::Left;
+        // H1 gets underline for emphasis
+        if i == 0 {
+            h.add_attr(Attribute::Underlined);
+        }
+    }
+
+    // Bullet — accent colored dot
+    skin.bullet = StyledChar::new(
+        CompoundStyle::new(Some(to_cross(accent)), None, Default::default()),
+        '•',
+    );
+
+    // Quote mark
+    skin.quote_mark = StyledChar::new(
+        CompoundStyle::new(Some(to_cross(muted)), None, Attribute::Bold.into()),
+        '▐',
+    );
+
+    // Horizontal rule — muted thin line
+    skin.horizontal_rule = StyledChar::new(
+        CompoundStyle::new(Some(to_cross(muted)), None, Default::default()),
+        '─',
+    );
+
+    // Table borders — muted color
+    skin.table.compound_style.set_fg(to_cross(muted));
+
+    skin
 }
 
 #[cfg(test)]
