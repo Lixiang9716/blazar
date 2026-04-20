@@ -53,22 +53,3 @@ fn slime_idle_animation() -> &'static SpriteAnimation {
             .expect("slime idle sprite should decode")
     })
 }
-
-/// Render the slime_run animation for the streaming indicator.
-pub fn render_slime_run_lines(now_ms: u64) -> Vec<Line<'static>> {
-    let animation = slime_run_animation();
-    let frame_interval_ms: u64 = 100; // 10 FPS
-    let frame_index = ((now_ms / frame_interval_ms) % animation.len() as u64) as usize;
-    animation.frame_by_index(frame_index).to_styled_lines()
-}
-
-fn slime_run_animation() -> &'static SpriteAnimation {
-    static ANIMATION: OnceLock<SpriteAnimation> = OnceLock::new();
-
-    ANIMATION.get_or_init(|| {
-        let png = fs::read("assets/spirit/slime/slime_run.png")
-            .expect("slime run sprite should be readable");
-
-        SpriteAnimation::from_png_bytes(&png, 6, 10).expect("slime run sprite should decode")
-    })
-}

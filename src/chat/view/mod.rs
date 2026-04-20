@@ -58,7 +58,7 @@ pub fn render_frame(frame: &mut Frame, app: &mut ChatApp, tick_ms: u64) {
 
     let streaming = app.is_streaming();
     // When streaming, allocate rows for the slime_run animation above input.
-    let streaming_height: u16 = if streaming { 8 } else { 0 };
+    let streaming_height: u16 = if streaming { 1 } else { 0 };
 
     let [
         banner_area,
