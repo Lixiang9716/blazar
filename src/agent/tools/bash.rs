@@ -60,6 +60,7 @@ where
     F: Fn(&Path) -> bool,
 {
     env_shell
+        .filter(|candidate| path_exists(candidate))
         .or_else(|| {
             ["/bin/bash", "/bin/sh"]
                 .into_iter()

@@ -201,9 +201,20 @@ fn bash_tool_uses_default_timeout_when_not_specified() {
 
 #[test]
 fn shell_config_prefers_env_shell_when_present() {
-    let config = ShellConfig::detect_from(Some(PathBuf::from("/custom-shell")), |_| false);
+    let config = ShellConfig::detect_from(Some(PathBuf::from("/custom-shell")), |path| {
+        path == Path::new("/custom-shell")
+    });
 
     assert_eq!(config.shell_path(), Path::new("/custom-shell"));
+}
+
+#[test]
+fn shell_config_ignores_missing_env_shell_and_falls_back() {
+    let config = ShellConfig::detect_from(Some(PathBuf::from("/missing-shell")), |path| {
+        path == Path::new("/bin/bash")
+    });
+
+    assert_eq!(config.shell_path(), Path::new("/bin/bash"));
 }
 
 #[test]
