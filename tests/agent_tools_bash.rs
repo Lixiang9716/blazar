@@ -18,6 +18,17 @@ fn thread_count() -> usize {
     fs::read_dir("/proc/self/task").unwrap().count()
 }
 
+fn unique_workspace_path(label: &str) -> PathBuf {
+    let suffix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    manifest_dir()
+        .join("target")
+        .join("test-workspaces")
+        .join(format!("blazar-bash-{label}-{suffix}.txt"))
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct RecordedRequest {
     shell_path: PathBuf,
@@ -184,6 +195,32 @@ fn bash_tool_timeout_stays_bounded_with_unbounded_output() {
         started.elapsed() < Duration::from_secs(3),
         "timeout took {:?}",
         started.elapsed()
+    );
+}
+
+#[test]
+fn bash_tool_timeout_kills_same_group_child_that_ignores_sigterm() {
+    let output_path = unique_workspace_path("sigterm-ignored");
+    if let Some(parent) = output_path.parent() {
+        fs::create_dir_all(parent).unwrap();
+    }
+    let _ = fs::remove_file(&output_path);
+
+    let command = format!(
+        "sh -c 'trap \"\" TERM; sleep 2; printf lingering > \"{}\"' & sleep 5",
+        output_path.display()
+    );
+    let tool = BashTool::new(manifest_dir());
+    let result = tool.execute(json!({
+        "command": command,
+        "timeout_secs": 1
+    }));
+
+    assert!(result.is_error);
+    std::thread::sleep(Duration::from_secs(3));
+    assert!(
+        !output_path.exists(),
+        "same-group child survived timeout cleanup"
     );
 }
 

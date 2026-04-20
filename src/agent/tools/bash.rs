@@ -291,18 +291,32 @@ fn wait_for_completion(
     }
 }
 
-fn terminate_process_group(child: &mut Child, process_group: Pid) {
+fn terminate_process_group(_child: &mut Child, process_group: Pid) {
     let _ = killpg(process_group, Signal::SIGTERM);
 
     let drain_deadline = Instant::now() + TERM_DRAIN_TIMEOUT;
     while Instant::now() < drain_deadline {
-        match child.try_wait() {
-            Ok(Some(_)) | Err(_) => return,
-            Ok(None) => thread::sleep(TERM_POLL_INTERVAL),
+        if !process_group_exists(process_group) {
+            return;
         }
+        thread::sleep(TERM_POLL_INTERVAL);
     }
 
-    let _ = killpg(process_group, Signal::SIGKILL);
+    if process_group_exists(process_group) {
+        let _ = killpg(process_group, Signal::SIGKILL);
+    }
+}
+
+fn process_group_exists(process_group: Pid) -> bool {
+    let result = unsafe { libc::kill(-process_group.as_raw(), 0) };
+    if result == 0 {
+        return true;
+    }
+
+    matches!(
+        std::io::Error::last_os_error().raw_os_error(),
+        Some(libc::EPERM)
+    )
 }
 
 #[derive(Default)]
