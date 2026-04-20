@@ -45,8 +45,22 @@ pub(super) fn render_timeline(frame: &mut Frame, area: Rect, app: &ChatApp, them
         )));
     }
 
-    // Calculate scroll: auto-scroll to bottom
-    let content_height = lines.len() as u16;
+    let paragraph = Paragraph::new(lines.clone())
+        .style(theme.timeline_bg)
+        .wrap(Wrap { trim: false });
+
+    // Compute actual visual height accounting for line wrapping.
+    let content_height: u16 = if area.width > 0 {
+        lines
+            .iter()
+            .map(|line| {
+                let w = line.width() as u16;
+                if w == 0 { 1 } else { w.div_ceil(area.width) }
+            })
+            .sum()
+    } else {
+        lines.len() as u16
+    };
     let visible_height = area.height;
 
     // Feed back heights so scroll sentinel can be resolved
@@ -61,10 +75,7 @@ pub(super) fn render_timeline(frame: &mut Frame, area: Rect, app: &ChatApp, them
         0
     };
 
-    let paragraph = Paragraph::new(lines)
-        .style(theme.timeline_bg)
-        .wrap(Wrap { trim: false })
-        .scroll((scroll_offset, 0));
+    let paragraph = paragraph.scroll((scroll_offset, 0));
 
     frame.render_widget(paragraph, area);
 }
