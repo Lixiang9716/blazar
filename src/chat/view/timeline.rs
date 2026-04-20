@@ -8,21 +8,22 @@ use ratatui_core::{
     terminal::Frame,
     text::{Line, Span},
 };
-use ratatui_widgets::paragraph::{Paragraph, Wrap};
+use ratatui_widgets::paragraph::Paragraph;
+use unicode_width::UnicodeWidthChar;
 
 /// Left margin for all timeline content (matches Claude Code's indentation).
 const MARGIN: &str = "  ";
 /// Continuation indent (margin + marker width).
 const INDENT: &str = "    ";
+const INDENT_WIDTH: u16 = 4;
 
 pub(super) fn render_timeline(frame: &mut Frame, area: Rect, app: &ChatApp, theme: &ChatTheme) {
     let mut lines: Vec<Line> = Vec::new();
     let show_details = app.show_details();
 
-    // Cap content width for readability on wide terminals.
+    // Cap logical text width for readability on wide terminals.
     const MAX_CONTENT_WIDTH: u16 = 100;
     let content_width = area.width.min(MAX_CONTENT_WIDTH);
-    let content_area = Rect::new(area.x, area.y, content_width, area.height);
 
     for entry in app.timeline() {
         let entry_lines = render_entry(entry, theme, content_width);
@@ -50,9 +51,7 @@ pub(super) fn render_timeline(frame: &mut Frame, area: Rect, app: &ChatApp, them
         )));
     }
 
-    let paragraph = Paragraph::new(lines.clone())
-        .style(theme.timeline_bg)
-        .wrap(Wrap { trim: false });
+    let paragraph = Paragraph::new(lines.clone()).style(theme.timeline_bg);
 
     // Compute actual visual height accounting for line wrapping.
     let content_height: u16 = if content_width > 0 {
@@ -82,10 +81,10 @@ pub(super) fn render_timeline(frame: &mut Frame, area: Rect, app: &ChatApp, them
 
     let paragraph = paragraph.scroll((scroll_offset, 0));
 
-    frame.render_widget(paragraph, content_area);
+    frame.render_widget(paragraph, area);
 }
 
-fn render_entry<'a>(entry: &TimelineEntry, theme: &ChatTheme, _width: u16) -> Vec<Line<'a>> {
+fn render_entry<'a>(entry: &TimelineEntry, theme: &ChatTheme, width: u16) -> Vec<Line<'a>> {
     let mut lines = Vec::new();
     let marker_style = marker_style_for(entry, theme);
 
@@ -94,51 +93,46 @@ fn render_entry<'a>(entry: &TimelineEntry, theme: &ChatTheme, _width: u16) -> Ve
             if !entry.body.is_empty() {
                 if entry.actor == Actor::User {
                     // User messages: `›` prefix, plain bold text (no markdown)
-                    let mut body_lines = entry.body.lines();
-                    if let Some(first) = body_lines.next() {
-                        lines.push(Line::from(vec![
-                            Span::raw(MARGIN),
-                            Span::styled("› ", marker_style),
-                            Span::styled(first.to_owned(), theme.bold_text),
-                        ]));
-                    }
-                    for cont in body_lines {
-                        lines.push(Line::from(vec![
-                            Span::raw(INDENT),
-                            Span::styled(cont.to_owned(), theme.bold_text),
-                        ]));
+                    for (i, body_line) in entry.body.lines().enumerate() {
+                        let prefix = if i == 0 {
+                            vec![Span::raw(MARGIN), Span::styled("› ", marker_style)]
+                        } else {
+                            vec![Span::raw(INDENT)]
+                        };
+                        push_wrapped_lines(&mut lines, body_line, theme.bold_text, prefix, width);
                     }
                 } else {
-                    // Assistant messages: render markdown with Solarized theme
+                    // Assistant messages: render markdown, then manually wrap
                     let opts = tui_markdown::Options::new(ThemeStyleSheet::from_chat_theme(theme));
                     let md_text = tui_markdown::from_str_with_options(&entry.body, &opts);
                     for (i, md_line) in md_text.lines.into_iter().enumerate() {
-                        let owned_spans: Vec<Span<'a>> = md_line
+                        // Collect spans into plain text + take the dominant style
+                        let style = md_line.spans.first().map_or(theme.body_text, |s| s.style);
+                        let plain: String = md_line
                             .spans
-                            .into_iter()
+                            .iter()
                             .map(|s| {
-                                // Strip heading `# ` prefixes — tui-markdown keeps them raw
-                                let content = s.content.into_owned();
+                                let content = s.content.as_ref();
                                 let trimmed = content.trim_start_matches('#');
                                 if trimmed.len() < content.len() {
-                                    Span::styled(trimmed.trim_start().to_owned(), s.style)
+                                    trimmed.trim_start().to_owned()
                                 } else {
-                                    Span::styled(content, s.style)
+                                    content.to_owned()
                                 }
                             })
-                            .filter(|s| !s.content.is_empty())
                             .collect();
 
-                        if i == 0 {
-                            let mut first =
-                                vec![Span::raw(MARGIN), Span::styled("● ", marker_style)];
-                            first.extend(owned_spans);
-                            lines.push(Line::from(first));
-                        } else {
-                            let mut cont = vec![Span::raw(INDENT)];
-                            cont.extend(owned_spans);
-                            lines.push(Line::from(cont));
+                        if plain.trim().is_empty() {
+                            lines.push(Line::from(""));
+                            continue;
                         }
+
+                        let prefix = if i == 0 {
+                            vec![Span::raw(MARGIN), Span::styled("● ", marker_style)]
+                        } else {
+                            vec![Span::raw(INDENT)]
+                        };
+                        push_wrapped_lines(&mut lines, &plain, style, prefix, width);
                     }
                     // Fallback if markdown produced nothing
                     if lines.is_empty() {
@@ -206,34 +200,27 @@ fn render_entry<'a>(entry: &TimelineEntry, theme: &ChatTheme, _width: u16) -> Ve
             }
         }
         EntryKind::Warning => {
-            let mut body_lines = entry.body.lines();
-            let first = body_lines.next().unwrap_or("");
-            lines.push(Line::from(vec![
-                Span::raw(MARGIN),
-                Span::styled("! ", marker_style),
-                Span::styled(first.to_owned(), theme.body_text),
-            ]));
-            for continuation in body_lines {
-                lines.push(Line::from(vec![
-                    Span::raw(INDENT),
-                    Span::styled(continuation.to_owned(), theme.body_text),
-                ]));
+            for (i, body_line) in entry.body.lines().enumerate() {
+                let prefix = if i == 0 {
+                    vec![Span::raw(MARGIN), Span::styled("! ", marker_style)]
+                } else {
+                    vec![Span::raw(INDENT)]
+                };
+                push_wrapped_lines(&mut lines, body_line, theme.body_text, prefix, width);
             }
         }
         EntryKind::Hint => {
-            let mut body_lines = entry.body.lines();
-            let first = body_lines.next().unwrap_or("");
-            lines.push(Line::from(vec![
-                Span::raw(MARGIN),
-                Span::styled("● ", marker_style),
-                Span::styled("💡 ", marker_style),
-                Span::styled(first.to_owned(), theme.body_text),
-            ]));
-            for continuation in body_lines {
-                lines.push(Line::from(vec![
-                    Span::raw(INDENT),
-                    Span::styled(continuation.to_owned(), theme.body_text),
-                ]));
+            for (i, body_line) in entry.body.lines().enumerate() {
+                let prefix = if i == 0 {
+                    vec![
+                        Span::raw(MARGIN),
+                        Span::styled("● ", marker_style),
+                        Span::styled("💡 ", marker_style),
+                    ]
+                } else {
+                    vec![Span::raw(INDENT)]
+                };
+                push_wrapped_lines(&mut lines, body_line, theme.body_text, prefix, width);
             }
         }
         EntryKind::Thinking => {
@@ -282,5 +269,59 @@ fn marker_style_for(entry: &TimelineEntry, theme: &ChatTheme) -> Style {
         (_, EntryKind::ToolUse { .. } | EntryKind::Bash { .. }) => theme.marker_tool,
         (_, EntryKind::CodeBlock { .. }) => theme.marker_tool,
         _ => theme.marker_response,
+    }
+}
+
+/// Break `text` into chunks that each fit within `max_cols` display columns.
+fn wrap_text(text: &str, max_cols: u16) -> Vec<String> {
+    if max_cols == 0 {
+        return vec![text.to_owned()];
+    }
+    let max = max_cols as usize;
+    let mut chunks = Vec::new();
+    let mut current = String::new();
+    let mut col = 0usize;
+
+    for ch in text.chars() {
+        let w = ch.width().unwrap_or(0);
+        if col + w > max && !current.is_empty() {
+            chunks.push(std::mem::take(&mut current));
+            col = 0;
+        }
+        current.push(ch);
+        col += w;
+    }
+    if !current.is_empty() {
+        chunks.push(current);
+    }
+    if chunks.is_empty() {
+        chunks.push(String::new());
+    }
+    chunks
+}
+
+/// Emit wrapped Lines: first line gets `prefix` spans, continuations get INDENT.
+fn push_wrapped_lines<'a>(
+    lines: &mut Vec<Line<'a>>,
+    text: &str,
+    style: Style,
+    prefix: Vec<Span<'a>>,
+    max_width: u16,
+) {
+    // Prefix display width: MARGIN(2) + marker(2) = 4 typically
+    let text_width = max_width.saturating_sub(INDENT_WIDTH);
+    let chunks = wrap_text(text, text_width);
+
+    for (i, chunk) in chunks.into_iter().enumerate() {
+        if i == 0 {
+            let mut spans = prefix.clone();
+            spans.push(Span::styled(chunk, style));
+            lines.push(Line::from(spans));
+        } else {
+            lines.push(Line::from(vec![
+                Span::raw(INDENT),
+                Span::styled(chunk, style),
+            ]));
+        }
     }
 }
