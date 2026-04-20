@@ -150,7 +150,8 @@ fn write_utf8_without_following_symlink(
 
 #[cfg(unix)]
 fn open_root_directory(path: &Path) -> std::io::Result<OwnedFd> {
-    Ok(File::open(path)?.into())
+    let path = c_string(path.as_os_str())?;
+    open_at(nix::libc::AT_FDCWD, &path, DIRECTORY_OPEN_FLAGS, 0)
 }
 
 #[cfg(unix)]
@@ -227,7 +228,8 @@ fn c_string(name: &std::ffi::OsStr) -> std::io::Result<CString> {
 
 #[cfg(test)]
 mod tests {
-    use super::write_utf8_within_workspace;
+    use super::{open_file_in_directory, open_root_directory, write_utf8_within_workspace};
+    use std::ffi::OsStr;
     use std::fs;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -292,6 +294,33 @@ mod tests {
 
         let error = write_utf8_within_workspace(&workspace, "redirect/escape.txt", "escape")
             .expect_err("symlinked ancestor should be rejected");
+
+        assert!(!outside.join("escape.txt").exists());
+        assert!(error.kind() != std::io::ErrorKind::NotFound);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn open_root_directory_rejects_symlink_replacement_of_canonical_root() {
+        let workspace = fresh_workspace("root-open-race");
+        let canonical_root = fs::canonicalize(&workspace).unwrap();
+        let renamed_workspace = workspace.with_extension("renamed");
+        fs::rename(&workspace, &renamed_workspace).unwrap();
+
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let outside = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("target")
+            .join("test-workspaces")
+            .join(OsString::from(format!("write-file-root-outside-{suffix}")));
+        fs::create_dir_all(&outside).unwrap();
+        unix_fs::symlink(&outside, &workspace).unwrap();
+
+        let error = open_root_directory(&canonical_root)
+            .and_then(|root| open_file_in_directory(&root, OsStr::new("escape.txt")).map(|_| ()))
+            .expect_err("symlink replacement of canonical root should be rejected");
 
         assert!(!outside.join("escape.txt").exists());
         assert!(error.kind() != std::io::ErrorKind::NotFound);
