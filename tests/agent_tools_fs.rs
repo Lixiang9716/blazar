@@ -192,3 +192,16 @@ fn file_tools_reject_symlink_escapes() {
     assert!(list.is_error);
     assert!(!outside.join("new.txt").exists());
 }
+
+#[cfg(unix)]
+#[test]
+fn list_dir_fails_when_traversal_hits_a_broken_symlink() {
+    let workspace = fresh_workspace("list-broken-symlink");
+    fs::create_dir_all(workspace.join("dir")).unwrap();
+    unix_fs::symlink(workspace.join("missing-target"), workspace.join("dir/broken-link")).unwrap();
+
+    let tool = ListDirTool::new(workspace.clone());
+    let result = tool.execute(json!({ "path": "dir" }));
+
+    assert!(result.is_error);
+}

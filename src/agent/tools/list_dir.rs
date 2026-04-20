@@ -23,30 +23,33 @@ impl ListDirTool {
         prefix: &str,
         depth: usize,
         lines: &mut Vec<String>,
-    ) -> bool {
+    ) -> Result<bool, String> {
         if depth >= MAX_DEPTH {
-            return false;
+            return Ok(false);
         }
 
-        let Ok(entries) = fs::read_dir(path) else {
-            return false;
-        };
+        let entries = fs::read_dir(path)
+            .map_err(|error| format!("cannot list {}: {error}", path.display()))?;
 
-        let mut entries = entries.filter_map(Result::ok).collect::<Vec<_>>();
+        let mut entries = entries
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| format!("cannot list {}: {error}", path.display()))?;
         entries.sort_by_key(|entry| entry.path());
 
         for entry in entries {
             if lines.len() >= MAX_ENTRIES {
-                return true;
+                return Ok(true);
             }
 
             let file_name = entry.file_name().to_string_lossy().to_string();
             let child_path = entry.path();
-            let Ok(canonical_child_path) = fs::canonicalize(&child_path) else {
-                continue;
-            };
+            let canonical_child_path = fs::canonicalize(&child_path)
+                .map_err(|error| format!("cannot resolve {}: {error}", child_path.display()))?;
             if !canonical_child_path.starts_with(workspace_root) {
-                continue;
+                return Err(format!(
+                    "cannot list {}: path escapes workspace root",
+                    child_path.display()
+                ));
             }
 
             if child_path.is_dir() {
@@ -59,15 +62,15 @@ impl ListDirTool {
                     &rendered,
                     depth + 1,
                     lines,
-                ) {
-                    return true;
+                )? {
+                    return Ok(true);
                 }
             } else {
                 lines.push(format!("{prefix}{file_name}"));
             }
         }
 
-        false
+        Ok(false)
     }
 }
 
@@ -108,7 +111,10 @@ impl Tool for ListDirTool {
         }
 
         let mut lines = Vec::new();
-        let truncated = Self::visit(&full_path, &canonical_root, "", 0, &mut lines);
+        let truncated = match Self::visit(&full_path, &canonical_root, "", 0, &mut lines) {
+            Ok(truncated) => truncated,
+            Err(error) => return ToolResult::failure(error),
+        };
 
         let mut output = lines.join("\n");
         if truncated {
