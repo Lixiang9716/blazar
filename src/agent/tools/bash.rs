@@ -8,7 +8,8 @@ use std::io::Read;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::thread::{self, JoinHandle};
+use std::sync::{Arc, Mutex, mpsc};
+use std::thread;
 use std::time::{Duration, Instant};
 
 pub const MAX_OUTPUT_BYTES: usize = 8 * 1024;
@@ -17,6 +18,7 @@ const DEFAULT_TIMEOUT_SECS: u64 = 30;
 const OUTPUT_TRUNCATED_MARKER: &str = "\n[output truncated]";
 const TERM_DRAIN_TIMEOUT: Duration = Duration::from_millis(250);
 const TERM_POLL_INTERVAL: Duration = Duration::from_millis(25);
+const OUTPUT_DRAIN_TIMEOUT: Duration = Duration::from_millis(50);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ShellConfig {
@@ -169,6 +171,7 @@ impl ProcessRunner for SystemBashRunner {
             .arg("-c")
             .arg(request.command)
             .current_dir(request.workspace_root)
+            .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::null());
 
@@ -194,8 +197,14 @@ impl ProcessRunner for SystemBashRunner {
             return ToolResult::failure("cannot capture shell output");
         };
 
-        let output_reader = thread::spawn(move || read_capped(stdout));
-        wait_for_completion(&mut child, process_group, request.timeout, output_reader)
+        let (output_state, output_rx) = spawn_output_reader(stdout);
+        wait_for_completion(
+            &mut child,
+            process_group,
+            request.timeout,
+            output_state,
+            output_rx,
+        )
     }
 }
 
@@ -203,14 +212,16 @@ fn wait_for_completion(
     child: &mut Child,
     process_group: Pid,
     timeout: Duration,
-    output_reader: JoinHandle<std::io::Result<(String, bool)>>,
+    output_state: SharedOutputState,
+    output_rx: mpsc::Receiver<std::io::Result<()>>,
 ) -> ToolResult {
     let deadline = Instant::now() + timeout;
 
     loop {
         match child.try_wait() {
             Ok(Some(status)) => {
-                let (output, output_truncated) = join_output(output_reader);
+                let (output, output_truncated) =
+                    collect_output(&output_state, &output_rx, OUTPUT_DRAIN_TIMEOUT);
                 return ToolResult {
                     output,
                     exit_code: status.code(),
@@ -222,7 +233,8 @@ fn wait_for_completion(
             Ok(None) => {
                 terminate_process_group(child, process_group);
                 let _ = child.wait();
-                let (mut output, output_truncated) = join_output(output_reader);
+                let (mut output, output_truncated) =
+                    collect_output(&output_state, &output_rx, OUTPUT_DRAIN_TIMEOUT);
                 if !output.is_empty() {
                     output.push('\n');
                 }
@@ -237,7 +249,8 @@ fn wait_for_completion(
             Err(error) => {
                 let _ = child.kill();
                 let _ = child.wait();
-                let (mut output, output_truncated) = join_output(output_reader);
+                let (mut output, output_truncated) =
+                    collect_output(&output_state, &output_rx, OUTPUT_DRAIN_TIMEOUT);
                 if !output.is_empty() {
                     output.push('\n');
                 }
@@ -267,21 +280,67 @@ fn terminate_process_group(child: &mut Child, process_group: Pid) {
     let _ = killpg(process_group, Signal::SIGKILL);
 }
 
-fn join_output(handle: JoinHandle<std::io::Result<(String, bool)>>) -> (String, bool) {
-    match handle.join() {
-        Ok(Ok(output)) => output,
-        Ok(Err(error)) => (format!("cannot read shell output: {error}"), false),
-        Err(_) => (
-            "cannot read shell output: reader thread panicked".into(),
-            false,
-        ),
+#[derive(Default)]
+struct OutputState {
+    bytes: Vec<u8>,
+    truncated: bool,
+}
+
+type SharedOutputState = Arc<Mutex<OutputState>>;
+
+fn spawn_output_reader<R: Read + Send + 'static>(
+    reader: R,
+) -> (SharedOutputState, mpsc::Receiver<std::io::Result<()>>) {
+    let state = Arc::new(Mutex::new(OutputState::default()));
+    let reader_state = Arc::clone(&state);
+    let (tx, rx) = mpsc::channel();
+
+    thread::spawn(move || {
+        let result = read_capped(reader, &reader_state);
+        let _ = tx.send(result);
+    });
+
+    (state, rx)
+}
+
+fn collect_output(
+    state: &SharedOutputState,
+    output_rx: &mpsc::Receiver<std::io::Result<()>>,
+    drain_timeout: Duration,
+) -> (String, bool) {
+    match output_rx.recv_timeout(drain_timeout) {
+        Ok(Ok(())) | Err(mpsc::RecvTimeoutError::Timeout) => snapshot_output(state),
+        Ok(Err(error)) => {
+            let (mut output, truncated) = snapshot_output(state);
+            if !output.is_empty() {
+                output.push('\n');
+            }
+            output.push_str(&format!("cannot read shell output: {error}"));
+            (output, truncated)
+        }
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            let (mut output, truncated) = snapshot_output(state);
+            if !output.is_empty() {
+                output.push('\n');
+            }
+            output.push_str("cannot read shell output: reader thread disconnected");
+            (output, truncated)
+        }
     }
 }
 
-fn read_capped<R: Read>(mut reader: R) -> std::io::Result<(String, bool)> {
-    let mut output = Vec::new();
+fn snapshot_output(state: &SharedOutputState) -> (String, bool) {
+    let state = state.lock().unwrap();
+    let mut text = String::from_utf8_lossy(&state.bytes).into_owned();
+    if state.truncated {
+        text.push_str(OUTPUT_TRUNCATED_MARKER);
+    }
+
+    (text, state.truncated)
+}
+
+fn read_capped<R: Read>(mut reader: R, state: &SharedOutputState) -> std::io::Result<()> {
     let mut buf = [0u8; 1024];
-    let mut truncated = false;
 
     loop {
         let read = reader.read(&mut buf)?;
@@ -289,20 +348,16 @@ fn read_capped<R: Read>(mut reader: R) -> std::io::Result<(String, bool)> {
             break;
         }
 
-        let remaining = MAX_OUTPUT_BYTES.saturating_sub(output.len());
+        let mut state = state.lock().unwrap();
+        let remaining = MAX_OUTPUT_BYTES.saturating_sub(state.bytes.len());
         if remaining > 0 {
             let keep = remaining.min(read);
-            output.extend_from_slice(&buf[..keep]);
+            state.bytes.extend_from_slice(&buf[..keep]);
         }
         if read > remaining {
-            truncated = true;
+            state.truncated = true;
         }
     }
 
-    let mut text = String::from_utf8_lossy(&output).into_owned();
-    if truncated {
-        text.push_str(OUTPUT_TRUNCATED_MARKER);
-    }
-
-    Ok((text, truncated))
+    Ok(())
 }

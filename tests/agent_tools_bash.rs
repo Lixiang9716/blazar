@@ -5,7 +5,7 @@ use blazar::agent::tools::bash::{
 use serde_json::json;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 fn manifest_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -141,6 +141,36 @@ fn bash_tool_times_out_and_returns_error() {
     assert!(result.is_error);
     assert_eq!(result.exit_code, None);
     assert!(result.output.contains("timed out"));
+}
+
+#[test]
+fn bash_tool_timeout_stays_bounded_when_descendant_escapes_process_group() {
+    let tool = BashTool::new(manifest_dir());
+    let started = Instant::now();
+    let result = tool.execute(json!({
+        "command": "setsid sh -c 'sleep 5' & sleep 5",
+        "timeout_secs": 1
+    }));
+
+    assert!(result.is_error);
+    assert!(result.output.contains("timed out"));
+    assert!(
+        started.elapsed() < Duration::from_secs(3),
+        "timeout took {:?}",
+        started.elapsed()
+    );
+}
+
+#[test]
+fn bash_tool_uses_noninteractive_stdin() {
+    let tool = BashTool::new(manifest_dir());
+    let result = tool.execute(json!({
+        "command": "if read value; then printf '%s' \"${value:-empty}\"; else printf eof; fi",
+        "timeout_secs": 1
+    }));
+
+    assert!(!result.is_error);
+    assert_eq!(result.output, "eof");
 }
 
 #[test]
