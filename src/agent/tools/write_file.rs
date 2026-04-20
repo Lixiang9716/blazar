@@ -14,12 +14,14 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 use std::path::PathBuf;
 #[cfg(unix)]
+use std::time::{SystemTime, UNIX_EPOCH};
+#[cfg(unix)]
 const DIRECTORY_OPEN_FLAGS: i32 =
     nix::libc::O_RDONLY | nix::libc::O_DIRECTORY | nix::libc::O_CLOEXEC | nix::libc::O_NOFOLLOW;
 #[cfg(unix)]
-const FILE_OPEN_FLAGS: i32 = nix::libc::O_WRONLY
+const TEMP_FILE_OPEN_FLAGS: i32 = nix::libc::O_WRONLY
     | nix::libc::O_CREAT
-    | nix::libc::O_TRUNC
+    | nix::libc::O_EXCL
     | nix::libc::O_CLOEXEC
     | nix::libc::O_NOFOLLOW;
 #[cfg(unix)]
@@ -107,8 +109,18 @@ fn write_utf8_within_workspace(
         current_dir = open_or_create_directory(&current_dir, component)?;
     }
 
-    let mut file = open_file_in_directory(&current_dir, file_name)?;
-    file.write_all(content.as_bytes())?;
+    reject_symlink_target(&current_dir, file_name)?;
+    let (temp_name, mut file) = create_temp_file_in_directory(&current_dir, file_name)?;
+    let write_result = (|| -> std::io::Result<()> {
+        file.write_all(content.as_bytes())?;
+        file.sync_all()?;
+        rename_in_directory(&current_dir, &temp_name, file_name)
+    })();
+    if let Err(error) = write_result {
+        let _ = unlink_in_directory(&current_dir, &temp_name);
+        return Err(error);
+    }
+
     Ok(())
 }
 
@@ -178,10 +190,103 @@ fn open_file_in_directory(parent: &OwnedFd, name: &std::ffi::OsStr) -> std::io::
     let fd = open_at(
         parent.as_raw_fd(),
         &name,
-        FILE_OPEN_FLAGS,
+        TEMP_FILE_OPEN_FLAGS,
         CREATED_FILE_MODE,
     )?;
     Ok(File::from(fd))
+}
+
+#[cfg(unix)]
+fn reject_symlink_target(parent: &OwnedFd, name: &std::ffi::OsStr) -> std::io::Result<()> {
+    let name = c_string(name)?;
+    let mut stat = std::mem::MaybeUninit::<nix::libc::stat>::uninit();
+    let result = unsafe {
+        nix::libc::fstatat(
+            parent.as_raw_fd(),
+            name.as_ptr(),
+            stat.as_mut_ptr(),
+            nix::libc::AT_SYMLINK_NOFOLLOW,
+        )
+    };
+    if result == 0 {
+        let stat = unsafe { stat.assume_init() };
+        if (stat.st_mode & nix::libc::S_IFMT) == nix::libc::S_IFLNK {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "refusing to replace a symlink target",
+            ));
+        }
+        return Ok(());
+    }
+
+    let error = std::io::Error::last_os_error();
+    if error.kind() == std::io::ErrorKind::NotFound {
+        Ok(())
+    } else {
+        Err(error)
+    }
+}
+
+#[cfg(unix)]
+fn create_temp_file_in_directory(
+    parent: &OwnedFd,
+    target_name: &std::ffi::OsStr,
+) -> std::io::Result<(std::ffi::OsString, File)> {
+    let pid = std::process::id();
+    let target_name = target_name.to_string_lossy();
+    for attempt in 0..128u32 {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(std::io::Error::other)?
+            .as_nanos();
+        let temp_name = std::ffi::OsString::from(format!(
+            ".{target_name}.blazar-tmp-{pid}-{timestamp}-{attempt}"
+        ));
+        match open_file_in_directory(parent, &temp_name) {
+            Ok(file) => return Ok((temp_name, file)),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        }
+    }
+
+    Err(std::io::Error::new(
+        std::io::ErrorKind::AlreadyExists,
+        "failed to allocate a unique temporary file name",
+    ))
+}
+
+#[cfg(unix)]
+fn rename_in_directory(
+    parent: &OwnedFd,
+    source: &std::ffi::OsStr,
+    destination: &std::ffi::OsStr,
+) -> std::io::Result<()> {
+    let source = c_string(source)?;
+    let destination = c_string(destination)?;
+    let result = unsafe {
+        nix::libc::renameat(
+            parent.as_raw_fd(),
+            source.as_ptr(),
+            parent.as_raw_fd(),
+            destination.as_ptr(),
+        )
+    };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
+
+#[cfg(unix)]
+fn unlink_in_directory(parent: &OwnedFd, name: &std::ffi::OsStr) -> std::io::Result<()> {
+    let name = c_string(name)?;
+    let result = unsafe { nix::libc::unlinkat(parent.as_raw_fd(), name.as_ptr(), 0) };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
 }
 
 #[cfg(unix)]
@@ -273,6 +378,40 @@ mod tests {
 
         assert_eq!(fs::read_to_string(outside_file).unwrap(), "secret");
         assert!(error.kind() != std::io::ErrorKind::NotFound);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_utf8_within_workspace_replaces_hard_link_without_touching_outside_inode() {
+        use std::os::unix::fs::MetadataExt;
+
+        let workspace = fresh_workspace("hard-link-replace");
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let outside = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("target")
+            .join("test-workspaces")
+            .join(OsString::from(format!(
+                "write-file-hard-link-outside-{suffix}"
+            )));
+        fs::create_dir_all(&outside).unwrap();
+        let outside_file = outside.join("shared.txt");
+        fs::write(&outside_file, "secret").unwrap();
+
+        let workspace_file = workspace.join("shared.txt");
+        fs::hard_link(&outside_file, &workspace_file).unwrap();
+        let outside_inode_before = fs::metadata(&outside_file).unwrap().ino();
+
+        write_utf8_within_workspace(&workspace, "shared.txt", "updated").unwrap();
+
+        let outside_metadata = fs::metadata(&outside_file).unwrap();
+        let workspace_metadata = fs::metadata(&workspace_file).unwrap();
+        assert_eq!(fs::read_to_string(&outside_file).unwrap(), "secret");
+        assert_eq!(fs::read_to_string(&workspace_file).unwrap(), "updated");
+        assert_eq!(outside_metadata.ino(), outside_inode_before);
+        assert_ne!(workspace_metadata.ino(), outside_metadata.ino());
     }
 
     #[cfg(unix)]
