@@ -18,9 +18,12 @@ pub(super) fn render_input(frame: &mut Frame, area: Rect, app: &ChatApp, theme: 
     frame.render_widget(prompt, prompt_area);
 
     if app.composer_text().is_empty() {
-        // Empty — show nothing, just the cursor position
-        let empty = Paragraph::new("").style(theme.timeline_bg);
-        frame.render_widget(empty, composer_area);
+        let placeholder = Paragraph::new(Line::from(Span::styled(
+            "Describe a task or ask a question…",
+            theme.input_placeholder,
+        )))
+        .style(theme.timeline_bg);
+        frame.render_widget(placeholder, composer_area);
     } else {
         let composer = app.composer();
         frame.render_widget(composer, composer_area);

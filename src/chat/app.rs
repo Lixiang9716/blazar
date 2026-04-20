@@ -135,6 +135,14 @@ impl ChatApp {
         }
     }
 
+    pub fn is_streaming(&self) -> bool {
+        matches!(self.agent_state.turn_state, TurnState::Streaming { .. })
+    }
+
+    pub fn is_failed(&self) -> bool {
+        matches!(self.agent_state.turn_state, TurnState::Failed { .. })
+    }
+
     pub fn show_details(&self) -> bool {
         self.show_details
     }

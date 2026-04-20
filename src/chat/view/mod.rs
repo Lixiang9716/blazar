@@ -4,6 +4,7 @@ mod banner;
 mod input;
 mod picker;
 mod status;
+mod streaming;
 mod timeline;
 
 use crate::chat::app::ChatApp;
@@ -55,17 +56,36 @@ pub fn render_frame(frame: &mut Frame, app: &mut ChatApp, tick_ms: u64) {
     let bg_block = Block::default().style(theme.timeline_bg);
     frame.render_widget(bg_block, area);
 
+    let streaming = app.is_streaming();
+    // When streaming, allocate rows for the slime_run animation above input.
+    let streaming_height: u16 = if streaming { 8 } else { 0 };
+
     let [
         banner_area,
         timeline_area,
+        streaming_area,
         sep_top,
         input_area,
         sep_bot,
         status_area,
-    ] = vertical![==12, >=1, ==1, ==1, ==1, ==1].areas(area);
+    ] = vertical![
+        ==12,
+        >=1,
+        ==(streaming_height),
+        ==1,
+        ==1,
+        ==1,
+        ==1
+    ]
+    .areas(area);
 
     banner::render_welcome_banner(frame, banner_area, app, tick_ms, &theme);
     timeline::render_timeline(frame, timeline_area, app, &theme);
+
+    if streaming {
+        streaming::render_streaming_indicator(frame, streaming_area, tick_ms, &theme);
+    }
+
     status::render_separator(frame, sep_top, &theme);
     input::render_input(frame, input_area, app, &theme);
     status::render_separator(frame, sep_bot, &theme);

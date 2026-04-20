@@ -216,7 +216,7 @@ fn render_entry<'a>(entry: &TimelineEntry, theme: &ChatTheme, width: u16) -> Vec
             // Show a compact single-line summary with truncation.
             // Full thinking text is available via Ctrl+O detail toggle.
             let collapsed = entry.body.replace('\n', " ");
-            let max_chars = 60;
+            let max_chars = (width as usize / 3).max(30);
             let summary = if collapsed.chars().count() > max_chars {
                 let truncated: String = collapsed.chars().take(max_chars).collect();
                 format!("{truncated}…")
