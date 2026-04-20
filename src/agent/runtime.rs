@@ -108,6 +108,7 @@ fn run_turn(prompt: &str, provider: &dyn LlmProvider, event_tx: &Sender<AgentEve
         for prov_event in &chunk_rx {
             let agent_event = match prov_event {
                 ProviderEvent::TextDelta(text) => AgentEvent::TextDelta { text },
+                ProviderEvent::ThinkingDelta(text) => AgentEvent::ThinkingDelta { text },
                 ProviderEvent::ToolCallRequest(payload) => AgentEvent::ToolCallRequest { payload },
                 ProviderEvent::TurnComplete => {
                     got_terminal = true;

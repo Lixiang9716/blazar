@@ -3,7 +3,7 @@ use crate::agent::runtime::AgentRuntime;
 use crate::agent::state::{AgentRuntimeState, TurnState};
 
 use crate::chat::input::InputAction;
-use crate::chat::model::{Author, ChatMessage, TimelineEntry};
+use crate::chat::model::{Author, ChatMessage, EntryKind, TimelineEntry};
 use crate::chat::picker::{ModalPicker, PickerItem};
 use crate::chat::theme::{ChatTheme, ThemeStyleSheet};
 use crate::provider::LlmProvider;
@@ -175,12 +175,31 @@ impl ChatApp {
 
             match &event {
                 AgentEvent::TurnStarted { .. } => {
-                    // Push a placeholder response entry for streaming
-                    self.timeline.push(TimelineEntry::response(""));
+                    self.scroll_offset = u16::MAX;
+                }
+                AgentEvent::ThinkingDelta { text } => {
+                    // Append to a thinking entry; create one if the last entry isn't thinking
+                    let needs_new = self
+                        .timeline
+                        .last()
+                        .is_none_or(|e| e.kind != EntryKind::Thinking);
+                    if needs_new {
+                        self.timeline.push(TimelineEntry::thinking(""));
+                    }
+                    if let Some(last) = self.timeline.last_mut() {
+                        last.body.push_str(text);
+                    }
                     self.scroll_offset = u16::MAX;
                 }
                 AgentEvent::TextDelta { text } => {
-                    // Append text to the last timeline entry (the streaming response)
+                    // Append to a response entry; create one if last is thinking or missing
+                    let needs_new = self
+                        .timeline
+                        .last()
+                        .is_none_or(|e| e.kind == EntryKind::Thinking);
+                    if needs_new {
+                        self.timeline.push(TimelineEntry::response(""));
+                    }
                     if let Some(last) = self.timeline.last_mut() {
                         last.body.push_str(text);
                     }

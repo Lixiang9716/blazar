@@ -8,6 +8,8 @@ use std::sync::mpsc::Sender;
 pub enum ProviderEvent {
     /// A chunk of generated text.
     TextDelta(String),
+    /// A chunk of chain-of-thought reasoning (thinking mode).
+    ThinkingDelta(String),
     /// The model requests tool/function calls (JSON-serialized `Vec<ToolCall>`).
     ToolCallRequest(String),
     /// The provider finished generating.

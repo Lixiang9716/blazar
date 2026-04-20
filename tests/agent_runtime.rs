@@ -16,6 +16,7 @@ fn echo_provider_streams_full_response() {
     for event in rx {
         match event {
             ProviderEvent::TextDelta(chunk) => text.push_str(&chunk),
+            ProviderEvent::ThinkingDelta(_) => {}
             ProviderEvent::TurnComplete => {
                 completed = true;
                 break;

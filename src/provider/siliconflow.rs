@@ -391,11 +391,11 @@ impl SiliconFlowClient {
             };
 
             for choice in &chunk.choices {
-                // Emit reasoning content (thinking mode)
+                // Emit reasoning content (thinking mode) as a separate event
                 if let Some(ref reasoning) = choice.delta.reasoning_content
                     && !reasoning.is_empty()
                     && tx
-                        .send(ProviderEvent::TextDelta(reasoning.clone()))
+                        .send(ProviderEvent::ThinkingDelta(reasoning.clone()))
                         .is_err()
                 {
                     return Ok(());

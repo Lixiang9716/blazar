@@ -48,6 +48,10 @@ impl AgentRuntimeState {
                 self.streaming_text.push_str(text);
                 false
             }
+            AgentEvent::ThinkingDelta { .. } => {
+                // Thinking deltas don't accumulate in state — only in timeline.
+                false
+            }
             AgentEvent::ToolCallRequest { .. } => {
                 // Tool calls are logged but don't change turn state yet.
                 false

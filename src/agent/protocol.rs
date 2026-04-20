@@ -15,6 +15,8 @@ pub enum AgentEvent {
     TurnStarted { turn_id: String },
     /// A chunk of assistant text was generated (streaming).
     TextDelta { text: String },
+    /// A chunk of chain-of-thought reasoning (thinking mode).
+    ThinkingDelta { text: String },
     /// The model requests tool/function calls (JSON-serialized).
     ToolCallRequest { payload: String },
     /// The current turn completed successfully.
