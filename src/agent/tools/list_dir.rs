@@ -78,7 +78,7 @@ impl Tool for ListDirTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "list_dir".into(),
-            description: "List workspace files and directories up to two levels deep.".into(),
+            description: "List files and directories in the workspace up to 2 levels deep. Defaults to workspace root. Use to explore project structure before reading or writing files.".into(),
             parameters: json!({
                 "type": "object",
                 "properties": {

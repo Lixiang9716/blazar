@@ -19,7 +19,7 @@ impl Tool for ReadFileTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "read_file".into(),
-            description: "Read a UTF-8 file from the workspace.".into(),
+            description: "Read a UTF-8 text file from the workspace. Path is relative to workspace root (e.g. \"src/main.rs\"). Returns the full file content.".into(),
             parameters: json!({
                 "type": "object",
                 "properties": {

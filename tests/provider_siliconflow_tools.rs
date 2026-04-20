@@ -20,6 +20,7 @@ fn build_request_groups_tool_only_multi_call_turns() {
         enable_thinking: None,
         thinking_budget: None,
         system_prompt: Some("system".into()),
+        system_prompt_file: None,
     });
 
     let request = provider.build_request_for_test(
@@ -91,6 +92,7 @@ fn build_request_preserves_assistant_text_on_tool_turn() {
         enable_thinking: None,
         thinking_budget: None,
         system_prompt: Some("system".into()),
+        system_prompt_file: None,
     });
 
     let request = provider.build_request_for_test(

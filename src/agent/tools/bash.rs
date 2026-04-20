@@ -116,7 +116,7 @@ where
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "bash".into(),
-            description: "Run a shell command in the workspace.".into(),
+            description: "Run a shell command in the workspace directory and return its stdout/stderr. Use for compiling, testing, running scripts, git operations, etc. Chain commands with && for efficiency.".into(),
             parameters: json!({
                 "type": "object",
                 "properties": {

@@ -43,7 +43,7 @@ impl Tool for WriteFileTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "write_file".into(),
-            description: "Write a UTF-8 file inside the workspace.".into(),
+            description: "Create or overwrite a UTF-8 file inside the workspace. Provide the complete file content — this is a full-file write, not a patch. Parent directories are created automatically. Path is relative to workspace root.".into(),
             parameters: json!({
                 "type": "object",
                 "properties": {

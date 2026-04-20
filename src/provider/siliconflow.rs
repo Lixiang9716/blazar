@@ -33,9 +33,13 @@ pub struct SiliconFlowConfig {
     /// Max tokens for chain-of-thought output (128..=32768).
     #[serde(default)]
     pub thinking_budget: Option<u32>,
-    /// System prompt prepended to every conversation.
+    /// Inline system prompt prepended to every conversation.
+    /// If both `system_prompt` and `system_prompt_file` are set, the file wins.
     #[serde(default)]
     pub system_prompt: Option<String>,
+    /// Path to a markdown file containing the system prompt (relative to repo root).
+    #[serde(default)]
+    pub system_prompt_file: Option<String>,
 }
 
 fn default_base_url() -> String {
@@ -53,11 +57,29 @@ fn default_temperature() -> f32 {
 
 impl SiliconFlowConfig {
     /// Load from `config/provider.json` relative to `repo_root`.
+    ///
+    /// If `system_prompt_file` is set, the file content replaces `system_prompt`.
     pub fn load(repo_root: &str) -> Result<Self, String> {
-        let path = std::path::Path::new(repo_root).join("config/provider.json");
+        let root = std::path::Path::new(repo_root);
+        let path = root.join("config/provider.json");
         let data = std::fs::read_to_string(&path)
             .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
-        serde_json::from_str(&data).map_err(|e| format!("invalid provider config: {e}"))
+        let mut cfg: Self =
+            serde_json::from_str(&data).map_err(|e| format!("invalid provider config: {e}"))?;
+
+        // Load system prompt from file if specified.
+        if let Some(ref file_path) = cfg.system_prompt_file {
+            let prompt_path = root.join(file_path);
+            let content = std::fs::read_to_string(&prompt_path).map_err(|e| {
+                format!(
+                    "cannot read system_prompt_file {}: {e}",
+                    prompt_path.display()
+                )
+            })?;
+            cfg.system_prompt = Some(content);
+        }
+
+        Ok(cfg)
     }
 }
 
