@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -240,6 +241,8 @@ fn run_turn(
     }];
     let tool_specs = tools.specs();
     let mut tool_iterations = 0usize;
+    // Track (tool_name, raw_args) → consecutive failure count for duplicate detection.
+    let mut consecutive_failures: HashMap<(String, String), usize> = HashMap::new();
 
     loop {
         if cancel_flag.load(Ordering::SeqCst) {
@@ -291,15 +294,42 @@ fn run_turn(
                     });
 
                     let cleaned_args = strip_thinking_tags(&pending.arguments);
-                    let result = match serde_json::from_str::<Value>(&cleaned_args) {
-                        Ok(args) => execute_tool_call(tools, &pending.name, args),
+                    let result = match parse_or_repair_json(&cleaned_args) {
+                        Ok(args) => {
+                            // Successful parse — clear any tracked failure for this tool.
+                            consecutive_failures.remove(&(
+                                pending.name.clone(),
+                                pending.arguments.clone(),
+                            ));
+                            execute_tool_call(tools, &pending.name, args)
+                        }
                         Err(error) => {
+                            let fail_key =
+                                (pending.name.clone(), pending.arguments.clone());
+                            let count =
+                                consecutive_failures.entry(fail_key).or_insert(0);
+                            *count += 1;
+
                             warn!(
                                 "runtime: invalid tool arguments for {}: {error}\n  raw: {}",
                                 pending.name,
                                 preview_text(&pending.arguments, 200)
                             );
-                            ToolResult::failure(format!("invalid tool arguments: {error}"))
+
+                            if *count >= 2 {
+                                ToolResult::failure(
+                                    "REPEATED ERROR: you sent identical malformed arguments. \
+                                     Please change approach: use single quotes for strings \
+                                     inside code, or escape double quotes with backslash (\\\")"
+                                        .to_string(),
+                                )
+                            } else {
+                                ToolResult::failure(format!(
+                                    "invalid tool arguments: JSON parse error. \
+                                     Ensure double quotes inside string values are \
+                                     escaped with backslash (\\\"): {error}"
+                                ))
+                            }
                         }
                     };
 
@@ -431,6 +461,92 @@ fn strip_thinking_tags(raw: &str) -> String {
     }
 
     s
+}
+
+/// Try standard JSON parse first. On failure, attempt targeted repair of
+/// unescaped interior quotes (common with Qwen3 models that embed code
+/// containing `"` inside JSON string values).
+fn parse_or_repair_json(raw: &str) -> Result<Value, serde_json::Error> {
+    let first_try = serde_json::from_str::<Value>(raw);
+    if first_try.is_ok() {
+        return first_try;
+    }
+
+    // Attempt iterative repair — escape the likely-problematic quote
+    // near each successive parse-error position.
+    if let Some(repaired) = repair_json_arguments(raw) {
+        match serde_json::from_str::<Value>(&repaired) {
+            Ok(val) => {
+                warn!(
+                    "runtime: repaired malformed JSON arguments\n  before: {}\n  after:  {}",
+                    preview_text(raw, 200),
+                    preview_text(&repaired, 200),
+                );
+                return Ok(val);
+            }
+            Err(_) => {} // repair didn't produce valid JSON either
+        }
+    }
+
+    // Return the original error for a meaningful message.
+    first_try
+}
+
+/// Iterative targeted repair: find the unescaped `"` just before each
+/// parse-error column, escape it, and retry.  Stops after `MAX_REPAIRS`
+/// successful individual fixes or when no more fixable quotes are found.
+fn repair_json_arguments(raw: &str) -> Option<String> {
+    const MAX_REPAIRS: usize = 8;
+    let mut s = raw.to_string();
+
+    for _ in 0..MAX_REPAIRS {
+        let err = match serde_json::from_str::<Value>(&s) {
+            Ok(_) => return Some(s),
+            Err(e) => e,
+        };
+
+        // serde_json reports 1-based column; convert to 0-based byte index.
+        let col = err.column().saturating_sub(1);
+        if col == 0 {
+            return None;
+        }
+
+        let bytes = s.as_bytes();
+        let search_end = col.min(bytes.len());
+
+        // Walk backward to find the last unescaped `"` before the error.
+        let mut found = None;
+        let mut i = search_end;
+        while i > 0 {
+            i -= 1;
+            if bytes[i] == b'"' {
+                // Count preceding backslashes to determine parity.
+                let mut bs = 0usize;
+                let mut j = i;
+                while j > 0 && bytes[j - 1] == b'\\' {
+                    bs += 1;
+                    j -= 1;
+                }
+                if bs % 2 == 0 {
+                    // This `"` is NOT escaped — candidate for repair.
+                    found = Some(i);
+                    break;
+                }
+            }
+        }
+
+        if let Some(pos) = found {
+            s.insert(pos, '\\');
+        } else {
+            return None; // nothing left to fix
+        }
+    }
+
+    // Final validation after all repairs.
+    match serde_json::from_str::<Value>(&s) {
+        Ok(_) => Some(s),
+        Err(_) => None,
+    }
 }
 
 /// Safe UTF-8 text preview for logging.
@@ -985,5 +1101,58 @@ mod tests {
         let text = "你好世界hello";
         assert_eq!(preview_text(text, 2), "你好");
         assert_eq!(preview_text(text, 100), text);
+    }
+
+    // ---- repair_json_arguments tests ----
+
+    #[test]
+    fn repair_fixes_unescaped_quotes_in_print() {
+        // The exact pattern Qwen3-8B produces.
+        let raw = r#"{"path": "hello.py", "content": "print("hello world!\")"}"#;
+        let repaired = repair_json_arguments(raw).expect("should repair");
+        let val: Value = serde_json::from_str(&repaired).expect("repaired should be valid JSON");
+        assert_eq!(val["content"], "print(\"hello world!\")");
+    }
+
+    #[test]
+    fn repair_returns_none_for_total_garbage() {
+        assert!(repair_json_arguments("not json at all").is_none());
+    }
+
+    #[test]
+    fn repair_returns_valid_json_unchanged() {
+        let raw = r#"{"path": "a.py", "content": "x = 1"}"#;
+        let repaired = repair_json_arguments(raw).expect("already valid");
+        assert_eq!(repaired, raw);
+    }
+
+    #[test]
+    fn repair_fixes_multiple_unescaped_quotes() {
+        // Code with two unescaped quote pairs.
+        let raw = r#"{"content": "say("hello") + say("world")"}"#;
+        let repaired = repair_json_arguments(raw).expect("should repair");
+        let val: Value = serde_json::from_str(&repaired).expect("valid JSON");
+        assert!(val["content"].as_str().unwrap().contains("hello"));
+        assert!(val["content"].as_str().unwrap().contains("world"));
+    }
+
+    #[test]
+    fn parse_or_repair_succeeds_on_valid_json() {
+        let raw = r#"{"command": "ls"}"#;
+        let val = parse_or_repair_json(raw).expect("should parse");
+        assert_eq!(val["command"], "ls");
+    }
+
+    #[test]
+    fn parse_or_repair_recovers_from_unescaped_quotes() {
+        let raw = r#"{"path": "hello.py", "content": "print("hello world!\")"}"#;
+        let val = parse_or_repair_json(raw).expect("should recover via repair");
+        assert_eq!(val["path"], "hello.py");
+    }
+
+    #[test]
+    fn parse_or_repair_returns_error_for_garbage() {
+        let result = parse_or_repair_json("total garbage");
+        assert!(result.is_err());
     }
 }
