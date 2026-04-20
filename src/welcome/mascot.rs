@@ -57,12 +57,8 @@ fn slime_idle_animation() -> &'static SpriteAnimation {
 /// Render the slime_run animation for the streaming indicator.
 pub fn render_slime_run_lines(now_ms: u64) -> Vec<Line<'static>> {
     let animation = slime_run_animation();
-    let frame_interval_ms = 1000 / 10; // 10 FPS for run animation
-    let frame_index = if frame_interval_ms > 0 {
-        ((now_ms / frame_interval_ms) % animation.len() as u64) as usize
-    } else {
-        0
-    };
+    let frame_interval_ms: u64 = 100; // 10 FPS
+    let frame_index = ((now_ms / frame_interval_ms) % animation.len() as u64) as usize;
     animation.frame_by_index(frame_index).to_styled_lines()
 }
 
