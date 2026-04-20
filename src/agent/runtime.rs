@@ -290,9 +290,15 @@ fn run_turn(
                         arguments: pending.arguments.clone(),
                     });
 
-                    let result = match serde_json::from_str::<Value>(&pending.arguments) {
+                    let cleaned_args = strip_thinking_tags(&pending.arguments);
+                    let result = match serde_json::from_str::<Value>(&cleaned_args) {
                         Ok(args) => execute_tool_call(tools, &pending.name, args),
                         Err(error) => {
+                            warn!(
+                                "runtime: invalid tool arguments for {}: {error}\n  raw: {}",
+                                pending.name,
+                                preview_text(&pending.arguments, 200)
+                            );
                             ToolResult::failure(format!("invalid tool arguments: {error}"))
                         }
                     };
@@ -398,6 +404,41 @@ fn stream_provider_pass(
     });
 
     pass
+}
+
+/// Strip `<think>...</think>` reasoning blocks that some models (e.g. Qwen3)
+/// may embed in tool call arguments. Falls back to the original string if no
+/// tags are found. Also attempts to extract a JSON substring if the result
+/// still doesn't start with `{` or `[`.
+fn strip_thinking_tags(raw: &str) -> String {
+    let mut s = raw.to_string();
+
+    // Remove <think>...</think> blocks (greedy across lines).
+    if let Some(start) = s.find("<think>")
+        && let Some(end) = s.find("</think>")
+    {
+        let tag_end = end + "</think>".len();
+        s = format!("{}{}", &s[..start], s[tag_end..].trim_start());
+    }
+
+    // If the result still doesn't look like JSON, try to find the first `{`.
+    let trimmed = s.trim();
+    if !trimmed.starts_with('{')
+        && !trimmed.starts_with('[')
+        && let Some(idx) = trimmed.find('{')
+    {
+        return trimmed[idx..].to_string();
+    }
+
+    s
+}
+
+/// Safe UTF-8 text preview for logging.
+fn preview_text(text: &str, max_chars: usize) -> &str {
+    match text.char_indices().nth(max_chars) {
+        Some((byte_idx, _)) => &text[..byte_idx],
+        None => text,
+    }
 }
 
 #[cfg(test)]
@@ -913,5 +954,36 @@ mod tests {
             .iter()
             .any(|event| matches!(event, AgentEvent::TextDelta { text } if text == "partial"));
         assert!(has_text, "should relay text even without terminal event");
+    }
+
+    #[test]
+    fn strip_thinking_tags_removes_think_block() {
+        let raw = "<think>\nreasoning here\n</think>\n{\"path\": \"hello.py\"}";
+        assert_eq!(strip_thinking_tags(raw), "{\"path\": \"hello.py\"}");
+    }
+
+    #[test]
+    fn strip_thinking_tags_preserves_clean_json() {
+        let raw = "{\"command\": \"ls -la\"}";
+        assert_eq!(strip_thinking_tags(raw), raw);
+    }
+
+    #[test]
+    fn strip_thinking_tags_extracts_json_after_garbage() {
+        let raw = "some text before {\"key\": \"val\"}";
+        assert_eq!(strip_thinking_tags(raw), "{\"key\": \"val\"}");
+    }
+
+    #[test]
+    fn strip_thinking_tags_handles_empty_think_block() {
+        let raw = "<think></think>{\"a\": 1}";
+        assert_eq!(strip_thinking_tags(raw), "{\"a\": 1}");
+    }
+
+    #[test]
+    fn preview_text_truncates_at_char_boundary() {
+        let text = "你好世界hello";
+        assert_eq!(preview_text(text, 2), "你好");
+        assert_eq!(preview_text(text, 100), text);
     }
 }
