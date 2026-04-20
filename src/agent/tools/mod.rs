@@ -1,3 +1,4 @@
+pub mod bash;
 pub mod list_dir;
 pub mod read_file;
 pub mod write_file;
@@ -129,15 +130,22 @@ fn canonicalize_existing_ancestor(path: &Path) -> Result<PathBuf, String> {
         }
     }
 
-    Err(format!("cannot resolve {}: no existing ancestor", path.display()))
+    Err(format!(
+        "cannot resolve {}: no existing ancestor",
+        path.display()
+    ))
 }
 
 pub fn resolve_workspace_path(workspace_root: &Path, requested: &str) -> Result<PathBuf, String> {
     validate_workspace_relative_path(requested)?;
 
     let canonical_root = canonical_workspace_root(workspace_root)?;
-    let canonical_path = fs::canonicalize(workspace_root.join(requested))
-        .map_err(|error| format!("cannot resolve {}: {error}", workspace_root.join(requested).display()))?;
+    let canonical_path = fs::canonicalize(workspace_root.join(requested)).map_err(|error| {
+        format!(
+            "cannot resolve {}: {error}",
+            workspace_root.join(requested).display()
+        )
+    })?;
     ensure_path_is_within_workspace(&canonical_path, &canonical_root)?;
     Ok(canonical_path)
 }

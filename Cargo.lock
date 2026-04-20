@@ -230,6 +230,7 @@ dependencies = [
  "image",
  "insta",
  "log",
+ "nix",
  "opaline",
  "proptest",
  "ratatui-core",

@@ -1,6 +1,4 @@
-use super::{
-    Tool, ToolResult, ToolSpec, canonical_workspace_root, resolve_workspace_path,
-};
+use super::{Tool, ToolResult, ToolSpec, canonical_workspace_root, resolve_workspace_path};
 use serde_json::{Value, json};
 use std::fs;
 use std::path::{Path, PathBuf};

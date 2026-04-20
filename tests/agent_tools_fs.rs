@@ -174,7 +174,11 @@ fn file_tools_reject_symlink_escapes() {
     fs::create_dir_all(&outside).unwrap();
     fs::write(outside.join("secret.txt"), "secret").unwrap();
     unix_fs::symlink(&outside, workspace.join("escape-dir")).unwrap();
-    unix_fs::symlink(outside.join("secret.txt"), workspace.join("escape-file.txt")).unwrap();
+    unix_fs::symlink(
+        outside.join("secret.txt"),
+        workspace.join("escape-file.txt"),
+    )
+    .unwrap();
 
     let read_tool = ReadFileTool::new(workspace.clone());
     let write_tool = WriteFileTool::new(workspace.clone());
@@ -206,7 +210,11 @@ fn write_file_rejects_broken_symlink_target() {
         .join("test-workspaces")
         .join(OsString::from(format!("outside-broken-{suffix}")));
     fs::create_dir_all(&outside).unwrap();
-    unix_fs::symlink(outside.join("missing.txt"), workspace.join("broken-link.txt")).unwrap();
+    unix_fs::symlink(
+        outside.join("missing.txt"),
+        workspace.join("broken-link.txt"),
+    )
+    .unwrap();
 
     let tool = WriteFileTool::new(workspace.clone());
     let result = tool.execute(json!({
@@ -223,7 +231,11 @@ fn write_file_rejects_broken_symlink_target() {
 fn list_dir_fails_when_traversal_hits_a_broken_symlink() {
     let workspace = fresh_workspace("list-broken-symlink");
     fs::create_dir_all(workspace.join("dir")).unwrap();
-    unix_fs::symlink(workspace.join("missing-target"), workspace.join("dir/broken-link")).unwrap();
+    unix_fs::symlink(
+        workspace.join("missing-target"),
+        workspace.join("dir/broken-link"),
+    )
+    .unwrap();
 
     let tool = ListDirTool::new(workspace.clone());
     let result = tool.execute(json!({ "path": "dir" }));

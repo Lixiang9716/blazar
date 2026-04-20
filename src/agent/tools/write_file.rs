@@ -38,10 +38,11 @@ impl Tool for WriteFileTool {
             return ToolResult::failure("write_file requires string content");
         };
 
-        let (full_path, canonical_root) = match resolve_workspace_write_path(&self.workspace_root, path) {
-            Ok(values) => values,
-            Err(error) => return ToolResult::failure(error),
-        };
+        let (full_path, canonical_root) =
+            match resolve_workspace_write_path(&self.workspace_root, path) {
+                Ok(values) => values,
+                Err(error) => return ToolResult::failure(error),
+            };
         if let Some(parent) = full_path.parent()
             && let Err(error) = fs::create_dir_all(parent)
         {
