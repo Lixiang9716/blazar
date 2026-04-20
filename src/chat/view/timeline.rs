@@ -102,18 +102,19 @@ fn render_entry<'a>(entry: &TimelineEntry, theme: &ChatTheme, width: u16) -> Vec
                 } else {
                     // Assistant messages: render markdown via ratskin (termimad backend)
                     // Normalize soft breaks first — termimad treats every \n as hard break.
-                    let normalized = normalize_markdown_paragraphs(&entry.body);
-                    let rat_skin = ratskin::RatSkin::default();
-                    let text_width = width.saturating_sub(INDENT_WIDTH);
-                    let md_lines =
-                        rat_skin.parse(ratskin::RatSkin::parse_text(&normalized), text_width);
-
-                    if md_lines.is_empty() {
+                    let body = entry.body.trim();
+                    if body.is_empty() {
                         lines.push(Line::from(vec![
                             Span::raw(MARGIN),
                             Span::styled("● ", marker_style),
                         ]));
                     } else {
+                        let normalized = normalize_markdown_paragraphs(body);
+                        let rat_skin = ratskin::RatSkin::default();
+                        let text_width = width.saturating_sub(INDENT_WIDTH);
+                        let md_lines =
+                            rat_skin.parse(ratskin::RatSkin::parse_text(&normalized), text_width);
+
                         for (i, md_line) in md_lines.into_iter().enumerate() {
                             let prefix = if i == 0 {
                                 vec![Span::raw(MARGIN), Span::styled("● ", marker_style)]
