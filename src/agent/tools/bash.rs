@@ -4,11 +4,11 @@ use nix::libc;
 use nix::sys::signal::{Signal, killpg};
 use nix::unistd::{Pid, setsid};
 use serde_json::{Value, json};
-use std::io::Read;
+use std::io::{ErrorKind, Read};
+use std::os::fd::AsRawFd;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
-use std::sync::{Arc, Mutex, mpsc};
+use std::process::{Child, ChildStdout, Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -196,15 +196,14 @@ impl ProcessRunner for SystemBashRunner {
             let _ = child.wait();
             return ToolResult::failure("cannot capture shell output");
         };
+        let mut stdout = stdout;
+        if let Err(error) = set_nonblocking(stdout.as_raw_fd()) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return ToolResult::failure(format!("cannot configure shell output: {error}"));
+        }
 
-        let (output_state, output_rx) = spawn_output_reader(stdout);
-        wait_for_completion(
-            &mut child,
-            process_group,
-            request.timeout,
-            output_state,
-            output_rx,
-        )
+        wait_for_completion(&mut child, process_group, request.timeout, &mut stdout)
     }
 }
 
@@ -212,16 +211,34 @@ fn wait_for_completion(
     child: &mut Child,
     process_group: Pid,
     timeout: Duration,
-    output_state: SharedOutputState,
-    output_rx: mpsc::Receiver<std::io::Result<()>>,
+    stdout: &mut ChildStdout,
 ) -> ToolResult {
     let deadline = Instant::now() + timeout;
+    let mut output_state = OutputState::default();
 
     loop {
+        if let Err(error) = read_available_output(stdout, &mut output_state) {
+            let (mut output, output_truncated) = snapshot_output(&output_state);
+            if !output.is_empty() {
+                output.push('\n');
+            }
+            output.push_str(&format!("cannot read shell output: {error}"));
+            return ToolResult {
+                output,
+                exit_code: None,
+                is_error: true,
+                output_truncated,
+            };
+        }
+
         match child.try_wait() {
             Ok(Some(status)) => {
-                let (output, output_truncated) =
-                    collect_output(&output_state, &output_rx, OUTPUT_DRAIN_TIMEOUT);
+                let _ = drain_output_until_idle(
+                    stdout,
+                    &mut output_state,
+                    Instant::now() + OUTPUT_DRAIN_TIMEOUT,
+                );
+                let (output, output_truncated) = snapshot_output(&output_state);
                 return ToolResult {
                     output,
                     exit_code: status.code(),
@@ -233,8 +250,12 @@ fn wait_for_completion(
             Ok(None) => {
                 terminate_process_group(child, process_group);
                 let _ = child.wait();
-                let (mut output, output_truncated) =
-                    collect_output(&output_state, &output_rx, OUTPUT_DRAIN_TIMEOUT);
+                let _ = drain_output_until_idle(
+                    stdout,
+                    &mut output_state,
+                    Instant::now() + OUTPUT_DRAIN_TIMEOUT,
+                );
+                let (mut output, output_truncated) = snapshot_output(&output_state);
                 if !output.is_empty() {
                     output.push('\n');
                 }
@@ -249,8 +270,12 @@ fn wait_for_completion(
             Err(error) => {
                 let _ = child.kill();
                 let _ = child.wait();
-                let (mut output, output_truncated) =
-                    collect_output(&output_state, &output_rx, OUTPUT_DRAIN_TIMEOUT);
+                let _ = drain_output_until_idle(
+                    stdout,
+                    &mut output_state,
+                    Instant::now() + OUTPUT_DRAIN_TIMEOUT,
+                );
+                let (mut output, output_truncated) = snapshot_output(&output_state);
                 if !output.is_empty() {
                     output.push('\n');
                 }
@@ -286,51 +311,7 @@ struct OutputState {
     truncated: bool,
 }
 
-type SharedOutputState = Arc<Mutex<OutputState>>;
-
-fn spawn_output_reader<R: Read + Send + 'static>(
-    reader: R,
-) -> (SharedOutputState, mpsc::Receiver<std::io::Result<()>>) {
-    let state = Arc::new(Mutex::new(OutputState::default()));
-    let reader_state = Arc::clone(&state);
-    let (tx, rx) = mpsc::channel();
-
-    thread::spawn(move || {
-        let result = read_capped(reader, &reader_state);
-        let _ = tx.send(result);
-    });
-
-    (state, rx)
-}
-
-fn collect_output(
-    state: &SharedOutputState,
-    output_rx: &mpsc::Receiver<std::io::Result<()>>,
-    drain_timeout: Duration,
-) -> (String, bool) {
-    match output_rx.recv_timeout(drain_timeout) {
-        Ok(Ok(())) | Err(mpsc::RecvTimeoutError::Timeout) => snapshot_output(state),
-        Ok(Err(error)) => {
-            let (mut output, truncated) = snapshot_output(state);
-            if !output.is_empty() {
-                output.push('\n');
-            }
-            output.push_str(&format!("cannot read shell output: {error}"));
-            (output, truncated)
-        }
-        Err(mpsc::RecvTimeoutError::Disconnected) => {
-            let (mut output, truncated) = snapshot_output(state);
-            if !output.is_empty() {
-                output.push('\n');
-            }
-            output.push_str("cannot read shell output: reader thread disconnected");
-            (output, truncated)
-        }
-    }
-}
-
-fn snapshot_output(state: &SharedOutputState) -> (String, bool) {
-    let state = state.lock().unwrap();
+fn snapshot_output(state: &OutputState) -> (String, bool) {
     let mut text = String::from_utf8_lossy(&state.bytes).into_owned();
     if state.truncated {
         text.push_str(OUTPUT_TRUNCATED_MARKER);
@@ -339,25 +320,54 @@ fn snapshot_output(state: &SharedOutputState) -> (String, bool) {
     (text, state.truncated)
 }
 
-fn read_capped<R: Read>(mut reader: R, state: &SharedOutputState) -> std::io::Result<()> {
+fn drain_output_until_idle(
+    stdout: &mut ChildStdout,
+    state: &mut OutputState,
+    deadline: Instant,
+) -> std::io::Result<()> {
+    loop {
+        if read_available_output(stdout, state)? {
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            return Ok(());
+        }
+        thread::sleep(TERM_POLL_INTERVAL);
+    }
+}
+
+fn read_available_output(
+    stdout: &mut ChildStdout,
+    state: &mut OutputState,
+) -> std::io::Result<bool> {
     let mut buf = [0u8; 1024];
 
     loop {
-        let read = reader.read(&mut buf)?;
-        if read == 0 {
-            break;
-        }
-
-        let mut state = state.lock().unwrap();
-        let remaining = MAX_OUTPUT_BYTES.saturating_sub(state.bytes.len());
-        if remaining > 0 {
-            let keep = remaining.min(read);
-            state.bytes.extend_from_slice(&buf[..keep]);
-        }
-        if read > remaining {
-            state.truncated = true;
+        match stdout.read(&mut buf) {
+            Ok(0) => return Ok(true),
+            Ok(read) => {
+                let remaining = MAX_OUTPUT_BYTES.saturating_sub(state.bytes.len());
+                if remaining > 0 {
+                    let keep = remaining.min(read);
+                    state.bytes.extend_from_slice(&buf[..keep]);
+                }
+                if read > remaining {
+                    state.truncated = true;
+                }
+            }
+            Err(error) if error.kind() == ErrorKind::WouldBlock => return Ok(false),
+            Err(error) => return Err(error),
         }
     }
+}
 
+fn set_nonblocking(fd: std::os::fd::RawFd) -> std::io::Result<()> {
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+    if flags < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    if unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
     Ok(())
 }

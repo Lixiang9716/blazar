@@ -3,12 +3,19 @@ use blazar::agent::tools::bash::{
     BashRequest, BashTool, MAX_OUTPUT_BYTES, ProcessRunner, ShellConfig, SystemBashRunner,
 };
 use serde_json::json;
+#[cfg(target_os = "linux")]
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 fn manifest_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+}
+
+#[cfg(target_os = "linux")]
+fn thread_count() -> usize {
+    fs::read_dir("/proc/self/task").unwrap().count()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -158,6 +165,24 @@ fn bash_tool_timeout_stays_bounded_when_descendant_escapes_process_group() {
         started.elapsed() < Duration::from_secs(3),
         "timeout took {:?}",
         started.elapsed()
+    );
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn bash_tool_timeout_does_not_leave_blocked_reader_thread() {
+    let before = thread_count();
+    let tool = BashTool::new(manifest_dir());
+    let result = tool.execute(json!({
+        "command": "setsid sh -c 'sleep 2' & sleep 2",
+        "timeout_secs": 1
+    }));
+
+    assert!(result.is_error);
+    assert!(
+        thread_count() <= before,
+        "thread count before={before} after={}",
+        thread_count()
     );
 }
 
