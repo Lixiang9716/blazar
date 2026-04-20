@@ -178,7 +178,6 @@ impl ChatApp {
                     self.scroll_offset = u16::MAX;
                 }
                 AgentEvent::ThinkingDelta { text } => {
-                    // Append to a thinking entry; create one if the last entry isn't thinking
                     let needs_new = self
                         .timeline
                         .last()
@@ -188,6 +187,8 @@ impl ChatApp {
                     }
                     if let Some(last) = self.timeline.last_mut() {
                         last.body.push_str(text);
+                        // Mirror into details so Ctrl+O can show full text
+                        last.details.push_str(text);
                     }
                     self.scroll_offset = u16::MAX;
                 }

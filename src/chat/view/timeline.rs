@@ -232,13 +232,21 @@ fn render_entry<'a>(entry: &TimelineEntry, theme: &ChatTheme, _width: u16) -> Ve
             }
         }
         EntryKind::Thinking => {
-            // Collapse newlines into spaces so thinking renders as a single
-            // wrapped paragraph instead of breaking at every SSE chunk boundary.
+            // Show a compact single-line summary with truncation.
+            // Full thinking text is available via Ctrl+O detail toggle.
             let collapsed = entry.body.replace('\n', " ");
+            let max_chars = 60;
+            let summary = if collapsed.chars().count() > max_chars {
+                let truncated: String = collapsed.chars().take(max_chars).collect();
+                format!("{truncated}…")
+            } else {
+                collapsed
+            };
             lines.push(Line::from(vec![
                 Span::raw(MARGIN),
                 Span::styled("● ", marker_style),
-                Span::styled(collapsed, theme.dim_text),
+                Span::styled("Thinking ", theme.dim_text),
+                Span::styled(summary, theme.dim_text),
             ]));
         }
         EntryKind::CodeBlock { language } => {
