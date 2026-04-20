@@ -3,7 +3,7 @@ use crate::agent::runtime::AgentRuntime;
 use crate::agent::state::{AgentRuntimeState, TurnState};
 
 use crate::chat::input::InputAction;
-use crate::chat::model::{Author, ChatMessage, EntryKind, TimelineEntry};
+use crate::chat::model::{Actor, Author, ChatMessage, EntryKind, TimelineEntry};
 use crate::chat::picker::{ModalPicker, PickerItem};
 use crate::chat::theme::{ChatTheme, ThemeStyleSheet};
 use crate::provider::LlmProvider;
@@ -192,11 +192,12 @@ impl ChatApp {
                     self.scroll_offset = u16::MAX;
                 }
                 AgentEvent::TextDelta { text } => {
-                    // Append to a response entry; create one if last is thinking or missing
-                    let needs_new = self
-                        .timeline
-                        .last()
-                        .is_none_or(|e| e.kind == EntryKind::Thinking);
+                    // Append to the current assistant response entry; create one if
+                    // the last entry is not an assistant Message (could be user msg,
+                    // thinking, tool_use, etc.)
+                    let needs_new = self.timeline.last().is_none_or(|e| {
+                        !(e.actor == Actor::Assistant && e.kind == EntryKind::Message)
+                    });
                     if needs_new {
                         self.timeline.push(TimelineEntry::response(""));
                     }
