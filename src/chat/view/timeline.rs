@@ -8,7 +8,7 @@ use ratatui_core::{
     terminal::Frame,
     text::{Line, Span},
 };
-use ratatui_widgets::paragraph::Paragraph;
+use ratatui_widgets::paragraph::{Paragraph, Wrap};
 use unicode_width::UnicodeWidthChar;
 
 /// Left margin for all timeline content (matches Claude Code's indentation).
@@ -49,7 +49,9 @@ pub(super) fn render_timeline(frame: &mut Frame, area: Rect, app: &ChatApp, them
         )));
     }
 
-    let paragraph = Paragraph::new(lines.clone()).style(theme.timeline_bg);
+    let paragraph = Paragraph::new(lines.clone())
+        .style(theme.timeline_bg)
+        .wrap(Wrap { trim: false });
 
     // Compute actual visual height accounting for line wrapping.
     let content_height: u16 = if content_width > 0 {
