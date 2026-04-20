@@ -5,7 +5,7 @@ use crate::agent::state::{AgentRuntimeState, TurnState};
 use crate::chat::input::InputAction;
 use crate::chat::model::{Actor, Author, ChatMessage, EntryKind, TimelineEntry};
 use crate::chat::picker::{ModalPicker, PickerItem};
-use crate::chat::theme::{ChatTheme, ThemeStyleSheet};
+use crate::chat::theme::ChatTheme;
 use crate::provider::LlmProvider;
 use crate::provider::echo::EchoProvider;
 use crate::provider::siliconflow::SiliconFlowConfig;
@@ -34,7 +34,6 @@ pub struct ChatApp {
     pub timeline_visible_height: Cell<u16>,
     theme_name: String,
     theme: ChatTheme,
-    markdown_stylesheet: ThemeStyleSheet,
     agent_runtime: AgentRuntime,
     agent_state: AgentRuntimeState,
 }
@@ -53,7 +52,6 @@ impl ChatApp {
         };
 
         let theme = crate::chat::theme::build_theme();
-        let markdown_stylesheet = ThemeStyleSheet::from_chat_theme(&theme);
 
         // Try SiliconFlow provider; fall back to EchoProvider.
         let provider: Box<dyn LlmProvider> = match SiliconFlowConfig::load(repo_path) {
@@ -85,7 +83,6 @@ impl ChatApp {
             timeline_visible_height: Cell::new(0),
             theme_name: crate::chat::theme::DEFAULT_THEME.to_owned(),
             theme,
-            markdown_stylesheet,
             agent_runtime: AgentRuntime::new(provider),
             agent_state: AgentRuntimeState::default(),
         }
@@ -153,13 +150,8 @@ impl ChatApp {
         &self.theme_name
     }
 
-    pub fn markdown_stylesheet(&self) -> &ThemeStyleSheet {
-        &self.markdown_stylesheet
-    }
-
     pub fn set_theme(&mut self, name: &str) {
         self.theme = crate::chat::theme::build_theme_by_name(name);
-        self.markdown_stylesheet = ThemeStyleSheet::from_chat_theme(&self.theme);
         self.theme_name = name.to_owned();
     }
 

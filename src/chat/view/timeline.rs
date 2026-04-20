@@ -1,6 +1,6 @@
 use crate::chat::app::ChatApp;
 use crate::chat::model::{Actor, EntryKind, TimelineEntry};
-use crate::chat::theme::{ChatTheme, ThemeStyleSheet};
+use crate::chat::theme::ChatTheme;
 use core::cmp;
 use ratatui_core::{
     layout::Rect,
@@ -100,44 +100,28 @@ fn render_entry<'a>(entry: &TimelineEntry, theme: &ChatTheme, width: u16) -> Vec
                         push_wrapped_lines(&mut lines, body_line, theme.bold_text, prefix, width);
                     }
                 } else {
-                    // Assistant messages: render markdown, then manually wrap
-                    let opts = tui_markdown::Options::new(ThemeStyleSheet::from_chat_theme(theme));
-                    let md_text = tui_markdown::from_str_with_options(&entry.body, &opts);
-                    for (i, md_line) in md_text.lines.into_iter().enumerate() {
-                        // Collect spans into plain text + take the dominant style
-                        let style = md_line.spans.first().map_or(theme.body_text, |s| s.style);
-                        let plain: String = md_line
-                            .spans
-                            .iter()
-                            .map(|s| {
-                                let content = s.content.as_ref();
-                                let trimmed = content.trim_start_matches('#');
-                                if trimmed.len() < content.len() {
-                                    trimmed.trim_start().to_owned()
-                                } else {
-                                    content.to_owned()
-                                }
-                            })
-                            .collect();
+                    // Assistant messages: render markdown via ratskin (termimad backend)
+                    let rat_skin = ratskin::RatSkin::default();
+                    let text_width = width.saturating_sub(INDENT_WIDTH);
+                    let md_lines =
+                        rat_skin.parse(ratskin::RatSkin::parse_text(&entry.body), text_width);
 
-                        if plain.trim().is_empty() {
-                            lines.push(Line::from(""));
-                            continue;
-                        }
-
-                        let prefix = if i == 0 {
-                            vec![Span::raw(MARGIN), Span::styled("● ", marker_style)]
-                        } else {
-                            vec![Span::raw(INDENT)]
-                        };
-                        push_wrapped_lines(&mut lines, &plain, style, prefix, width);
-                    }
-                    // Fallback if markdown produced nothing
-                    if lines.is_empty() {
+                    if md_lines.is_empty() {
                         lines.push(Line::from(vec![
                             Span::raw(MARGIN),
                             Span::styled("● ", marker_style),
                         ]));
+                    } else {
+                        for (i, md_line) in md_lines.into_iter().enumerate() {
+                            let prefix = if i == 0 {
+                                vec![Span::raw(MARGIN), Span::styled("● ", marker_style)]
+                            } else {
+                                vec![Span::raw(INDENT)]
+                            };
+                            let mut result_spans = prefix;
+                            result_spans.extend(md_line.spans);
+                            lines.push(Line::from(result_spans));
+                        }
                     }
                 }
             } else {

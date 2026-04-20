@@ -11,64 +11,6 @@ fn to_color(c: OpalineColor) -> Color {
     Color::Rgb(c.r, c.g, c.b)
 }
 
-/// Dynamic stylesheet for tui-markdown, derived from the current theme.
-#[derive(Clone, Debug)]
-pub struct ThemeStyleSheet {
-    heading_1: Style,
-    heading_2: Style,
-    heading_other: Style,
-    code: Style,
-    link: Style,
-    blockquote: Style,
-    heading_meta: Style,
-    metadata_block: Style,
-}
-
-impl ThemeStyleSheet {
-    pub fn from_chat_theme(theme: &ChatTheme) -> Self {
-        Self {
-            heading_1: theme.title_text.add_modifier(Modifier::UNDERLINED),
-            heading_2: theme.picker_title,
-            heading_other: theme.tool_target.add_modifier(Modifier::BOLD),
-            code: theme.code_block.bg(theme.code_bg),
-            link: theme.tool_target.add_modifier(Modifier::UNDERLINED),
-            blockquote: theme.dim_text,
-            heading_meta: theme.dim_text,
-            metadata_block: theme.tip_command,
-        }
-    }
-}
-
-impl tui_markdown::StyleSheet for ThemeStyleSheet {
-    fn heading(&self, level: u8) -> Style {
-        match level {
-            1 => self.heading_1,
-            2 => self.heading_2,
-            _ => self.heading_other,
-        }
-    }
-
-    fn code(&self) -> Style {
-        self.code
-    }
-
-    fn link(&self) -> Style {
-        self.link
-    }
-
-    fn blockquote(&self) -> Style {
-        self.blockquote
-    }
-
-    fn heading_meta(&self) -> Style {
-        self.heading_meta
-    }
-
-    fn metadata_block(&self) -> Style {
-        self.metadata_block
-    }
-}
-
 /// ChatTheme — rendering contract. Views use this, never opaline directly.
 #[derive(Clone)]
 pub struct ChatTheme {
@@ -99,7 +41,7 @@ pub struct ChatTheme {
     pub picker_desc: Style,
     pub spinner: Style,
     pub tip_command: Style,
-    /// Background color for code blocks (used by ThemeStyleSheet).
+    /// Background color for code blocks.
     pub code_bg: Color,
     /// Background color for overlays (picker backdrop etc.).
     pub backdrop_color: Color,
