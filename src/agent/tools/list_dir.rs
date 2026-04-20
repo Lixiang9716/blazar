@@ -24,7 +24,7 @@ impl ListDirTool {
         depth: usize,
         lines: &mut Vec<String>,
     ) -> Result<bool, String> {
-        if depth >= MAX_DEPTH {
+        if depth > MAX_DEPTH {
             return Ok(false);
         }
 
@@ -56,13 +56,15 @@ impl ListDirTool {
                 let rendered = format!("{prefix}{file_name}/");
                 lines.push(rendered.clone());
 
-                if Self::visit(
-                    &canonical_child_path,
-                    workspace_root,
-                    &rendered,
-                    depth + 1,
-                    lines,
-                )? {
+                if depth < MAX_DEPTH
+                    && Self::visit(
+                        &canonical_child_path,
+                        workspace_root,
+                        &rendered,
+                        depth + 1,
+                        lines,
+                    )?
+                {
                     return Ok(true);
                 }
             } else {

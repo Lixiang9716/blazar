@@ -92,8 +92,8 @@ fn list_dir_stops_after_two_levels() {
     assert!(!result.is_error);
     assert!(result.output.contains("a/"));
     assert!(result.output.contains("a/b/"));
-    assert!(!result.output.contains("a/b/inner.txt"));
-    assert!(!result.output.contains("a/b/c/"));
+    assert!(result.output.contains("a/b/inner.txt"));
+    assert!(result.output.contains("a/b/c/"));
     assert!(!result.output.contains("a/b/c/deep.txt"));
 }
 
@@ -191,6 +191,31 @@ fn file_tools_reject_symlink_escapes() {
     assert!(write.is_error);
     assert!(list.is_error);
     assert!(!outside.join("new.txt").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn write_file_rejects_broken_symlink_target() {
+    let workspace = fresh_workspace("write-broken-symlink");
+    let suffix = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let outside = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target")
+        .join("test-workspaces")
+        .join(OsString::from(format!("outside-broken-{suffix}")));
+    fs::create_dir_all(&outside).unwrap();
+    unix_fs::symlink(outside.join("missing.txt"), workspace.join("broken-link.txt")).unwrap();
+
+    let tool = WriteFileTool::new(workspace.clone());
+    let result = tool.execute(json!({
+        "path": "broken-link.txt",
+        "content": "escape"
+    }));
+
+    assert!(result.is_error);
+    assert!(!outside.join("missing.txt").exists());
 }
 
 #[cfg(unix)]

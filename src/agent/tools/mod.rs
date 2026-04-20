@@ -155,7 +155,14 @@ pub fn resolve_workspace_write_path(
     let canonical_parent = canonicalize_existing_ancestor(parent)?;
     ensure_path_is_within_workspace(&canonical_parent, &canonical_root)?;
 
-    if full_path.exists() {
+    if let Ok(metadata) = fs::symlink_metadata(&full_path) {
+        if metadata.file_type().is_symlink() {
+            return Err(format!(
+                "cannot write {}: target path is a symlink",
+                full_path.display()
+            ));
+        }
+
         let canonical_path = fs::canonicalize(&full_path)
             .map_err(|error| format!("cannot resolve {}: {error}", full_path.display()))?;
         ensure_path_is_within_workspace(&canonical_path, &canonical_root)?;
