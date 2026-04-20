@@ -263,7 +263,16 @@ fn run_turn(
                     });
                 }
 
-                for pending in pass.tool_calls {
+                let pending_calls = pass.tool_calls;
+                for pending in &pending_calls {
+                    messages.push(ProviderMessage::ToolCall {
+                        id: pending.call_id.clone(),
+                        name: pending.name.clone(),
+                        arguments: pending.arguments.clone(),
+                    });
+                }
+
+                for pending in pending_calls {
                     if cancel_flag.load(Ordering::SeqCst) {
                         let _ = event_tx.send(AgentEvent::TurnFailed {
                             error: "cancelled".to_string(),
@@ -294,11 +303,6 @@ fn run_turn(
                         is_error: result.is_error,
                     });
 
-                    messages.push(ProviderMessage::ToolCall {
-                        id: pending.call_id.clone(),
-                        name: pending.name.clone(),
-                        arguments: pending.arguments.clone(),
-                    });
                     messages.push(ProviderMessage::ToolResult {
                         tool_call_id: pending.call_id,
                         output: result.output,
@@ -308,7 +312,12 @@ fn run_turn(
                 }
             }
             TurnOutcome::Cancelled => return TurnOutcome::Cancelled,
-            TurnOutcome::TransientError(err) => return TurnOutcome::TransientError(err),
+            TurnOutcome::TransientError(err) => {
+                if tool_iterations > 0 {
+                    return TurnOutcome::FatalError(err);
+                }
+                return TurnOutcome::TransientError(err);
+            }
             TurnOutcome::FatalError(err) => return TurnOutcome::FatalError(err),
         }
     }
@@ -394,7 +403,10 @@ fn stream_provider_pass(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::tools::ToolSpec;
+    use crate::agent::tools::{Tool, ToolSpec};
+    use serde_json::json;
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicU32;
 
     fn empty_registry() -> ToolRegistry {
         ToolRegistry::new(PathBuf::from(env!("CARGO_MANIFEST_DIR")))
@@ -404,6 +416,29 @@ mod tests {
         vec![ProviderMessage::User {
             content: prompt.to_string(),
         }]
+    }
+
+    struct CountingTool {
+        calls: Arc<AtomicU32>,
+    }
+
+    impl Tool for CountingTool {
+        fn spec(&self) -> ToolSpec {
+            ToolSpec {
+                name: "count".into(),
+                description: "count executions".into(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": false
+                }),
+            }
+        }
+
+        fn execute(&self, _args: serde_json::Value) -> crate::agent::tools::ToolResult {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            crate::agent::tools::ToolResult::success("counted")
+        }
     }
 
     #[test]
@@ -724,6 +759,125 @@ mod tests {
             has_cancelled,
             "pre-cancelled flag should abort before first attempt"
         );
+    }
+
+    #[test]
+    fn retry_does_not_rerun_tools_after_transient_error() {
+        struct ToolThenTransientProvider {
+            stage: AtomicU32,
+        }
+
+        impl LlmProvider for ToolThenTransientProvider {
+            fn stream_turn(
+                &self,
+                messages: &[ProviderMessage],
+                _tools: &[ToolSpec],
+                tx: Sender<ProviderEvent>,
+            ) {
+                let has_tool_result = messages
+                    .iter()
+                    .any(|message| matches!(message, ProviderMessage::ToolResult { .. }));
+                let stage = self.stage.load(Ordering::SeqCst);
+
+                match (stage, has_tool_result) {
+                    (0, false) | (1, false) => {
+                        let _ = tx.send(ProviderEvent::ToolCall {
+                            call_id: "call-1".into(),
+                            name: "count".into(),
+                            arguments: "{}".into(),
+                        });
+                        let _ = tx.send(ProviderEvent::TurnComplete);
+                    }
+                    (0, true) => {
+                        self.stage.store(1, Ordering::SeqCst);
+                        let _ = tx.send(ProviderEvent::Error("connection timeout".into()));
+                    }
+                    (1, true) => {
+                        let _ = tx.send(ProviderEvent::TextDelta("done".into()));
+                        let _ = tx.send(ProviderEvent::TurnComplete);
+                    }
+                    _ => unreachable!("unexpected provider stage"),
+                }
+            }
+        }
+
+        let counter = Arc::new(AtomicU32::new(0));
+        let mut registry = empty_registry();
+        registry.register(Box::new(CountingTool {
+            calls: Arc::clone(&counter),
+        }));
+
+        let provider = ToolThenTransientProvider {
+            stage: AtomicU32::new(0),
+        };
+        let (event_tx, event_rx) = mpsc::channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+
+        run_turn_with_retry(
+            "turn-test",
+            "count once",
+            &provider,
+            &registry,
+            &event_tx,
+            &cancel,
+        );
+
+        let events: Vec<_> = event_rx.try_iter().collect();
+        assert_eq!(
+            counter.load(Ordering::SeqCst),
+            1,
+            "transient retries must not rerun tool side effects"
+        );
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, AgentEvent::TurnFailed { .. })),
+            "turn should fail instead of retrying after tool execution"
+        );
+    }
+
+    #[test]
+    fn run_turn_enforces_tool_iteration_limit() {
+        struct InfiniteToolProvider;
+
+        impl LlmProvider for InfiniteToolProvider {
+            fn stream_turn(
+                &self,
+                _messages: &[ProviderMessage],
+                _tools: &[ToolSpec],
+                tx: Sender<ProviderEvent>,
+            ) {
+                let _ = tx.send(ProviderEvent::ToolCall {
+                    call_id: "call-loop".into(),
+                    name: "count".into(),
+                    arguments: "{}".into(),
+                });
+                let _ = tx.send(ProviderEvent::TurnComplete);
+            }
+        }
+
+        let counter = Arc::new(AtomicU32::new(0));
+        let mut registry = empty_registry();
+        registry.register(Box::new(CountingTool {
+            calls: Arc::clone(&counter),
+        }));
+
+        let (event_tx, _event_rx) = mpsc::channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+
+        let outcome = run_turn(
+            "count forever",
+            &InfiniteToolProvider,
+            &registry,
+            &event_tx,
+            &cancel,
+        );
+
+        assert!(matches!(
+            outcome,
+            TurnOutcome::FatalError(ref err) if err == "tool iteration limit exceeded"
+        ));
+        assert_eq!(counter.load(Ordering::SeqCst), MAX_TOOL_ITERATIONS as u32);
     }
 
     #[test]

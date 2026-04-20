@@ -528,32 +528,36 @@ impl SiliconFlowProvider {
             request_messages.push(ChatMessage::system(sys.clone()));
         }
 
-        for message in messages {
-            match message {
+        let mut index = 0usize;
+        while index < messages.len() {
+            match &messages[index] {
                 ProviderMessage::User { content } => {
                     request_messages.push(ChatMessage::user(content.clone()));
+                    index += 1;
                 }
                 ProviderMessage::Assistant { content } => {
-                    request_messages.push(ChatMessage::assistant(content.clone()));
+                    let (tool_calls, next_index) = collect_tool_call_batch(messages, index + 1);
+                    if tool_calls.is_empty() {
+                        request_messages.push(ChatMessage::assistant(content.clone()));
+                    } else {
+                        request_messages.push(ChatMessage {
+                            role: Role::Assistant,
+                            content: Some(content.clone()),
+                            tool_calls: Some(tool_calls),
+                            tool_call_id: None,
+                        });
+                    }
+                    index = next_index;
                 }
-                ProviderMessage::ToolCall {
-                    id,
-                    name,
-                    arguments,
-                } => {
+                ProviderMessage::ToolCall { .. } => {
+                    let (tool_calls, next_index) = collect_tool_call_batch(messages, index);
                     request_messages.push(ChatMessage {
                         role: Role::Assistant,
                         content: None,
-                        tool_calls: Some(vec![ToolCall {
-                            id: id.clone(),
-                            call_type: "function".into(),
-                            function: FunctionCall {
-                                name: name.clone(),
-                                arguments: arguments.clone(),
-                            },
-                        }]),
+                        tool_calls: Some(tool_calls),
                         tool_call_id: None,
                     });
+                    index = next_index;
                 }
                 ProviderMessage::ToolResult {
                     tool_call_id,
@@ -564,6 +568,7 @@ impl SiliconFlowProvider {
                         tool_call_id.clone(),
                         output.clone(),
                     ));
+                    index += 1;
                 }
             }
         }
@@ -602,6 +607,34 @@ impl SiliconFlowProvider {
             n: None,
         }
     }
+}
+
+fn collect_tool_call_batch(messages: &[ProviderMessage], start: usize) -> (Vec<ToolCall>, usize) {
+    let mut collected = Vec::new();
+    let mut index = start;
+
+    while index < messages.len() {
+        match &messages[index] {
+            ProviderMessage::ToolCall {
+                id,
+                name,
+                arguments,
+            } => {
+                collected.push(ToolCall {
+                    id: id.clone(),
+                    call_type: "function".into(),
+                    function: FunctionCall {
+                        name: name.clone(),
+                        arguments: arguments.clone(),
+                    },
+                });
+                index += 1;
+            }
+            _ => break,
+        }
+    }
+
+    (collected, index)
 }
 
 impl LlmProvider for SiliconFlowProvider {

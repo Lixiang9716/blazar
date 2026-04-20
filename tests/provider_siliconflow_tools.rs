@@ -7,7 +7,7 @@ use blazar::provider::siliconflow::{
 use serde_json::json;
 
 #[test]
-fn build_request_maps_history_and_tools() {
+fn build_request_groups_tool_only_multi_call_turns() {
     let provider = SiliconFlowProvider::new(SiliconFlowConfig {
         api_key: "test".into(),
         base_url: "https://example.com/v1".into(),
@@ -32,9 +32,19 @@ fn build_request_maps_history_and_tools() {
                 name: "read_file".into(),
                 arguments: "{\"path\":\"Cargo.toml\"}".into(),
             },
+            ProviderMessage::ToolCall {
+                id: "call-2".into(),
+                name: "read_file".into(),
+                arguments: "{\"path\":\"src/main.rs\"}".into(),
+            },
             ProviderMessage::ToolResult {
                 tool_call_id: "call-1".into(),
-                output: "package contents".into(),
+                output: "cargo contents".into(),
+                is_error: false,
+            },
+            ProviderMessage::ToolResult {
+                tool_call_id: "call-2".into(),
+                output: "main contents".into(),
                 is_error: false,
             },
         ],
@@ -52,12 +62,75 @@ fn build_request_maps_history_and_tools() {
         }],
     );
 
-    assert_eq!(request.messages.len(), 4);
+    assert_eq!(request.messages.len(), 5);
     assert_eq!(
         request.tools.as_ref().unwrap()[0].function.name,
         "read_file"
     );
+    assert_eq!(
+        request.messages[2].role,
+        blazar::provider::siliconflow::Role::Assistant
+    );
+    assert!(request.messages[2].content.is_none());
+    assert_eq!(request.messages[2].tool_calls.as_ref().unwrap().len(), 2);
     assert_eq!(request.messages[3].tool_call_id.as_deref(), Some("call-1"));
+    assert_eq!(request.messages[4].tool_call_id.as_deref(), Some("call-2"));
+}
+
+#[test]
+fn build_request_preserves_assistant_text_on_tool_turn() {
+    let provider = SiliconFlowProvider::new(SiliconFlowConfig {
+        api_key: "test".into(),
+        base_url: "https://example.com/v1".into(),
+        model: "Qwen/Qwen3-8B".into(),
+        max_tokens: 256,
+        temperature: 0.0,
+        top_p: None,
+        top_k: None,
+        frequency_penalty: None,
+        enable_thinking: None,
+        thinking_budget: None,
+        system_prompt: Some("system".into()),
+    });
+
+    let request = provider.build_request_for_test(
+        &[
+            ProviderMessage::User {
+                content: "compare two files".into(),
+            },
+            ProviderMessage::Assistant {
+                content: "I'll inspect both files.".into(),
+            },
+            ProviderMessage::ToolCall {
+                id: "call-1".into(),
+                name: "read_file".into(),
+                arguments: "{\"path\":\"a.txt\"}".into(),
+            },
+            ProviderMessage::ToolCall {
+                id: "call-2".into(),
+                name: "read_file".into(),
+                arguments: "{\"path\":\"b.txt\"}".into(),
+            },
+            ProviderMessage::ToolResult {
+                tool_call_id: "call-1".into(),
+                output: "alpha".into(),
+                is_error: false,
+            },
+            ProviderMessage::ToolResult {
+                tool_call_id: "call-2".into(),
+                output: "beta".into(),
+                is_error: false,
+            },
+        ],
+        &[],
+    );
+
+    assert_eq!(request.messages.len(), 5);
+    assert_eq!(
+        request.messages[2].content.as_deref(),
+        Some("I'll inspect both files.")
+    );
+    assert_eq!(request.messages[2].tool_calls.as_ref().unwrap().len(), 2);
 }
 
 #[test]

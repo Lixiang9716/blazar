@@ -3,7 +3,7 @@ use crate::agent::runtime::AgentRuntime;
 use crate::agent::state::{AgentRuntimeState, TurnState};
 
 use crate::chat::input::InputAction;
-use crate::chat::model::{Actor, Author, ChatMessage, EntryKind, TimelineEntry};
+use crate::chat::model::{Actor, Author, ChatMessage, EntryKind, TimelineEntry, ToolCallStatus};
 use crate::chat::picker::{ModalPicker, PickerItem};
 use crate::chat::theme::ChatTheme;
 use crate::provider::LlmProvider;
@@ -183,91 +183,7 @@ impl ChatApp {
 
         // Drain agent runtime events
         while let Some(event) = self.agent_runtime.try_recv() {
-            let state_changed = self.agent_state.apply_event(&event);
-
-            match &event {
-                AgentEvent::TurnStarted { .. } => {
-                    debug!("tick: TurnStarted");
-                    self.scroll_offset = u16::MAX;
-                }
-                AgentEvent::ThinkingDelta { text } => {
-                    trace!("tick: ThinkingDelta len={}", text.len());
-                    let needs_new = self
-                        .timeline
-                        .last()
-                        .is_none_or(|e| e.kind != EntryKind::Thinking);
-                    if needs_new {
-                        self.timeline.push(TimelineEntry::thinking(""));
-                    }
-                    if let Some(last) = self.timeline.last_mut() {
-                        last.body.push_str(text);
-                        // Mirror into details so Ctrl+O can show full text
-                        last.details.push_str(text);
-                    }
-                    self.scroll_offset = u16::MAX;
-                }
-                AgentEvent::TextDelta { text } => {
-                    trace!("tick: TextDelta len={}", text.len());
-                    // Append to the current assistant response entry; create one if
-                    // the last entry is not an assistant Message (could be user msg,
-                    // thinking, tool_use, etc.)
-                    let needs_new = self.timeline.last().is_none_or(|e| {
-                        !(e.actor == Actor::Assistant && e.kind == EntryKind::Message)
-                    });
-                    if needs_new {
-                        self.timeline.push(TimelineEntry::response(""));
-                    }
-                    if let Some(last) = self.timeline.last_mut() {
-                        last.body.push_str(text);
-                    }
-                    self.scroll_offset = u16::MAX;
-                }
-                AgentEvent::ToolCallStarted {
-                    tool_name,
-                    arguments,
-                    ..
-                } => {
-                    debug!(
-                        "tick: ToolCallStarted tool={} arguments_len={}",
-                        tool_name,
-                        arguments.len()
-                    );
-                    self.timeline.push(TimelineEntry::tool_use(
-                        tool_name,
-                        &arguments[..arguments.len().min(60)],
-                        0,
-                        0,
-                        arguments.clone(),
-                    ));
-                    self.scroll_offset = u16::MAX;
-                }
-                AgentEvent::ToolCallCompleted { output, .. } => {
-                    self.timeline.push(TimelineEntry::tool_use(
-                        "tool_result",
-                        &output[..output.len().min(60)],
-                        0,
-                        0,
-                        output.clone(),
-                    ));
-                    self.scroll_offset = u16::MAX;
-                }
-                AgentEvent::TurnComplete => {
-                    debug!("tick: TurnComplete");
-                }
-                AgentEvent::TurnFailed { error } => {
-                    if error == "cancelled" {
-                        debug!("tick: TurnCancelled");
-                        self.timeline.push(TimelineEntry::hint("Turn cancelled."));
-                    } else {
-                        warn!("tick: TurnFailed error={error}");
-                        self.timeline
-                            .push(TimelineEntry::warning(format!("Agent error: {error}")));
-                    }
-                    self.scroll_offset = u16::MAX;
-                }
-            }
-
-            let _ = state_changed;
+            self.apply_agent_event(event);
         }
 
         // Demo playback: add one entry per second
@@ -469,6 +385,106 @@ impl ChatApp {
     pub fn composer(&self) -> &TextArea<'static> {
         &self.composer
     }
+
+    #[doc(hidden)]
+    pub fn apply_agent_event_for_test(&mut self, event: AgentEvent) {
+        self.apply_agent_event(event);
+    }
+
+    fn apply_agent_event(&mut self, event: AgentEvent) {
+        let _ = self.agent_state.apply_event(&event);
+
+        match event {
+            AgentEvent::TurnStarted { .. } => {
+                debug!("tick: TurnStarted");
+                self.scroll_offset = u16::MAX;
+            }
+            AgentEvent::ThinkingDelta { text } => {
+                trace!("tick: ThinkingDelta len={}", text.len());
+                let needs_new = self
+                    .timeline
+                    .last()
+                    .is_none_or(|entry| entry.kind != EntryKind::Thinking);
+                if needs_new {
+                    self.timeline.push(TimelineEntry::thinking(""));
+                }
+                if let Some(last) = self.timeline.last_mut() {
+                    last.body.push_str(&text);
+                    last.details.push_str(&text);
+                }
+                self.scroll_offset = u16::MAX;
+            }
+            AgentEvent::TextDelta { text } => {
+                trace!("tick: TextDelta len={}", text.len());
+                let needs_new = self.timeline.last().is_none_or(|entry| {
+                    !(entry.actor == Actor::Assistant && entry.kind == EntryKind::Message)
+                });
+                if needs_new {
+                    self.timeline.push(TimelineEntry::response(""));
+                }
+                if let Some(last) = self.timeline.last_mut() {
+                    last.body.push_str(&text);
+                }
+                self.scroll_offset = u16::MAX;
+            }
+            AgentEvent::ToolCallStarted {
+                call_id,
+                tool_name,
+                arguments,
+            } => {
+                debug!(
+                    "tick: ToolCallStarted tool={} arguments_len={}",
+                    tool_name,
+                    arguments.len()
+                );
+                self.timeline.push(TimelineEntry::tool_call(
+                    call_id,
+                    tool_name,
+                    summarize_tool_arguments(&arguments),
+                    arguments,
+                    ToolCallStatus::Running,
+                ));
+                self.scroll_offset = u16::MAX;
+            }
+            AgentEvent::ToolCallCompleted {
+                call_id,
+                output,
+                is_error,
+            } => {
+                if let Some(entry) = self.timeline.iter_mut().rev().find(|entry| {
+                    matches!(
+                        &entry.kind,
+                        EntryKind::ToolCall { call_id: existing, .. } if existing == &call_id
+                    )
+                }) {
+                    entry.body = summarize_tool_output(&output);
+                    entry.details = output;
+                    if let EntryKind::ToolCall { status, .. } = &mut entry.kind {
+                        *status = if is_error {
+                            ToolCallStatus::Error
+                        } else {
+                            ToolCallStatus::Success
+                        };
+                    }
+                }
+                self.scroll_offset = u16::MAX;
+            }
+            AgentEvent::TurnComplete => {
+                debug!("tick: TurnComplete");
+            }
+            AgentEvent::TurnFailed { error } => {
+                if error == "cancelled" {
+                    debug!("tick: TurnCancelled");
+                    self.timeline.push(TimelineEntry::hint("Turn cancelled."));
+                } else {
+                    warn!("tick: TurnFailed error={error}");
+                    self.timeline
+                        .push(TimelineEntry::warning(format!("Agent error: {error}")));
+                }
+                self.scroll_offset = u16::MAX;
+            }
+        }
+    }
 }
 
 /// Shorten `/home/<user>/...` to `~/...` for display.
@@ -479,6 +495,29 @@ fn shorten_home(path: &str) -> String {
         return format!("~{rest}");
     }
     path.to_owned()
+}
+
+fn preview_text(text: &str, max_chars: usize) -> &str {
+    if text.chars().count() <= max_chars {
+        return text;
+    }
+
+    let end = text
+        .char_indices()
+        .nth(max_chars)
+        .map(|(index, _)| index)
+        .unwrap_or(text.len());
+
+    &text[..end]
+}
+
+fn summarize_tool_arguments(arguments: &str) -> String {
+    preview_text(arguments, 60).to_owned()
+}
+
+fn summarize_tool_output(output: &str) -> String {
+    let first_line = output.lines().next().unwrap_or("");
+    preview_text(first_line, 80).to_owned()
 }
 
 /// Detect the current git branch. Returns "main" as fallback.
@@ -498,4 +537,111 @@ fn detect_branch(repo_path: &str) -> String {
             }
         })
         .unwrap_or_else(|| "main".to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::provider::{ProviderEvent, ProviderMessage};
+    use std::path::PathBuf;
+    use std::sync::mpsc::Sender;
+    use std::time::Duration;
+
+    struct UnicodeArgumentProvider;
+
+    impl LlmProvider for UnicodeArgumentProvider {
+        fn stream_turn(
+            &self,
+            messages: &[ProviderMessage],
+            _tools: &[crate::agent::tools::ToolSpec],
+            tx: Sender<ProviderEvent>,
+        ) {
+            let has_tool_result = messages
+                .iter()
+                .any(|message| matches!(message, ProviderMessage::ToolResult { .. }));
+
+            if has_tool_result {
+                let _ = tx.send(ProviderEvent::TurnComplete);
+                return;
+            }
+
+            let _ = tx.send(ProviderEvent::ToolCall {
+                call_id: "call-1".into(),
+                name: "read_file".into(),
+                arguments: serde_json::json!({
+                    "path": "😀".repeat(20)
+                })
+                .to_string(),
+            });
+            let _ = tx.send(ProviderEvent::TurnComplete);
+        }
+    }
+
+    struct UnicodeOutputProvider;
+
+    impl LlmProvider for UnicodeOutputProvider {
+        fn stream_turn(
+            &self,
+            messages: &[ProviderMessage],
+            _tools: &[crate::agent::tools::ToolSpec],
+            tx: Sender<ProviderEvent>,
+        ) {
+            let has_tool_result = messages
+                .iter()
+                .any(|message| matches!(message, ProviderMessage::ToolResult { .. }));
+
+            if has_tool_result {
+                let _ = tx.send(ProviderEvent::TurnComplete);
+                return;
+            }
+
+            let _ = tx.send(ProviderEvent::ToolCall {
+                call_id: "call-1".into(),
+                name: "bash".into(),
+                arguments: serde_json::json!({
+                    "command": "printf '\\U1F600%.0s' {1..20}"
+                })
+                .to_string(),
+            });
+            let _ = tx.send(ProviderEvent::TurnComplete);
+        }
+    }
+
+    #[test]
+    fn tick_handles_multibyte_tool_arguments_without_panicking() {
+        let repo_path = env!("CARGO_MANIFEST_DIR");
+        let mut app = ChatApp::new_for_test(repo_path);
+        app.agent_runtime =
+            AgentRuntime::new(Box::new(UnicodeArgumentProvider), PathBuf::from(repo_path));
+
+        app.agent_runtime.submit_turn("read unicode path").unwrap();
+        std::thread::sleep(Duration::from_millis(100));
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| app.tick()));
+
+        assert!(
+            result.is_ok(),
+            "tick should not panic on multibyte tool arguments"
+        );
+    }
+
+    #[test]
+    fn tick_handles_multibyte_tool_output_without_panicking() {
+        let repo_path = env!("CARGO_MANIFEST_DIR");
+        let mut app = ChatApp::new_for_test(repo_path);
+        app.agent_runtime =
+            AgentRuntime::new(Box::new(UnicodeOutputProvider), PathBuf::from(repo_path));
+
+        app.agent_runtime
+            .submit_turn("render unicode output")
+            .unwrap();
+        std::thread::sleep(Duration::from_millis(100));
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| app.tick()));
+
+        assert!(
+            result.is_ok(),
+            "tick should not panic on multibyte tool output"
+        );
+    }
 }
