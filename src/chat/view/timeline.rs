@@ -1,5 +1,5 @@
 use crate::chat::app::ChatApp;
-use crate::chat::model::{Actor, EntryKind, TimelineEntry};
+use crate::chat::model::{Actor, EntryKind, TimelineEntry, ToolCallStatus};
 use crate::chat::theme::ChatTheme;
 use core::cmp;
 use ratatui_core::{
@@ -168,6 +168,30 @@ fn render_entry<'a>(entry: &TimelineEntry, theme: &ChatTheme, width: u16) -> Vec
                 }
             }
         }
+        EntryKind::ToolCall {
+            tool_name, status, ..
+        } => {
+            let status_marker = match status {
+                ToolCallStatus::Running => "…",
+                ToolCallStatus::Success => "✓",
+                ToolCallStatus::Error => "✗",
+            };
+
+            lines.push(Line::from(vec![
+                Span::raw(MARGIN),
+                Span::styled("● ", marker_style),
+                Span::styled(tool_name.clone(), theme.tool_label),
+                Span::raw(" "),
+                Span::styled(status_marker, theme.tool_target),
+            ]));
+
+            for body_line in entry.body.lines() {
+                lines.push(Line::from(vec![
+                    Span::raw(INDENT),
+                    Span::styled(body_line.to_owned(), theme.dim_text),
+                ]));
+            }
+        }
         EntryKind::Bash { command } => {
             lines.push(Line::from(vec![
                 Span::raw(MARGIN),
@@ -255,7 +279,9 @@ fn marker_style_for(entry: &TimelineEntry, theme: &ChatTheme) -> Style {
         (_, EntryKind::Warning) => theme.marker_warning,
         (_, EntryKind::Hint) => theme.marker_hint,
         (_, EntryKind::Thinking) => theme.marker_thinking,
-        (_, EntryKind::ToolUse { .. } | EntryKind::Bash { .. }) => theme.marker_tool,
+        (_, EntryKind::ToolUse { .. } | EntryKind::ToolCall { .. } | EntryKind::Bash { .. }) => {
+            theme.marker_tool
+        }
         (_, EntryKind::CodeBlock { .. }) => theme.marker_tool,
         _ => theme.marker_response,
     }

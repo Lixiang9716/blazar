@@ -13,6 +13,13 @@ pub enum Actor {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ToolCallStatus {
+    Running,
+    Success,
+    Error,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EntryKind {
     Message,
     Warning,
@@ -22,6 +29,11 @@ pub enum EntryKind {
         target: String,
         additions: u16,
         deletions: u16,
+    },
+    ToolCall {
+        call_id: String,
+        tool_name: String,
+        status: ToolCallStatus,
     },
     Bash {
         command: String,
@@ -94,6 +106,25 @@ impl TimelineEntry {
             },
             body: body.into(),
             details: String::new(),
+        }
+    }
+
+    pub fn tool_call(
+        call_id: impl Into<String>,
+        tool_name: impl Into<String>,
+        body: impl Into<String>,
+        details: impl Into<String>,
+        status: ToolCallStatus,
+    ) -> Self {
+        Self {
+            actor: Actor::Tool,
+            kind: EntryKind::ToolCall {
+                call_id: call_id.into(),
+                tool_name: tool_name.into(),
+                status,
+            },
+            body: body.into(),
+            details: details.into(),
         }
     }
 

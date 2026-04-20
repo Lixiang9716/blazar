@@ -3,7 +3,9 @@ use std::sync::mpsc::Sender;
 
 use log::{debug, info, trace, warn};
 
-use super::{LlmProvider, ProviderEvent};
+use crate::agent::tools::ToolSpec;
+
+use super::{LlmProvider, ProviderEvent, ProviderMessage};
 
 // ── Configuration ──────────────────────────────────────────────────
 
@@ -356,7 +358,7 @@ impl SiliconFlowClient {
     /// Stream chat completion chunks into the provided channel.
     ///
     /// Sends `ProviderEvent::TextDelta` for content and reasoning,
-    /// `ProviderEvent::ToolCallRequest` when the model requests tool calls,
+    /// `ProviderEvent::ToolCall` when the model requests tool calls,
     /// and `ProviderEvent::TurnComplete` or `ProviderEvent::Error` at the end.
     pub fn chat_stream(
         &self,
@@ -427,28 +429,7 @@ impl SiliconFlowClient {
                 // Accumulate streaming tool calls
                 if let Some(ref delta_tcs) = choice.delta.tool_calls {
                     for dtc in delta_tcs {
-                        let idx = dtc.index as usize;
-                        while tool_calls.len() <= idx {
-                            tool_calls.push(ToolCall {
-                                id: String::new(),
-                                call_type: "function".to_owned(),
-                                function: FunctionCall {
-                                    name: String::new(),
-                                    arguments: String::new(),
-                                },
-                            });
-                        }
-                        if let Some(ref id) = dtc.id {
-                            tool_calls[idx].id.clone_from(id);
-                        }
-                        if let Some(ref f) = dtc.function {
-                            if let Some(ref name) = f.name {
-                                tool_calls[idx].function.name.clone_from(name);
-                            }
-                            if let Some(ref args) = f.arguments {
-                                tool_calls[idx].function.arguments.push_str(args);
-                            }
-                        }
+                        merge_tool_call_fragment(&mut tool_calls, dtc);
                     }
                 }
 
@@ -456,8 +437,13 @@ impl SiliconFlowClient {
                     && reason == "tool_calls"
                     && !tool_calls.is_empty()
                 {
-                    let json = serde_json::to_string(&tool_calls).unwrap_or_default();
-                    let _ = tx.send(ProviderEvent::ToolCallRequest(json));
+                    for tool_call in tool_calls.drain(..) {
+                        let _ = tx.send(ProviderEvent::ToolCall {
+                            call_id: tool_call.id,
+                            name: tool_call.function.name,
+                            arguments: tool_call.function.arguments,
+                        });
+                    }
                 }
             }
         }
@@ -521,19 +507,93 @@ impl SiliconFlowProvider {
         &self.client
     }
 
-    /// Build a `ChatCompletionRequest` from a user prompt, applying config defaults.
-    fn build_request(&self, prompt: &str) -> ChatCompletionRequest {
+    pub fn build_request_for_test(
+        &self,
+        messages: &[ProviderMessage],
+        tools: &[ToolSpec],
+    ) -> ChatCompletionRequest {
+        self.build_request(messages, tools)
+    }
+
+    /// Build a `ChatCompletionRequest` from message history, applying config defaults.
+    fn build_request(
+        &self,
+        messages: &[ProviderMessage],
+        tools: &[ToolSpec],
+    ) -> ChatCompletionRequest {
         let cfg = self.client.config();
-        let mut messages = Vec::new();
+        let mut request_messages = Vec::new();
 
         if let Some(ref sys) = cfg.system_prompt {
-            messages.push(ChatMessage::system(sys.clone()));
+            request_messages.push(ChatMessage::system(sys.clone()));
         }
-        messages.push(ChatMessage::user(prompt));
+
+        let mut index = 0usize;
+        while index < messages.len() {
+            match &messages[index] {
+                ProviderMessage::User { content } => {
+                    request_messages.push(ChatMessage::user(content.clone()));
+                    index += 1;
+                }
+                ProviderMessage::Assistant { content } => {
+                    let (tool_calls, next_index) = collect_tool_call_batch(messages, index + 1);
+                    if tool_calls.is_empty() {
+                        request_messages.push(ChatMessage::assistant(content.clone()));
+                    } else {
+                        request_messages.push(ChatMessage {
+                            role: Role::Assistant,
+                            content: Some(content.clone()),
+                            tool_calls: Some(tool_calls),
+                            tool_call_id: None,
+                        });
+                    }
+                    index = next_index;
+                }
+                ProviderMessage::ToolCall { .. } => {
+                    let (tool_calls, next_index) = collect_tool_call_batch(messages, index);
+                    request_messages.push(ChatMessage {
+                        role: Role::Assistant,
+                        content: None,
+                        tool_calls: Some(tool_calls),
+                        tool_call_id: None,
+                    });
+                    index = next_index;
+                }
+                ProviderMessage::ToolResult {
+                    tool_call_id,
+                    output,
+                    ..
+                } => {
+                    request_messages.push(ChatMessage::tool_result(
+                        tool_call_id.clone(),
+                        output.clone(),
+                    ));
+                    index += 1;
+                }
+            }
+        }
+
+        let request_tools = if tools.is_empty() {
+            None
+        } else {
+            Some(
+                tools
+                    .iter()
+                    .map(|tool| Tool {
+                        tool_type: "function".into(),
+                        function: FunctionDef {
+                            name: tool.name.clone(),
+                            description: tool.description.clone(),
+                            parameters: tool.parameters.clone(),
+                        },
+                    })
+                    .collect(),
+            )
+        };
 
         ChatCompletionRequest {
             model: cfg.model.clone(),
-            messages,
+            messages: request_messages,
             stream: Some(true),
             max_tokens: Some(cfg.max_tokens),
             temperature: Some(cfg.temperature),
@@ -543,19 +603,85 @@ impl SiliconFlowProvider {
             enable_thinking: cfg.enable_thinking,
             thinking_budget: cfg.thinking_budget,
             stop: None,
-            tools: None,
+            tools: request_tools,
             n: None,
         }
     }
 }
 
+fn collect_tool_call_batch(messages: &[ProviderMessage], start: usize) -> (Vec<ToolCall>, usize) {
+    let mut collected = Vec::new();
+    let mut index = start;
+
+    while index < messages.len() {
+        match &messages[index] {
+            ProviderMessage::ToolCall {
+                id,
+                name,
+                arguments,
+            } => {
+                collected.push(ToolCall {
+                    id: id.clone(),
+                    call_type: "function".into(),
+                    function: FunctionCall {
+                        name: name.clone(),
+                        arguments: arguments.clone(),
+                    },
+                });
+                index += 1;
+            }
+            _ => break,
+        }
+    }
+
+    (collected, index)
+}
+
 impl LlmProvider for SiliconFlowProvider {
-    fn stream_turn(&self, prompt: &str, tx: Sender<ProviderEvent>) {
-        info!("stream_turn: prompt_len={}", prompt.len());
-        let req = self.build_request(prompt);
+    fn stream_turn(
+        &self,
+        messages: &[ProviderMessage],
+        tools: &[ToolSpec],
+        tx: Sender<ProviderEvent>,
+    ) {
+        info!(
+            "stream_turn: messages={} tools={}",
+            messages.len(),
+            tools.len()
+        );
+        let req = self.build_request(messages, tools);
         if let Err(e) = self.client.chat_stream(&req, &tx) {
             warn!("stream_turn: error={e}");
             let _ = tx.send(ProviderEvent::Error(e));
+        }
+    }
+}
+
+pub fn merge_tool_call_fragment(tool_calls: &mut Vec<ToolCall>, dtc: &DeltaToolCall) {
+    let idx = dtc.index as usize;
+    while tool_calls.len() <= idx {
+        tool_calls.push(ToolCall {
+            id: String::new(),
+            call_type: "function".to_owned(),
+            function: FunctionCall {
+                name: String::new(),
+                arguments: String::new(),
+            },
+        });
+    }
+
+    if let Some(ref id) = dtc.id {
+        tool_calls[idx].id.clone_from(id);
+    }
+    if let Some(ref call_type) = dtc.call_type {
+        tool_calls[idx].call_type.clone_from(call_type);
+    }
+    if let Some(ref function) = dtc.function {
+        if let Some(ref name) = function.name {
+            tool_calls[idx].function.name.clone_from(name);
+        }
+        if let Some(ref arguments) = function.arguments {
+            tool_calls[idx].function.arguments.push_str(arguments);
         }
     }
 }
