@@ -178,3 +178,138 @@ pub fn resolve_workspace_write_path(
 
     Ok((full_path, canonical_root))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    struct EchoTool;
+
+    impl Tool for EchoTool {
+        fn spec(&self) -> ToolSpec {
+            ToolSpec {
+                name: "echo".into(),
+                description: "echo tool".into(),
+                parameters: json!({"type":"object"}),
+            }
+        }
+
+        fn execute(&self, args: Value) -> ToolResult {
+            ToolResult::success(args.to_string())
+        }
+    }
+
+    fn unique_workspace(name: &str) -> PathBuf {
+        let base = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target");
+        std::fs::create_dir_all(&base).expect("target dir should exist");
+        let suffix = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock should be monotonic")
+            .as_nanos();
+        base.join(format!("tools-{name}-{suffix}"))
+    }
+
+    #[test]
+    fn tool_result_helpers_build_expected_flags() {
+        let ok = ToolResult::success("done");
+        assert_eq!(ok.output, "done");
+        assert!(!ok.is_error);
+        assert_eq!(ok.exit_code, None);
+
+        let err = ToolResult::failure("nope");
+        assert_eq!(err.output, "nope");
+        assert!(err.is_error);
+        assert!(!err.output_truncated);
+    }
+
+    #[test]
+    fn registry_registers_specs_and_executes_known_tools() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let mut registry = ToolRegistry::new(root.clone());
+        registry.register(Box::new(EchoTool));
+
+        assert_eq!(registry.workspace_root(), root.as_path());
+        assert!(registry.get("echo").is_some());
+        assert!(registry.get("missing").is_none());
+        assert_eq!(registry.specs().len(), 1);
+
+        let result = registry
+            .execute("echo", json!({"value":"x"}))
+            .expect("tool should execute");
+        assert_eq!(result.output, r#"{"value":"x"}"#);
+        assert_eq!(
+            registry.execute("missing", json!({})).expect_err("unknown"),
+            "unknown tool: missing"
+        );
+    }
+
+    #[test]
+    fn path_validation_rejects_absolute_and_parent_components() {
+        assert!(validate_workspace_relative_path("src/main.rs").is_ok());
+        assert!(validate_workspace_relative_path("/etc/passwd").is_err());
+        assert!(validate_workspace_relative_path("../secret").is_err());
+        assert!(validate_workspace_relative_path("nested/../../oops").is_err());
+    }
+
+    #[test]
+    fn resolve_workspace_path_returns_canonical_path_inside_workspace() {
+        let workspace = unique_workspace("resolve-read");
+        std::fs::create_dir_all(workspace.join("src")).expect("create workspace");
+        std::fs::write(workspace.join("src/file.txt"), "hello").expect("write test file");
+
+        let resolved = resolve_workspace_path(&workspace, "src/file.txt").expect("resolve path");
+        assert!(resolved.ends_with("src/file.txt"));
+
+        let err = resolve_workspace_path(&workspace, "../escape")
+            .expect_err("path traversal must be rejected");
+        assert!(err.contains("path must stay inside workspace root"));
+
+        let missing = resolve_workspace_path(&workspace, "src/missing.txt")
+            .expect_err("missing file should fail");
+        assert!(missing.contains("cannot resolve"));
+
+        std::fs::remove_dir_all(workspace).expect("cleanup workspace");
+    }
+
+    #[test]
+    fn resolve_workspace_write_path_rejects_symlink_targets() {
+        let workspace = unique_workspace("resolve-write");
+        std::fs::create_dir_all(workspace.join("dir")).expect("create workspace");
+        std::fs::write(workspace.join("dir/real.txt"), "real").expect("write file");
+
+        let (full_path, canonical_root) =
+            resolve_workspace_write_path(&workspace, "dir/new.txt").expect("new write path");
+        assert!(full_path.ends_with("dir/new.txt"));
+        assert_eq!(
+            canonical_root,
+            std::fs::canonicalize(&workspace).expect("canonical root")
+        );
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            symlink(
+                workspace.join("dir/real.txt"),
+                workspace.join("dir/link.txt"),
+            )
+            .expect("create symlink");
+            let err = resolve_workspace_write_path(&workspace, "dir/link.txt")
+                .expect_err("symlink writes should fail");
+            assert!(err.contains("target path is a symlink"));
+        }
+
+        let err = resolve_workspace_write_path(&workspace, "../outside.txt")
+            .expect_err("traversal should fail");
+        assert!(err.contains("path must stay inside workspace root"));
+
+        std::fs::remove_dir_all(workspace).expect("cleanup workspace");
+    }
+
+    #[test]
+    fn canonical_workspace_root_reports_missing_directories() {
+        let missing = unique_workspace("missing");
+        let err = canonical_workspace_root(&missing).expect_err("missing dir should fail");
+        assert!(err.contains("cannot resolve workspace root"));
+    }
+}

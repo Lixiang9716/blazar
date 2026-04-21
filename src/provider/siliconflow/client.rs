@@ -208,3 +208,273 @@ impl SiliconFlowClient {
 }
 
 // ── LlmProvider implementation ─────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::provider::ProviderEvent;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::sync::mpsc;
+    use std::thread;
+
+    fn test_config(base_url: String) -> SiliconFlowConfig {
+        SiliconFlowConfig {
+            api_key: "test-key".into(),
+            base_url,
+            model: "Qwen/Qwen3-8B".into(),
+            max_tokens: 128,
+            temperature: 0.1,
+            top_p: None,
+            top_k: None,
+            frequency_penalty: None,
+            enable_thinking: None,
+            thinking_budget: None,
+            system_prompt: None,
+            system_prompt_file: None,
+        }
+    }
+
+    fn test_request() -> ChatCompletionRequest {
+        ChatCompletionRequest {
+            model: "Qwen/Qwen3-8B".into(),
+            messages: vec![crate::provider::siliconflow::ChatMessage::user("hi")],
+            stream: None,
+            max_tokens: Some(64),
+            temperature: Some(0.2),
+            top_p: None,
+            top_k: None,
+            frequency_penalty: None,
+            enable_thinking: None,
+            thinking_budget: None,
+            stop: None,
+            tools: None,
+            tool_choice: None,
+            n: None,
+        }
+    }
+
+    fn http_response(status: u16, reason: &str, content_type: &str, body: &str) -> String {
+        format!(
+            "HTTP/1.1 {status} {reason}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        )
+    }
+
+    fn spawn_one_shot_server<F>(handler: F) -> (String, thread::JoinHandle<()>)
+    where
+        F: FnOnce(String) -> String + Send + 'static,
+    {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
+        let addr = listener.local_addr().expect("local addr");
+        let handle = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept");
+            let mut request_bytes = Vec::new();
+            let mut header_end = None;
+            let mut content_length = 0usize;
+
+            loop {
+                let mut buf = [0_u8; 4096];
+                let n = stream.read(&mut buf).expect("read request");
+                if n == 0 {
+                    break;
+                }
+                request_bytes.extend_from_slice(&buf[..n]);
+
+                if header_end.is_none()
+                    && let Some(pos) = request_bytes.windows(4).position(|w| w == b"\r\n\r\n")
+                {
+                    header_end = Some(pos + 4);
+                    let headers = String::from_utf8_lossy(&request_bytes[..pos + 4]);
+                    content_length = headers
+                        .lines()
+                        .find_map(|line| {
+                            line.strip_prefix("Content-Length:")
+                                .and_then(|v| v.trim().parse::<usize>().ok())
+                        })
+                        .unwrap_or(0);
+                }
+
+                if let Some(end) = header_end
+                    && request_bytes.len() >= end + content_length
+                {
+                    break;
+                }
+            }
+
+            let request = String::from_utf8_lossy(&request_bytes).to_string();
+            let response = handler(request);
+            stream
+                .write_all(response.as_bytes())
+                .expect("write response");
+        });
+        (format!("http://{addr}"), handle)
+    }
+
+    #[test]
+    fn auth_header_and_url_helpers_use_config() {
+        let client = SiliconFlowClient::new(test_config("https://example.com/v1".into()));
+        assert_eq!(client.auth_header(), "Bearer test-key");
+        assert_eq!(client.url("/models"), "https://example.com/v1/models");
+    }
+
+    #[test]
+    fn chat_sets_stream_false_and_parses_response() {
+        let (base_url, handle) = spawn_one_shot_server(|request| {
+            assert!(request.starts_with("POST /chat/completions HTTP/1.1"));
+            assert!(request.contains("Authorization: Bearer test-key"));
+            assert!(request.contains(r#""stream":false"#));
+            http_response(
+                200,
+                "OK",
+                "application/json",
+                r#"{"id":"chat-1","choices":[{"index":0,"message":{"role":"assistant","content":"hello","tool_calls":null},"finish_reason":"stop"}],"usage":null,"model":"Qwen/Qwen3-8B"}"#,
+            )
+        });
+        let client = SiliconFlowClient::new(test_config(base_url));
+        let response = client.chat(&test_request()).expect("chat response");
+        handle.join().expect("server joined");
+
+        assert_eq!(response.id, "chat-1");
+        assert_eq!(
+            response.choices[0].message.content.as_deref(),
+            Some("hello")
+        );
+    }
+
+    #[test]
+    fn chat_returns_parse_error_with_response_body() {
+        let (base_url, handle) =
+            spawn_one_shot_server(|_| http_response(200, "OK", "application/json", "not-json"));
+        let client = SiliconFlowClient::new(test_config(base_url));
+        let err = client
+            .chat(&test_request())
+            .expect_err("parse error expected");
+        handle.join().expect("server joined");
+
+        assert!(err.contains("parse error"));
+        assert!(err.contains("not-json"));
+    }
+
+    #[test]
+    fn list_models_extracts_nested_error_message() {
+        let (base_url, handle) = spawn_one_shot_server(|request| {
+            assert!(request.starts_with("GET /models HTTP/1.1"));
+            http_response(
+                401,
+                "Unauthorized",
+                "application/json",
+                r#"{"error":{"message":"invalid key"}}"#,
+            )
+        });
+        let client = SiliconFlowClient::new(test_config(base_url));
+        let err = client
+            .list_models()
+            .expect_err("list_models should surface API error");
+        handle.join().expect("server joined");
+
+        assert_eq!(err, "HTTP 401: invalid key");
+    }
+
+    #[test]
+    fn embeddings_sends_payload_and_parses_success_response() {
+        let (base_url, handle) = spawn_one_shot_server(|request| {
+            assert!(request.starts_with("POST /embeddings HTTP/1.1"));
+            assert!(request.contains(r#""model":"text-embedding""#));
+            assert!(request.contains(r#""hello""#));
+            http_response(
+                200,
+                "OK",
+                "application/json",
+                r#"{"data":[{"index":0,"embedding":[0.1,0.2]}],"model":"text-embedding","usage":{"prompt_tokens":1,"total_tokens":1}}"#,
+            )
+        });
+        let client = SiliconFlowClient::new(test_config(base_url));
+        let response = client
+            .embeddings("text-embedding", EmbeddingInput::Single("hello".into()))
+            .expect("embeddings should parse");
+        handle.join().expect("server joined");
+
+        assert_eq!(response.data.len(), 1);
+        assert_eq!(response.model, "text-embedding");
+    }
+
+    #[test]
+    fn chat_stream_emits_reasoning_text_and_tool_calls() {
+        let sse = concat!(
+            "data: {\"id\":\"c1\",\"choices\":[{\"index\":0,\"delta\":{\"reasoning_content\":\"think\"},\"finish_reason\":null}]}\n",
+            "event: ping\n",
+            "data: {not-json}\n",
+            "data: {\"id\":\"c1\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hello\",\"tool_calls\":[{\"index\":0,\"id\":\"call-1\",\"type\":\"function\",\"function\":{\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\\\"Ca\"}}]},\"finish_reason\":null}]}\n",
+            "data: {\"id\":\"c1\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"rgo.toml\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n",
+            "data: [DONE]\n"
+        );
+        let (base_url, handle) =
+            spawn_one_shot_server(move |_| http_response(200, "OK", "text/event-stream", sse));
+        let client = SiliconFlowClient::new(test_config(base_url));
+        let (tx, rx) = mpsc::channel();
+
+        client
+            .chat_stream(&test_request(), &tx)
+            .expect("chat_stream should succeed");
+        handle.join().expect("server joined");
+
+        let events: Vec<_> = rx.try_iter().collect();
+        assert!(events.contains(&ProviderEvent::ThinkingDelta("think".into())));
+        assert!(events.contains(&ProviderEvent::TextDelta("hello".into())));
+        assert!(events.contains(&ProviderEvent::ToolCall {
+            call_id: "call-1".into(),
+            name: "read_file".into(),
+            arguments: "{\"path\":\"Cargo.toml\"}".into(),
+        }));
+        assert!(events.contains(&ProviderEvent::TurnComplete));
+    }
+
+    #[test]
+    fn chat_stream_returns_ok_when_receiver_is_dropped() {
+        let sse = concat!(
+            "data: {\"id\":\"c1\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hello\"},\"finish_reason\":null}]}\n",
+            "data: [DONE]\n"
+        );
+        let (base_url, handle) =
+            spawn_one_shot_server(move |_| http_response(200, "OK", "text/event-stream", sse));
+        let client = SiliconFlowClient::new(test_config(base_url));
+        let (tx, rx) = mpsc::channel();
+        drop(rx);
+
+        let result = client.chat_stream(&test_request(), &tx);
+        handle.join().expect("server joined");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn chat_stream_surfaces_status_message_from_top_level_message_field() {
+        let (base_url, handle) = spawn_one_shot_server(|_| {
+            http_response(
+                429,
+                "Too Many Requests",
+                "application/json",
+                r#"{"message":"rate limited"}"#,
+            )
+        });
+        let client = SiliconFlowClient::new(test_config(base_url));
+        let (tx, _rx) = mpsc::channel();
+        let err = client
+            .chat_stream(&test_request(), &tx)
+            .expect_err("status error expected");
+        handle.join().expect("server joined");
+
+        assert_eq!(err, "HTTP 429: rate limited");
+    }
+
+    #[test]
+    fn transport_errors_use_fallback_display_format() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind ephemeral port");
+        let addr = listener.local_addr().expect("local addr");
+        drop(listener);
+
+        let client = SiliconFlowClient::new(test_config(format!("http://{addr}")));
+        let err = client.list_models().expect_err("connection should fail");
+        assert!(!err.starts_with("HTTP"));
+    }
+}

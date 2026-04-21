@@ -307,3 +307,545 @@ fn follow_up_turn_reuses_latest_plan_title_while_streaming() {
     assert!(text.contains("MiniMax Provider Integration"));
     assert!(!text.contains("streaming…"));
 }
+
+#[test]
+fn picker_backspace_pops_filter_then_closes_overlay() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+
+    app.handle_action(InputAction::Key(KeyEvent::new(
+        KeyCode::Char('/'),
+        KeyModifiers::NONE,
+    )));
+    app.handle_action(InputAction::Key(KeyEvent::new(
+        KeyCode::Char('h'),
+        KeyModifiers::NONE,
+    )));
+    assert_eq!(app.picker.filter, "h");
+
+    app.handle_action(InputAction::Backspace);
+    assert!(app.picker.is_open());
+    assert!(app.picker.filter.is_empty());
+
+    app.handle_action(InputAction::Backspace);
+    assert!(!app.picker.is_open());
+}
+
+#[test]
+fn picker_theme_selection_opens_subpicker_and_applies_theme() {
+    use crate::chat::picker::PickerContext;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+
+    app.handle_action(InputAction::Key(KeyEvent::new(
+        KeyCode::Char('/'),
+        KeyModifiers::NONE,
+    )));
+    for ch in "theme".chars() {
+        app.handle_action(InputAction::Key(KeyEvent::new(
+            KeyCode::Char(ch),
+            KeyModifiers::NONE,
+        )));
+    }
+    app.handle_action(InputAction::Submit);
+    assert_eq!(app.picker.context, PickerContext::ThemeSelect);
+    assert!(app.picker.is_open());
+
+    let selected_theme = app
+        .picker
+        .select_current()
+        .expect("theme picker should have a selection");
+    app.handle_action(InputAction::Submit);
+
+    assert_eq!(app.theme_name(), selected_theme);
+    assert_eq!(app.picker.context, PickerContext::Commands);
+}
+
+#[test]
+fn demo_trigger_message_resets_timeline_and_starts_playback_queue() {
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+
+    app.send_message("1");
+    assert!(app.timeline.is_empty());
+    assert!(app.demo_active());
+
+    app.tick();
+    assert_eq!(app.timeline.len(), 1);
+    assert!(!app.timeline[0].body.is_empty());
+}
+
+#[test]
+fn turn_helpers_ignore_blank_input_and_validate_plan_title() {
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+    let initial_len = app.timeline.len();
+    app.send_message("   ");
+    assert_eq!(app.timeline.len(), initial_len);
+
+    assert!(super::turns::extract_plan_title_and_body("").is_none());
+    assert!(super::turns::extract_plan_title_and_body("###\n\nbody").is_none());
+    let parsed = super::turns::extract_plan_title_and_body("Title\n\n1. step").expect("valid plan");
+    assert_eq!(parsed.0, "Title");
+    assert_eq!(parsed.1, "1. step");
+}
+
+#[test]
+fn turn_failed_events_render_hint_for_cancel_and_warning_for_errors() {
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+
+    app.apply_agent_event_for_test(AgentEvent::TurnFailed {
+        error: "cancelled".into(),
+    });
+    assert!(matches!(
+        app.timeline.last().map(|entry| &entry.kind),
+        Some(EntryKind::Hint)
+    ));
+
+    app.apply_agent_event_for_test(AgentEvent::TurnFailed {
+        error: "boom".into(),
+    });
+    let last = app.timeline.last().expect("warning entry should exist");
+    assert!(matches!(last.kind, EntryKind::Warning));
+    assert!(last.body.contains("Agent error: boom"));
+}
+
+#[test]
+fn quit_and_scroll_actions_follow_runtime_state_rules() {
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+    app.timeline_content_height.set(30);
+    app.timeline_visible_height.set(10);
+    app.scroll_offset = u16::MAX;
+
+    app.handle_action(InputAction::ScrollUp);
+    assert_eq!(app.scroll_offset, 17);
+    app.handle_action(InputAction::ScrollDown);
+    assert_eq!(app.scroll_offset, 20);
+
+    app.handle_action(InputAction::Quit);
+    assert!(app.should_quit());
+}
+
+#[test]
+fn set_model_without_provider_config_reports_warning() {
+    let base = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target");
+    std::fs::create_dir_all(&base).expect("target dir should exist");
+    let unique = format!(
+        "chat-app-model-switch-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock should be monotonic")
+            .as_nanos()
+    );
+    let repo_path = base.join(unique);
+    std::fs::create_dir_all(&repo_path).expect("scratch repo path should exist");
+
+    let repo_str = repo_path.to_string_lossy().to_string();
+    let mut app = ChatApp::new_for_test(&repo_str).expect("test app should initialize");
+    app.set_model("Qwen/Qwen3-8B");
+
+    let warning = app.timeline.last().expect("warning entry should exist");
+    assert!(matches!(warning.kind, EntryKind::Warning));
+    assert!(warning.body.contains("Failed to switch model"));
+    assert_eq!(app.model_name(), "echo");
+
+    std::fs::remove_dir_all(&repo_path).expect("cleanup scratch repo");
+}
+
+#[test]
+fn picker_plan_command_prefills_composer_shortcut() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+    app.handle_action(InputAction::Key(KeyEvent::new(
+        KeyCode::Char('/'),
+        KeyModifiers::NONE,
+    )));
+    for ch in "plan".chars() {
+        app.handle_action(InputAction::Key(KeyEvent::new(
+            KeyCode::Char(ch),
+            KeyModifiers::NONE,
+        )));
+    }
+
+    app.handle_action(InputAction::Submit);
+    assert_eq!(app.composer_text(), "/plan ");
+}
+
+#[test]
+fn slash_when_composer_not_empty_does_not_open_picker() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+    app.set_composer_text("x");
+    app.handle_action(InputAction::Key(KeyEvent::new(
+        KeyCode::Char('/'),
+        KeyModifiers::NONE,
+    )));
+
+    assert!(!app.picker.is_open());
+    assert!(app.composer_text().contains('/'));
+}
+
+#[test]
+fn status_label_transitions_across_streaming_failure_and_recovery() {
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+    assert_eq!(app.status_label(), "ready");
+
+    app.apply_agent_event_for_test(AgentEvent::TurnStarted {
+        turn_id: "t-1".into(),
+    });
+    assert_eq!(app.status_label(), "streaming…");
+
+    app.active_turn_kind = Some(TurnKind::Plan);
+    assert_eq!(app.status_label(), "thinking");
+
+    app.apply_agent_event_for_test(AgentEvent::TurnFailed {
+        error: "network".into(),
+    });
+    assert!(app.status_label().contains("error: network"));
+
+    app.apply_agent_event_for_test(AgentEvent::TurnComplete);
+    assert_eq!(app.status_label(), "ready");
+}
+
+#[test]
+fn submit_composer_sends_message_and_clears_input() {
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+
+    app.set_composer_text("hello from composer");
+    app.submit_composer();
+
+    assert_eq!(app.composer_text(), "");
+    assert!(
+        app.timeline
+            .iter()
+            .any(|entry| entry.actor == Actor::User && entry.body.contains("hello from composer"))
+    );
+}
+
+#[test]
+fn picker_model_command_opens_model_subpicker_context() {
+    use crate::chat::picker::PickerContext;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+    app.handle_action(InputAction::Key(KeyEvent::new(
+        KeyCode::Char('/'),
+        KeyModifiers::NONE,
+    )));
+    for ch in "model".chars() {
+        app.handle_action(InputAction::Key(KeyEvent::new(
+            KeyCode::Char(ch),
+            KeyModifiers::NONE,
+        )));
+    }
+    app.handle_action(InputAction::Submit);
+
+    assert_eq!(app.picker.context, PickerContext::ModelSelect);
+    assert!(app.picker.is_open());
+    assert_eq!(app.picker.title, "Select Model");
+}
+
+#[test]
+fn quit_during_streaming_requests_cancel_without_exiting() {
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+    app.apply_agent_event_for_test(AgentEvent::TurnStarted {
+        turn_id: "streaming-turn".into(),
+    });
+    assert!(app.is_streaming());
+
+    app.handle_action(InputAction::Quit);
+    assert!(!app.should_quit());
+}
+
+#[test]
+fn set_model_with_valid_config_switches_runtime_and_adds_hint() {
+    let base = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target");
+    std::fs::create_dir_all(&base).expect("target dir should exist");
+    let unique = format!(
+        "chat-app-model-success-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock should be monotonic")
+            .as_nanos()
+    );
+    let repo_path = base.join(unique);
+    std::fs::create_dir_all(repo_path.join("config")).expect("create config dir");
+    std::fs::write(
+        repo_path.join("config/provider.json"),
+        r#"{
+  "api_key": "test-key",
+  "base_url": "https://example.com/v1",
+  "model": "Qwen/Qwen3-8B"
+}"#,
+    )
+    .expect("write provider config");
+
+    let repo_str = repo_path.to_string_lossy().to_string();
+    let mut app = ChatApp::new_for_test(&repo_str).expect("test app should initialize");
+    app.set_model("Qwen/Qwen3-32B");
+
+    assert_eq!(app.model_name(), "Qwen/Qwen3-32B");
+    let hint = app.timeline.last().expect("hint entry should exist");
+    assert!(matches!(hint.kind, EntryKind::Hint));
+    assert!(hint.body.contains("Model switched"));
+
+    std::fs::remove_dir_all(&repo_path).expect("cleanup scratch repo");
+}
+
+#[test]
+fn private_text_helpers_handle_unicode_and_home_paths() {
+    let home = std::env::var("HOME").expect("HOME should exist");
+    let inside_home = format!("{home}/projects/blazar");
+    assert_eq!(shorten_home(&inside_home), "~/projects/blazar");
+    assert_eq!(shorten_home("/opt/work"), "/opt/work");
+
+    assert_eq!(preview_text("你好世界hello", 2), "你好");
+    assert_eq!(
+        summarize_tool_arguments(&"x".repeat(70)).chars().count(),
+        60
+    );
+    assert_eq!(summarize_tool_output("first\nsecond"), "first");
+}
+
+#[test]
+fn picker_submit_regular_command_and_navigation_actions_work() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+    app.handle_action(InputAction::Key(KeyEvent::new(
+        KeyCode::Char('/'),
+        KeyModifiers::NONE,
+    )));
+
+    let selected_before = app.picker.selected_index();
+    app.handle_action(InputAction::ScrollDown);
+    app.handle_action(InputAction::PickerDown);
+    app.handle_action(InputAction::ScrollUp);
+    app.handle_action(InputAction::PickerUp);
+    assert_eq!(app.picker.selected_index(), selected_before);
+
+    app.handle_action(InputAction::Key(KeyEvent::new(
+        KeyCode::Tab,
+        KeyModifiers::NONE,
+    )));
+    assert!(app.picker.filter.is_empty());
+
+    for ch in "help".chars() {
+        app.handle_action(InputAction::Key(KeyEvent::new(
+            KeyCode::Char(ch),
+            KeyModifiers::NONE,
+        )));
+    }
+    app.handle_action(InputAction::Submit);
+    assert!(
+        app.timeline
+            .iter()
+            .any(|entry| entry.actor == Actor::User && entry.body == "/help")
+    );
+}
+
+#[test]
+fn picker_model_selection_trims_checkmark_suffix_before_switch() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    let base = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target");
+    std::fs::create_dir_all(&base).expect("target dir should exist");
+    let unique = format!(
+        "chat-app-model-trim-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock should be monotonic")
+            .as_nanos()
+    );
+    let repo_path = base.join(unique);
+    std::fs::create_dir_all(repo_path.join("config")).expect("create config dir");
+    std::fs::write(
+        repo_path.join("config/provider.json"),
+        r#"{
+  "api_key": "test-key",
+  "base_url": "https://example.com/v1",
+  "model": "Qwen/Qwen3-8B"
+}"#,
+    )
+    .expect("write provider config");
+
+    let repo_str = repo_path.to_string_lossy().to_string();
+    let mut app = ChatApp::new_for_test(&repo_str).expect("test app should initialize");
+    app.model_name = "Qwen/Qwen3-8B".into();
+    app.handle_action(InputAction::Key(KeyEvent::new(
+        KeyCode::Char('/'),
+        KeyModifiers::NONE,
+    )));
+    for ch in "model".chars() {
+        app.handle_action(InputAction::Key(KeyEvent::new(
+            KeyCode::Char(ch),
+            KeyModifiers::NONE,
+        )));
+    }
+    app.handle_action(InputAction::Submit); // open model picker
+    app.handle_action(InputAction::Submit); // choose first model item (contains ✓ suffix)
+
+    assert_eq!(app.model_name(), "Qwen/Qwen3-8B");
+    let hint = app.timeline.last().expect("hint entry should exist");
+    assert!(!hint.body.contains('✓'));
+
+    std::fs::remove_dir_all(&repo_path).expect("cleanup scratch repo");
+}
+
+#[test]
+fn input_backspace_and_toggle_details_actions_update_local_state() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+    app.handle_action(InputAction::Key(KeyEvent::new(
+        KeyCode::Char('a'),
+        KeyModifiers::NONE,
+    )));
+    app.handle_action(InputAction::Key(KeyEvent::new(
+        KeyCode::Char('b'),
+        KeyModifiers::NONE,
+    )));
+    app.handle_action(InputAction::Backspace);
+    assert_eq!(app.composer_text(), "a");
+
+    assert!(!app.show_details());
+    app.handle_action(InputAction::ToggleDetails);
+    assert!(app.show_details());
+}
+
+#[test]
+fn event_handlers_append_to_existing_thinking_and_response_entries() {
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+    app.timeline.clear();
+    app.timeline.push(TimelineEntry::thinking("seed"));
+
+    app.apply_agent_event_for_test(AgentEvent::ThinkingDelta {
+        text: " +more".into(),
+    });
+    assert_eq!(app.timeline.len(), 1);
+    assert!(app.timeline[0].body.contains("seed +more"));
+    assert!(app.timeline[0].details.contains(" +more"));
+
+    app.apply_agent_event_for_test(AgentEvent::TextDelta {
+        text: "answer".into(),
+    });
+    assert_eq!(app.timeline.len(), 2);
+    app.apply_agent_event_for_test(AgentEvent::TextDelta {
+        text: " tail".into(),
+    });
+    assert!(app.timeline[1].body.ends_with(" tail"));
+}
+
+#[test]
+fn tool_call_completed_without_matching_start_is_ignored_safely() {
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+    let initial_len = app.timeline.len();
+    app.apply_agent_event_for_test(AgentEvent::ToolCallCompleted {
+        call_id: "missing".into(),
+        output: "ignored".into(),
+        is_error: false,
+    });
+    assert_eq!(app.timeline.len(), initial_len);
+}
+
+#[test]
+fn picker_commands_context_supports_non_slash_labels() {
+    use crate::chat::picker::{ModalPicker, PickerContext, PickerItem};
+
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+    app.picker = ModalPicker::with_context(
+        "Commands",
+        vec![PickerItem::new("custom command", "desc")],
+        PickerContext::Commands,
+    );
+    app.picker.open();
+
+    app.handle_action(InputAction::Submit);
+    assert!(
+        app.timeline
+            .iter()
+            .any(|entry| entry.actor == Actor::User && entry.body == "custom command")
+    );
+}
+
+#[test]
+fn tool_call_completed_sets_error_status_and_summary() {
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+
+    app.apply_agent_event_for_test(AgentEvent::ToolCallStarted {
+        call_id: "call-err".into(),
+        tool_name: "bash".into(),
+        arguments: r#"{"command":"exit 1"}"#.into(),
+    });
+    app.apply_agent_event_for_test(AgentEvent::ToolCallCompleted {
+        call_id: "call-err".into(),
+        output: "first line\nsecond line".into(),
+        is_error: true,
+    });
+
+    let entry = app.timeline.last().expect("tool entry should exist");
+    assert!(matches!(
+        entry.kind,
+        EntryKind::ToolCall {
+            status: ToolCallStatus::Error,
+            ..
+        }
+    ));
+    assert_eq!(entry.body, "first line");
+    assert!(entry.details.contains("second line"));
+}
+
+#[test]
+fn turn_complete_plan_with_non_extractable_body_leaves_entry_untitled() {
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+    app.timeline
+        .push(TimelineEntry::response("###").with_title("Existing"));
+    app.active_turn_kind = Some(TurnKind::Plan);
+    app.active_turn_title = Some("Temp title".into());
+
+    app.apply_agent_event_for_test(AgentEvent::TurnComplete);
+    let last = app.timeline.last().expect("assistant entry should exist");
+    assert_eq!(last.title.as_deref(), Some("Existing"));
+    assert_eq!(last.body, "###");
+    assert!(app.active_turn_kind.is_none());
+    assert!(app.active_turn_title.is_none());
+}
+
+#[test]
+fn build_pending_turn_and_dispatch_helpers_cover_plan_and_chat_paths() {
+    let chat = super::turns::build_pending_turn("  hello ");
+    assert_eq!(chat.user_text, "hello");
+    assert_eq!(chat.runtime_prompt, "hello");
+    assert_eq!(chat.kind, TurnKind::Chat);
+
+    let plan = super::turns::build_pending_turn("/plan   improve tests");
+    assert_eq!(plan.kind, TurnKind::Plan);
+    assert!(plan.runtime_prompt.contains("planning mode"));
+    assert!(plan.runtime_prompt.contains("User request:\nimprove tests"));
+
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+    app.dispatch_next_queued();
+    assert!(app.pending_messages.is_empty());
+}

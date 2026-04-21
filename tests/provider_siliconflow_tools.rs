@@ -1,11 +1,72 @@
 use blazar::agent::tools::ToolSpec;
-use blazar::provider::ProviderMessage;
 use blazar::provider::siliconflow::{
     DeltaFunction, DeltaToolCall, FunctionCall, SiliconFlowConfig, SiliconFlowProvider, ToolCall,
     ToolChoice, merge_tool_call_fragment,
 };
+use blazar::provider::{LlmProvider, ProviderMessage};
 use serde_json::json;
+use std::io::{Read, Write};
+use std::net::TcpListener;
+use std::sync::mpsc;
+use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+fn spawn_one_shot_server<F>(handler: F) -> (String, thread::JoinHandle<()>)
+where
+    F: FnOnce(String) -> String + Send + 'static,
+{
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
+    let addr = listener.local_addr().expect("local addr");
+    let handle = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept");
+        let mut request_bytes = Vec::new();
+        let mut header_end = None;
+        let mut content_length = 0usize;
+
+        loop {
+            let mut buf = [0_u8; 4096];
+            let n = stream.read(&mut buf).expect("read request");
+            if n == 0 {
+                break;
+            }
+            request_bytes.extend_from_slice(&buf[..n]);
+
+            if header_end.is_none()
+                && let Some(pos) = request_bytes.windows(4).position(|w| w == b"\r\n\r\n")
+            {
+                header_end = Some(pos + 4);
+                let headers = String::from_utf8_lossy(&request_bytes[..pos + 4]);
+                content_length = headers
+                    .lines()
+                    .find_map(|line| {
+                        line.strip_prefix("Content-Length:")
+                            .and_then(|v| v.trim().parse::<usize>().ok())
+                    })
+                    .unwrap_or(0);
+            }
+
+            if let Some(end) = header_end
+                && request_bytes.len() >= end + content_length
+            {
+                break;
+            }
+        }
+
+        let request = String::from_utf8_lossy(&request_bytes).to_string();
+        let response = handler(request);
+        stream
+            .write_all(response.as_bytes())
+            .expect("write response");
+    });
+    (format!("http://{addr}"), handle)
+}
+
+fn http_response(status: u16, reason: &str, content_type: &str, body: &str) -> String {
+    format!(
+        "HTTP/1.1 {status} {reason}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    )
+}
 
 #[test]
 fn build_request_groups_tool_only_multi_call_turns() {
@@ -535,4 +596,177 @@ fn load_config_defaults_enable_thinking_to_false() {
     assert_eq!(config.enable_thinking, Some(false));
 
     std::fs::remove_dir_all(&repo_root).expect("cleanup temp repo");
+}
+
+#[test]
+fn load_config_reads_system_prompt_file_and_overrides_inline_prompt() {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock should be monotonic")
+        .as_nanos();
+    let repo_root = std::env::temp_dir().join(format!("blazar-provider-config-file-{nonce}"));
+    std::fs::create_dir_all(repo_root.join("config")).expect("create config dir");
+    std::fs::create_dir_all(repo_root.join("prompts")).expect("create prompts dir");
+    std::fs::write(
+        repo_root.join("prompts/system.md"),
+        "You are a careful coding assistant.",
+    )
+    .expect("write prompt file");
+    std::fs::write(
+        repo_root.join("config/provider.json"),
+        r#"{
+  "api_key": "test-key",
+  "base_url": "https://example.com/v1",
+  "model": "Qwen/Qwen3-8B",
+  "system_prompt": "inline prompt",
+  "system_prompt_file": "prompts/system.md"
+}"#,
+    )
+    .expect("write provider config");
+
+    let config = SiliconFlowConfig::load(repo_root.to_str().expect("utf-8 temp path"))
+        .expect("load provider config");
+    assert_eq!(
+        config.system_prompt.as_deref(),
+        Some("You are a careful coding assistant.")
+    );
+    assert_eq!(config.enable_thinking, Some(false));
+
+    std::fs::remove_dir_all(&repo_root).expect("cleanup temp repo");
+}
+
+#[test]
+fn load_config_returns_descriptive_errors_for_missing_or_invalid_input() {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock should be monotonic")
+        .as_nanos();
+    let missing_root = std::env::temp_dir().join(format!("blazar-provider-missing-{nonce}"));
+    std::fs::create_dir_all(&missing_root).expect("create root");
+    let missing_err = SiliconFlowConfig::load(missing_root.to_str().expect("utf-8 temp path"))
+        .expect_err("missing config should fail");
+    assert!(missing_err.contains("cannot read"));
+
+    let invalid_root = std::env::temp_dir().join(format!("blazar-provider-invalid-{nonce}"));
+    std::fs::create_dir_all(invalid_root.join("config")).expect("create config dir");
+    std::fs::write(invalid_root.join("config/provider.json"), "{not-json")
+        .expect("write invalid json");
+    let invalid_err = SiliconFlowConfig::load(invalid_root.to_str().expect("utf-8 temp path"))
+        .expect_err("invalid json should fail");
+    assert!(invalid_err.contains("invalid provider config"));
+
+    std::fs::write(
+        invalid_root.join("config/provider.json"),
+        r#"{
+  "api_key": "test-key",
+  "base_url": "https://example.com/v1",
+  "model": "Qwen/Qwen3-8B",
+  "system_prompt_file": "missing/prompt.md"
+}"#,
+    )
+    .expect("write config with missing prompt file");
+    let prompt_err = SiliconFlowConfig::load(invalid_root.to_str().expect("utf-8 temp path"))
+        .expect_err("missing prompt file should fail");
+    assert!(prompt_err.contains("cannot read system_prompt_file"));
+
+    std::fs::remove_dir_all(&missing_root).expect("cleanup missing root");
+    std::fs::remove_dir_all(&invalid_root).expect("cleanup invalid root");
+}
+
+#[test]
+fn merge_tool_call_fragment_expands_vector_for_sparse_indexes() {
+    let mut tool_calls = Vec::new();
+    merge_tool_call_fragment(
+        &mut tool_calls,
+        &DeltaToolCall {
+            index: 2,
+            id: Some("call-3".into()),
+            call_type: Some("function".into()),
+            function: Some(DeltaFunction {
+                name: Some("bash".into()),
+                arguments: Some("{\"command\":\"echo hi\"}".into()),
+            }),
+        },
+    );
+
+    assert_eq!(tool_calls.len(), 3);
+    assert_eq!(tool_calls[2].id, "call-3");
+    assert_eq!(tool_calls[2].function.name, "bash");
+    assert_eq!(
+        tool_calls[2].function.arguments,
+        "{\"command\":\"echo hi\"}"
+    );
+    assert!(tool_calls[0].id.is_empty());
+}
+
+#[test]
+fn stream_turn_surfaces_provider_errors_and_success_events() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind ephemeral port");
+    let addr = listener.local_addr().expect("local addr");
+    drop(listener);
+
+    let error_provider = SiliconFlowProvider::new(SiliconFlowConfig {
+        api_key: "test".into(),
+        base_url: format!("http://{addr}"),
+        model: "Qwen/Qwen3-8B".into(),
+        max_tokens: 64,
+        temperature: 0.0,
+        top_p: None,
+        top_k: None,
+        frequency_penalty: None,
+        enable_thinking: None,
+        thinking_budget: None,
+        system_prompt: None,
+        system_prompt_file: None,
+    });
+
+    let (tx, rx) = mpsc::channel();
+    error_provider.stream_turn(
+        &[ProviderMessage::User {
+            content: "hello".into(),
+        }],
+        &[],
+        tx,
+    );
+    let events: Vec<_> = rx.try_iter().collect();
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event, blazar::provider::ProviderEvent::Error(_)))
+    );
+
+    let (base_url, handle) = spawn_one_shot_server(|request| {
+        assert!(request.starts_with("POST /chat/completions HTTP/1.1"));
+        http_response(200, "OK", "text/event-stream", "data: [DONE]\n")
+    });
+    let success_provider = SiliconFlowProvider::new(SiliconFlowConfig {
+        api_key: "test".into(),
+        base_url,
+        model: "Qwen/Qwen3-8B".into(),
+        max_tokens: 64,
+        temperature: 0.0,
+        top_p: None,
+        top_k: None,
+        frequency_penalty: None,
+        enable_thinking: None,
+        thinking_budget: None,
+        system_prompt: None,
+        system_prompt_file: None,
+    });
+
+    let (tx, rx) = mpsc::channel();
+    success_provider.stream_turn(
+        &[ProviderMessage::User {
+            content: "hello".into(),
+        }],
+        &[],
+        tx,
+    );
+    handle.join().expect("server joined");
+    let events: Vec<_> = rx.try_iter().collect();
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event, blazar::provider::ProviderEvent::TurnComplete))
+    );
 }

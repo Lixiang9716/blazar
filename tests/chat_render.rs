@@ -237,3 +237,36 @@ fn interactive_send_message_shows_echo_response() {
         "user message 'hi' should appear in timeline"
     );
 }
+
+#[test]
+fn render_to_lines_returns_empty_when_dimensions_are_zero() {
+    let mut app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
+    assert!(render_to_lines_for_test(&mut app, 0, 20).is_empty());
+    assert!(render_to_lines_for_test(&mut app, 20, 0).is_empty());
+}
+
+#[test]
+fn render_to_lines_handles_wide_unicode_cells() {
+    let mut app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
+    app.apply_agent_event_for_test(blazar::agent::protocol::AgentEvent::TextDelta {
+        text: "Emoji 😀 output and 你好".into(),
+    });
+
+    let lines = render_to_lines_for_test(&mut app, 60, 20);
+    let text = lines.join("\n");
+    assert!(text.contains('😀'));
+}
+
+#[test]
+fn render_frame_handles_streaming_indicator_in_tight_layouts() {
+    let backend = TestBackend::new(3, 6);
+    let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
+    let mut app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
+    app.apply_agent_event_for_test(blazar::agent::protocol::AgentEvent::TurnStarted {
+        turn_id: "tight-stream".into(),
+    });
+
+    terminal
+        .draw(|frame| render_frame(frame, &mut app, 0))
+        .expect("render should succeed even when streaming area is narrow");
+}

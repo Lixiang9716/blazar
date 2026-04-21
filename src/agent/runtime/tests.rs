@@ -1,11 +1,64 @@
 use super::*;
 use crate::agent::tools::{Tool, ToolSpec};
 use serde_json::json;
+use std::error::Error;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
 
 fn empty_registry() -> ToolRegistry {
     ToolRegistry::new(PathBuf::from(env!("CARGO_MANIFEST_DIR")))
+}
+
+#[test]
+fn new_with_spawner_surfaces_thread_spawn_errors() {
+    let result = AgentRuntime::new_with_spawner(
+        Box::new(crate::provider::echo::EchoProvider::new(0)),
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")),
+        |_| Err(std::io::Error::other("spawn failed")),
+    );
+    let error = match result {
+        Ok(_) => panic!("runtime creation should fail"),
+        Err(error) => error,
+    };
+
+    assert!(matches!(error, AgentRuntimeError::ThreadSpawn(_)));
+    assert!(
+        error
+            .to_string()
+            .contains("failed to spawn agent runtime thread")
+    );
+    assert_eq!(
+        error
+            .source()
+            .expect("thread spawn error should expose source")
+            .to_string(),
+        "spawn failed"
+    );
+}
+
+#[test]
+fn runtime_loop_handles_cancel_and_shutdown_commands() {
+    let (cmd_tx, cmd_rx) = mpsc::channel();
+    let (event_tx, _event_rx) = mpsc::channel();
+    let cancel_flag = Arc::new(AtomicBool::new(false));
+    let cancel_for_thread = Arc::clone(&cancel_flag);
+    let tools = empty_registry();
+
+    let handle = std::thread::spawn(move || {
+        runtime_loop(
+            cmd_rx,
+            event_tx,
+            Box::new(crate::provider::echo::EchoProvider::new(0)),
+            tools,
+            cancel_for_thread,
+        );
+    });
+
+    cmd_tx.send(AgentCommand::Cancel).expect("send cancel");
+    cmd_tx.send(AgentCommand::Shutdown).expect("send shutdown");
+    handle.join().expect("runtime loop should stop");
+
+    assert!(cancel_flag.load(Ordering::SeqCst));
 }
 
 fn user_messages(prompt: &str) -> Vec<ProviderMessage> {
