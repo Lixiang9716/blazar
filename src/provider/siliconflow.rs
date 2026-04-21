@@ -1,3 +1,4 @@
+use std::collections::{HashMap, HashSet};
 use std::io::BufRead;
 use std::process::Command;
 use std::sync::mpsc::Sender;
@@ -29,7 +30,7 @@ pub struct SiliconFlowConfig {
     #[serde(default)]
     pub frequency_penalty: Option<f32>,
     /// Enable chain-of-thought (for supported models like Qwen3, DeepSeek-V3).
-    #[serde(default)]
+    #[serde(default = "default_enable_thinking")]
     pub enable_thinking: Option<bool>,
     /// Max tokens for chain-of-thought output (128..=32768).
     #[serde(default)]
@@ -54,6 +55,9 @@ fn default_max_tokens() -> u32 {
 }
 fn default_temperature() -> f32 {
     0.7
+}
+fn default_enable_thinking() -> Option<bool> {
+    Some(false)
 }
 
 impl SiliconFlowConfig {
@@ -776,32 +780,35 @@ fn determine_tool_choice(messages: &[ProviderMessage], has_tools: bool) -> Optio
 }
 
 fn has_repeated_successful_tool_calls(messages: &[ProviderMessage]) -> bool {
-    let mut successful_pairs: Vec<(String, String, String)> = Vec::new();
-    for pair in messages.windows(2) {
-        let (
+    let mut pending_calls: HashMap<&str, (&str, &str)> = HashMap::new();
+    let mut seen_successes: HashSet<(String, String, String)> = HashSet::new();
+
+    for message in messages {
+        match message {
             ProviderMessage::ToolCall {
-                name, arguments, ..
-            },
+                id,
+                name,
+                arguments,
+            } => {
+                pending_calls.insert(id.as_str(), (name.as_str(), arguments.as_str()));
+            }
             ProviderMessage::ToolResult {
+                tool_call_id,
                 output,
                 is_error: false,
-                ..
-            },
-        ) = (&pair[0], &pair[1])
-        else {
-            continue;
-        };
-
-        successful_pairs.push((name.clone(), arguments.clone(), output.clone()));
+            } => {
+                if let Some((name, arguments)) = pending_calls.remove(tool_call_id.as_str()) {
+                    let success = (name.to_string(), arguments.to_string(), output.clone());
+                    if !seen_successes.insert(success) {
+                        return true;
+                    }
+                }
+            }
+            _ => {}
+        }
     }
 
-    if successful_pairs.len() < 2 {
-        return false;
-    }
-
-    let previous = &successful_pairs[successful_pairs.len() - 2];
-    let latest = &successful_pairs[successful_pairs.len() - 1];
-    previous == latest
+    false
 }
 
 impl LlmProvider for SiliconFlowProvider {

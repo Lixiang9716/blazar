@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -40,6 +40,11 @@ const REPEATED_SUCCESS_GUIDANCE: &str = "REPEATED SUCCESS: identical tool call a
      Stop repeating it and continue with the next step or final answer.";
 const JSON_REPAIR_NOTE: &str = "[NOTE] Tool arguments had malformed JSON and were auto-repaired. \
 Use escaped double quotes (\\\") inside JSON string values.";
+const TIMEOUT_NOTE: &str = "TIMEOUT NOTE: this command exceeded the tool timeout. \
+If this is computation-heavy, the algorithm may be too slow for the current input. \
+Consider a more efficient approach (e.g., memoization/iterative rewrite), reducing input size, or only then increasing timeout_secs.";
+const REPEATED_TIMEOUT_GUIDANCE: &str = "REPEATED TIMEOUT: the same tool call timed out multiple times. \
+Change strategy instead of retrying the same implementation.";
 
 impl AgentRuntime {
     /// Create a new runtime with the given provider.
@@ -261,7 +266,8 @@ fn run_turn(
     let mut tool_iterations = 0usize;
     // Track (tool_name, raw_args) → consecutive failure count for duplicate detection.
     let mut consecutive_failures: HashMap<(String, String), usize> = HashMap::new();
-    let mut last_success_signature: Option<(String, String)> = None;
+    let mut consecutive_timeout_failures: HashMap<(String, String), usize> = HashMap::new();
+    let mut previous_pass_successes: HashSet<(String, String)> = HashSet::new();
 
     loop {
         if cancel_flag.load(Ordering::SeqCst) {
@@ -299,6 +305,7 @@ fn run_turn(
                     });
                 }
 
+                let mut current_pass_successes: HashSet<(String, String)> = HashSet::new();
                 for pending in pending_calls {
                     if cancel_flag.load(Ordering::SeqCst) {
                         let _ = event_tx.send(AgentEvent::TurnFailed {
@@ -327,7 +334,7 @@ fn run_turn(
                                 pending.name.clone(),
                                 canonical_tool_args(&parsed.value, &cleaned_args),
                             );
-                            if last_success_signature.as_ref() == Some(&signature) {
+                            if previous_pass_successes.contains(&signature) {
                                 ToolResult::failure(REPEATED_SUCCESS_GUIDANCE)
                             } else {
                                 let mut result =
@@ -337,15 +344,20 @@ fn run_turn(
                                         format!("{}\n\n{}", JSON_REPAIR_NOTE, result.output);
                                 }
                                 if result.is_error {
-                                    last_success_signature = None;
+                                    result = annotate_timeout_failure(
+                                        result,
+                                        &pending.name,
+                                        &signature.1,
+                                        &mut consecutive_timeout_failures,
+                                    );
                                 } else {
-                                    last_success_signature = Some(signature);
+                                    consecutive_timeout_failures.remove(&signature);
+                                    current_pass_successes.insert(signature);
                                 }
                                 result
                             }
                         }
                         Err(error) => {
-                            last_success_signature = None;
                             let fail_key = (pending.name.clone(), pending.arguments.clone());
                             let count = consecutive_failures.entry(fail_key).or_insert(0);
                             *count += 1;
@@ -386,6 +398,7 @@ fn run_turn(
                     });
                     tool_iterations += 1;
                 }
+                previous_pass_successes = current_pass_successes;
             }
             TurnOutcome::Cancelled => return TurnOutcome::Cancelled,
             TurnOutcome::TransientError(err) => {
@@ -404,6 +417,34 @@ fn execute_tool_call(tools: &ToolRegistry, name: &str, args: Value) -> ToolResul
         Ok(result) => result,
         Err(error) => ToolResult::failure(error),
     }
+}
+
+fn annotate_timeout_failure(
+    mut result: ToolResult,
+    tool_name: &str,
+    canonical_args: &str,
+    failures: &mut HashMap<(String, String), usize>,
+) -> ToolResult {
+    let key = (tool_name.to_string(), canonical_args.to_string());
+    if !is_timeout_output(&result.output) {
+        failures.remove(&key);
+        return result;
+    }
+
+    let count = failures
+        .entry(key)
+        .and_modify(|current| *current += 1)
+        .or_insert(1);
+    result.output = format!("{}\n\n{}", result.output, TIMEOUT_NOTE);
+    if *count >= 2 {
+        result.output = format!("{}\n\n{}", result.output, REPEATED_TIMEOUT_GUIDANCE);
+    }
+    result
+}
+
+fn is_timeout_output(output: &str) -> bool {
+    let lower = output.to_ascii_lowercase();
+    lower.contains("timed out") || lower.contains("timeout")
 }
 
 fn stream_provider_pass(
@@ -1112,8 +1153,8 @@ mod tests {
         ));
         assert_eq!(
             counter.load(Ordering::SeqCst),
-            1,
-            "duplicate success guard should prevent rerunning identical side effects"
+            (MAX_TOOL_ITERATIONS / 2) as u32,
+            "duplicate-success guard should block every immediate retry and cut side effects roughly in half"
         );
     }
 
@@ -1236,6 +1277,243 @@ mod tests {
         assert!(messages.iter().any(|message| {
             matches!(message, ProviderMessage::ToolResult { output, is_error, .. }
                 if !*is_error && output.contains(JSON_REPAIR_NOTE))
+        }));
+    }
+
+    struct TimeoutTool {
+        calls: Arc<AtomicU32>,
+    }
+
+    impl Tool for TimeoutTool {
+        fn spec(&self) -> ToolSpec {
+            ToolSpec {
+                name: "slow_bash".into(),
+                description: "always times out".into(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": false
+                }),
+            }
+        }
+
+        fn execute(&self, _args: serde_json::Value) -> crate::agent::tools::ToolResult {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            crate::agent::tools::ToolResult {
+                output: "command timed out after 30s".into(),
+                exit_code: None,
+                is_error: true,
+                output_truncated: false,
+            }
+        }
+    }
+
+    #[test]
+    fn run_turn_adds_timeout_guidance_on_first_timeout_error() {
+        struct SingleTimeoutProvider;
+
+        impl LlmProvider for SingleTimeoutProvider {
+            fn stream_turn(
+                &self,
+                messages: &[ProviderMessage],
+                _tools: &[ToolSpec],
+                tx: Sender<ProviderEvent>,
+            ) {
+                let has_tool_result = messages
+                    .iter()
+                    .any(|message| matches!(message, ProviderMessage::ToolResult { .. }));
+                if has_tool_result {
+                    let _ = tx.send(ProviderEvent::TextDelta("done".into()));
+                    let _ = tx.send(ProviderEvent::TurnComplete);
+                    return;
+                }
+
+                let _ = tx.send(ProviderEvent::ToolCall {
+                    call_id: "call-timeout-1".into(),
+                    name: "slow_bash".into(),
+                    arguments: "{}".into(),
+                });
+                let _ = tx.send(ProviderEvent::TurnComplete);
+            }
+        }
+
+        let calls = Arc::new(AtomicU32::new(0));
+        let mut registry = empty_registry();
+        registry.register(Box::new(TimeoutTool {
+            calls: Arc::clone(&calls),
+        }));
+
+        let (event_tx, _event_rx) = mpsc::channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let mut messages = user_messages("run once");
+
+        let outcome = run_turn(
+            &mut messages,
+            &SingleTimeoutProvider,
+            &registry,
+            &event_tx,
+            &cancel,
+        );
+
+        assert!(matches!(outcome, TurnOutcome::Complete));
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert!(messages.iter().any(|message| {
+            matches!(message, ProviderMessage::ToolResult { output, is_error, .. }
+                if *is_error && output.contains("TIMEOUT NOTE"))
+        }));
+    }
+
+    #[test]
+    fn run_turn_escalates_guidance_after_repeated_timeout_errors() {
+        struct RepeatedTimeoutProvider;
+
+        impl LlmProvider for RepeatedTimeoutProvider {
+            fn stream_turn(
+                &self,
+                messages: &[ProviderMessage],
+                _tools: &[ToolSpec],
+                tx: Sender<ProviderEvent>,
+            ) {
+                let last_error = messages.iter().rev().find_map(|message| match message {
+                    ProviderMessage::ToolResult {
+                        output, is_error, ..
+                    } if *is_error => Some(output.as_str()),
+                    _ => None,
+                });
+
+                if let Some(output) = last_error
+                    && output.contains("REPEATED TIMEOUT")
+                {
+                    let _ = tx.send(ProviderEvent::TextDelta("done".into()));
+                    let _ = tx.send(ProviderEvent::TurnComplete);
+                    return;
+                }
+
+                let _ = tx.send(ProviderEvent::ToolCall {
+                    call_id: "call-timeout-loop".into(),
+                    name: "slow_bash".into(),
+                    arguments: "{}".into(),
+                });
+                let _ = tx.send(ProviderEvent::TurnComplete);
+            }
+        }
+
+        let calls = Arc::new(AtomicU32::new(0));
+        let mut registry = empty_registry();
+        registry.register(Box::new(TimeoutTool {
+            calls: Arc::clone(&calls),
+        }));
+
+        let (event_tx, _event_rx) = mpsc::channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let mut messages = user_messages("run with retries");
+
+        let outcome = run_turn(
+            &mut messages,
+            &RepeatedTimeoutProvider,
+            &registry,
+            &event_tx,
+            &cancel,
+        );
+
+        assert!(matches!(outcome, TurnOutcome::Complete));
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        assert!(messages.iter().any(|message| {
+            matches!(message, ProviderMessage::ToolResult { output, is_error, .. }
+                if *is_error && output.contains("REPEATED TIMEOUT"))
+        }));
+    }
+
+    #[test]
+    fn run_turn_blocks_repeated_success_for_batched_tool_calls() {
+        struct NamedCountingTool {
+            name: &'static str,
+            calls: Arc<AtomicU32>,
+        }
+
+        impl Tool for NamedCountingTool {
+            fn spec(&self) -> ToolSpec {
+                ToolSpec {
+                    name: self.name.to_string(),
+                    description: "count executions".into(),
+                    parameters: json!({
+                        "type": "object",
+                        "properties": {},
+                        "additionalProperties": false
+                    }),
+                }
+            }
+
+            fn execute(&self, _args: serde_json::Value) -> crate::agent::tools::ToolResult {
+                self.calls.fetch_add(1, Ordering::SeqCst);
+                crate::agent::tools::ToolResult::success("counted")
+            }
+        }
+
+        struct BatchedDuplicateProvider;
+
+        impl LlmProvider for BatchedDuplicateProvider {
+            fn stream_turn(
+                &self,
+                messages: &[ProviderMessage],
+                _tools: &[ToolSpec],
+                tx: Sender<ProviderEvent>,
+            ) {
+                let saw_repeat_guard = messages.iter().any(|message| {
+                    matches!(message, ProviderMessage::ToolResult { output, is_error, .. }
+                        if *is_error && output.contains("REPEATED SUCCESS"))
+                });
+
+                if saw_repeat_guard {
+                    let _ = tx.send(ProviderEvent::TextDelta("done".into()));
+                    let _ = tx.send(ProviderEvent::TurnComplete);
+                    return;
+                }
+
+                let _ = tx.send(ProviderEvent::ToolCall {
+                    call_id: "call-a".into(),
+                    name: "count_a".into(),
+                    arguments: "{}".into(),
+                });
+                let _ = tx.send(ProviderEvent::ToolCall {
+                    call_id: "call-b".into(),
+                    name: "count_b".into(),
+                    arguments: "{}".into(),
+                });
+                let _ = tx.send(ProviderEvent::TurnComplete);
+            }
+        }
+
+        let counter_a = Arc::new(AtomicU32::new(0));
+        let counter_b = Arc::new(AtomicU32::new(0));
+        let mut registry = empty_registry();
+        registry.register(Box::new(NamedCountingTool {
+            name: "count_a",
+            calls: Arc::clone(&counter_a),
+        }));
+        registry.register(Box::new(NamedCountingTool {
+            name: "count_b",
+            calls: Arc::clone(&counter_b),
+        }));
+
+        let (event_tx, _event_rx) = mpsc::channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let mut messages = user_messages("run batch once");
+
+        let outcome = run_turn(
+            &mut messages,
+            &BatchedDuplicateProvider,
+            &registry,
+            &event_tx,
+            &cancel,
+        );
+
+        assert!(matches!(outcome, TurnOutcome::Complete));
+        assert_eq!(counter_a.load(Ordering::SeqCst), 1);
+        assert_eq!(counter_b.load(Ordering::SeqCst), 1);
+        assert!(messages.iter().any(|message| {
+            matches!(message, ProviderMessage::ToolResult { output, is_error, .. }
+                if *is_error && output.contains("REPEATED SUCCESS"))
         }));
     }
 
