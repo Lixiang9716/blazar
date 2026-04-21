@@ -27,7 +27,14 @@ pub(super) fn render_status_bar(frame: &mut Frame, area: Rect, app: &ChatApp, th
     } else {
         theme.status_right
     };
-    let right = format!("blazar · {status}");
+
+    // Show short model name (last path segment) for brevity.
+    let model_short = app
+        .model_name()
+        .rsplit('/')
+        .next()
+        .unwrap_or(app.model_name());
+    let right = format!("{model_short} · {status}");
 
     let available = area.width as usize;
     let gap = available.saturating_sub(left.len() + right.len());

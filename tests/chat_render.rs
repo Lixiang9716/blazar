@@ -10,8 +10,10 @@ fn chat_view_renders_title_bar_and_timeline() {
     let lines = render_to_lines_for_test(&mut app, 100, 35);
 
     assert!(
-        lines.iter().any(|line| line.contains("blazar")),
-        "title bar should contain 'blazar'"
+        lines
+            .iter()
+            .any(|line| line.to_lowercase().contains("blazar")),
+        "title bar should contain 'Blazar'"
     );
     assert!(
         lines

@@ -6,6 +6,14 @@ use tui_widget_list::ListState;
 
 pub const PICKER_PAGE_SIZE: usize = 6;
 
+/// What the picker is currently selecting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PickerContext {
+    Commands,
+    ThemeSelect,
+    ModelSelect,
+}
+
 #[derive(Debug, Clone)]
 pub struct PickerItem {
     pub label: String,
@@ -26,23 +34,33 @@ pub struct ModalPicker {
     pub title: String,
     pub items: Vec<PickerItem>,
     pub filter: String,
+    pub context: PickerContext,
     overlay_state: OverlayState,
     list_state: ListState,
 }
 
 impl ModalPicker {
     pub fn new(title: impl Into<String>, items: Vec<PickerItem>) -> Self {
+        Self::with_context(title, items, PickerContext::Commands)
+    }
+
+    pub fn with_context(
+        title: impl Into<String>,
+        items: Vec<PickerItem>,
+        context: PickerContext,
+    ) -> Self {
         Self {
             title: title.into(),
             items,
             filter: String::new(),
+            context,
             overlay_state: OverlayState::new(),
             list_state: ListState::default(),
         }
     }
 
     pub fn command_palette() -> Self {
-        Self::new(
+        Self::with_context(
             "Commands",
             vec![
                 PickerItem::new("/help", "Show available commands and shortcuts"),
@@ -68,6 +86,7 @@ impl ModalPicker {
                 PickerItem::new("/log", "Show application logs"),
                 PickerItem::new("/quit", "Exit Blazar"),
             ],
+            PickerContext::Commands,
         )
     }
 

@@ -60,6 +60,17 @@ fn default_enable_thinking() -> Option<bool> {
     Some(false)
 }
 
+/// Curated list of popular SiliconFlow models suitable for tool-calling agents.
+pub const POPULAR_MODELS: &[(&str, &str)] = &[
+    ("Qwen/Qwen3-8B", "Qwen3 8B — fast, free tier"),
+    ("Qwen/Qwen3-32B", "Qwen3 32B — balanced"),
+    ("Qwen/Qwen3-235B-A22B", "Qwen3 235B MoE — strongest"),
+    ("Qwen/Qwen2.5-72B-Instruct", "Qwen2.5 72B Instruct"),
+    ("deepseek-ai/DeepSeek-V3", "DeepSeek V3"),
+    ("deepseek-ai/DeepSeek-R1", "DeepSeek R1 — reasoning"),
+    ("Pro/deepseek-ai/DeepSeek-V3", "DeepSeek V3 Pro — optimised"),
+];
+
 impl SiliconFlowConfig {
     /// Load from `config/provider.json` relative to `repo_root`.
     ///

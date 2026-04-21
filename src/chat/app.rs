@@ -4,7 +4,7 @@ use crate::agent::state::{AgentRuntimeState, TurnState};
 
 use crate::chat::input::InputAction;
 use crate::chat::model::{Actor, Author, ChatMessage, EntryKind, TimelineEntry, ToolCallStatus};
-use crate::chat::picker::{ModalPicker, PickerItem};
+use crate::chat::picker::{ModalPicker, PickerContext, PickerItem};
 use crate::chat::theme::ChatTheme;
 use crate::provider::LlmProvider;
 use crate::provider::echo::EchoProvider;
@@ -13,6 +13,7 @@ use log::{debug, info, trace, warn};
 use ratatui_textarea::TextArea;
 use std::cell::Cell;
 use std::collections::VecDeque;
+use std::path::PathBuf;
 use std::time::Instant;
 
 pub struct ChatApp {
@@ -40,6 +41,10 @@ pub struct ChatApp {
     agent_state: AgentRuntimeState,
     /// Messages queued while agent was busy, dispatched FIFO on turn completion.
     pending_messages: VecDeque<String>,
+    /// Workspace root for recreating the provider on model switch.
+    workspace_root: PathBuf,
+    /// Display name of the active model (e.g. "Qwen/Qwen3-8B").
+    model_name: String,
 }
 
 impl ChatApp {
@@ -58,10 +63,19 @@ impl ChatApp {
         let theme = crate::chat::theme::build_theme();
 
         // Try SiliconFlow provider; fall back to EchoProvider.
-        let provider: Box<dyn LlmProvider> = match SiliconFlowConfig::load(repo_path) {
-            Ok(cfg) => Box::new(crate::provider::siliconflow::SiliconFlowProvider::new(cfg)),
-            Err(_) => Box::new(EchoProvider::default()),
-        };
+        let (provider, model_name): (Box<dyn LlmProvider>, String) =
+            match SiliconFlowConfig::load(repo_path) {
+                Ok(cfg) => {
+                    let name = cfg.model.clone();
+                    (
+                        Box::new(crate::provider::siliconflow::SiliconFlowProvider::new(cfg)),
+                        name,
+                    )
+                }
+                Err(_) => (Box::new(EchoProvider::default()), "echo".to_owned()),
+            };
+
+        let workspace_root = PathBuf::from(repo_path);
 
         Self {
             messages: vec![ChatMessage {
@@ -87,9 +101,11 @@ impl ChatApp {
             timeline_visible_height: Cell::new(0),
             theme_name: crate::chat::theme::DEFAULT_THEME.to_owned(),
             theme,
-            agent_runtime: AgentRuntime::new(provider, std::path::PathBuf::from(repo_path)),
+            agent_runtime: AgentRuntime::new(provider, workspace_root.clone()),
             agent_state: AgentRuntimeState::default(),
             pending_messages: VecDeque::new(),
+            workspace_root,
+            model_name,
         }
     }
 
@@ -97,6 +113,8 @@ impl ChatApp {
         let mut app = Self::new(_repo_path);
         // Use a fixed display path so snapshots are environment-independent.
         app.display_path = "~/blazar".to_owned();
+        // Stable model name for tests.
+        app.model_name = "echo".to_owned();
         // Always use EchoProvider in tests — no network calls.
         app.agent_runtime = AgentRuntime::new(
             Box::new(EchoProvider::new(0)),
@@ -177,6 +195,42 @@ impl ChatApp {
     pub fn set_theme(&mut self, name: &str) {
         self.theme = crate::chat::theme::build_theme_by_name(name);
         self.theme_name = name.to_owned();
+    }
+
+    pub fn model_name(&self) -> &str {
+        &self.model_name
+    }
+
+    /// Switch the active LLM model by rebuilding the provider and agent runtime.
+    ///
+    /// Cancels any in-flight turn, reloads config from disk with the new model
+    /// name, and creates a fresh `AgentRuntime`. Conversation history is reset.
+    pub fn set_model(&mut self, model: &str) {
+        if self.is_streaming() {
+            self.agent_runtime.cancel();
+        }
+
+        let repo_str = self.workspace_root.to_string_lossy();
+        match SiliconFlowConfig::load(&repo_str) {
+            Ok(mut cfg) => {
+                cfg.model = model.to_owned();
+                let provider: Box<dyn LlmProvider> =
+                    Box::new(crate::provider::siliconflow::SiliconFlowProvider::new(cfg));
+                self.agent_runtime = AgentRuntime::new(provider, self.workspace_root.clone());
+                self.agent_state = AgentRuntimeState::default();
+                self.model_name = model.to_owned();
+                self.timeline.push(TimelineEntry::hint(format!(
+                    "Model switched to **{model}**"
+                )));
+                self.scroll_offset = u16::MAX;
+            }
+            Err(e) => {
+                self.timeline.push(TimelineEntry::warning(format!(
+                    "Failed to switch model: {e}"
+                )));
+                self.scroll_offset = u16::MAX;
+            }
+        }
     }
 
     pub fn tick(&mut self) {
@@ -317,16 +371,28 @@ impl ChatApp {
                 }
                 InputAction::Submit => {
                     if let Some(cmd) = self.picker.select_current() {
+                        let ctx = self.picker.context;
                         self.picker.close();
 
-                        // Theme name selected (no / prefix) — apply it
+                        // Sub-picker selection (no / prefix) — dispatch by context
                         if !cmd.starts_with('/') {
-                            self.set_theme(&cmd);
+                            match ctx {
+                                PickerContext::ThemeSelect => {
+                                    self.set_theme(&cmd);
+                                }
+                                PickerContext::ModelSelect => {
+                                    let clean = cmd.trim_end_matches(" ✓");
+                                    self.set_model(clean);
+                                }
+                                PickerContext::Commands => {
+                                    self.send_message(&cmd);
+                                }
+                            }
                             self.picker = ModalPicker::command_palette();
                             return;
                         }
 
-                        // /theme selected — open theme picker
+                        // /theme selected — open theme sub-picker
                         if cmd == "/theme" {
                             let theme_items: Vec<PickerItem> =
                                 crate::chat::theme::available_themes()
@@ -338,7 +404,35 @@ impl ChatApp {
                                         )
                                     })
                                     .collect();
-                            self.picker = ModalPicker::new("Select Theme", theme_items);
+                            self.picker = ModalPicker::with_context(
+                                "Select Theme",
+                                theme_items,
+                                PickerContext::ThemeSelect,
+                            );
+                            self.picker.open();
+                            return;
+                        }
+
+                        // /model selected — open model sub-picker
+                        if cmd == "/model" {
+                            use crate::provider::siliconflow::POPULAR_MODELS;
+                            let current = &self.model_name;
+                            let model_items: Vec<PickerItem> = POPULAR_MODELS
+                                .iter()
+                                .map(|(name, desc)| {
+                                    let label = if *name == current {
+                                        format!("{name} ✓")
+                                    } else {
+                                        name.to_string()
+                                    };
+                                    PickerItem::new(label, *desc)
+                                })
+                                .collect();
+                            self.picker = ModalPicker::with_context(
+                                "Select Model",
+                                model_items,
+                                PickerContext::ModelSelect,
+                            );
                             self.picker.open();
                             return;
                         }

@@ -1,6 +1,5 @@
 ---
 source: tests/chat_render_snapshot.rs
-assertion_line: 10
 expression: "lines.join(\"\\n\")"
 ---
 ╭──────────────────────────────────────────────────────────╮
@@ -22,4 +21,4 @@ expression: "lines.join(\"\\n\")"
 ────────────────────────────────────────────────────────────
 › Describe a task or ask a question…                        
 ────────────────────────────────────────────────────────────
-/ commands · ? help                         blazar · ready
+/ commands · ? help                           echo · ready
