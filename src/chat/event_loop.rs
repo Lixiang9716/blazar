@@ -13,7 +13,7 @@ pub fn run_terminal_chat(
     use crate::chat::view::render_frame;
     use crossterm::{
         ExecutableCommand,
-        event::{self, EnableMouseCapture, Event, MouseEventKind},
+        event::{self, EnableBracketedPaste, EnableMouseCapture, Event, MouseEventKind},
         terminal::{EnterAlternateScreen, enable_raw_mode},
     };
     use ratatui_core::terminal::Terminal;
@@ -29,6 +29,11 @@ pub fn run_terminal_chat(
     enable_raw_mode()?;
     stdout().execute(EnterAlternateScreen)?;
     stdout().execute(EnableMouseCapture)?;
+    // Bracketed paste: multi-line paste arrives as single Event::Paste(String).
+    // Non-fatal — some terminals may not support it.
+    if let Err(e) = stdout().execute(EnableBracketedPaste) {
+        debug!("event_loop: bracketed paste not supported: {e}");
+    }
     let _guard = TerminalGuard;
     let backend = CrosstermBackend::new(stdout());
     let mut terminal = Terminal::new(backend)?;
@@ -74,6 +79,10 @@ pub fn run_terminal_chat(
                 Event::Resize(w, h) => {
                     debug!("event_loop: terminal resized to {w}x{h}");
                 }
+                Event::Paste(text) => {
+                    debug!("event_loop: paste len={}", text.len());
+                    app.handle_action(InputAction::Paste(text));
+                }
                 _ => {}
             }
         }
@@ -97,7 +106,8 @@ pub(crate) struct TerminalGuard;
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
         use crossterm::ExecutableCommand;
-        use crossterm::event::DisableMouseCapture;
+        use crossterm::event::{DisableBracketedPaste, DisableMouseCapture};
+        let _ = std::io::stdout().execute(DisableBracketedPaste);
         let _ = std::io::stdout().execute(DisableMouseCapture);
         let _ = crossterm::terminal::disable_raw_mode();
         let _ = std::io::stdout().execute(crossterm::terminal::LeaveAlternateScreen);

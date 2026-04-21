@@ -11,6 +11,8 @@ pub enum InputAction {
     PickerDown,
     Backspace,
     Key(KeyEvent),
+    /// Bracketed paste: multi-line text arrives as a single event.
+    Paste(String),
 }
 
 impl InputAction {

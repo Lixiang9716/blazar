@@ -12,6 +12,7 @@ use crate::provider::siliconflow::SiliconFlowConfig;
 use log::{debug, info, trace, warn};
 use ratatui_textarea::TextArea;
 use std::cell::Cell;
+use std::collections::VecDeque;
 use std::time::Instant;
 
 pub struct ChatApp {
@@ -37,6 +38,8 @@ pub struct ChatApp {
     theme: ChatTheme,
     agent_runtime: AgentRuntime,
     agent_state: AgentRuntimeState,
+    /// Messages queued while agent was busy, dispatched FIFO on turn completion.
+    pending_messages: VecDeque<String>,
 }
 
 impl ChatApp {
@@ -86,6 +89,7 @@ impl ChatApp {
             theme,
             agent_runtime: AgentRuntime::new(provider, std::path::PathBuf::from(repo_path)),
             agent_state: AgentRuntimeState::default(),
+            pending_messages: VecDeque::new(),
         }
     }
 
@@ -246,9 +250,13 @@ impl ChatApp {
         // Add user message to timeline
         self.timeline.push(TimelineEntry::user_message(trimmed));
 
-        // Admission control: reject if agent is already busy
+        // Admission control: queue if agent is busy instead of dropping
         if self.agent_state.is_busy() {
-            debug!("send_message: rejected — agent busy");
+            info!(
+                "send_message: queued (agent busy) queue_depth={}",
+                self.pending_messages.len() + 1
+            );
+            self.pending_messages.push_back(trimmed.to_owned());
             return;
         }
 
@@ -261,6 +269,25 @@ impl ChatApp {
 
         // Auto-scroll to bottom
         self.scroll_offset = u16::MAX;
+    }
+
+    /// Dispatches the next queued message to the agent runtime (FIFO).
+    /// Called after any terminal turn event (TurnComplete, TurnFailed).
+    fn dispatch_next_queued(&mut self) {
+        if let Some(msg) = self.pending_messages.pop_front() {
+            info!(
+                "dispatch_next_queued: dispatching len={} remaining={}",
+                msg.len(),
+                self.pending_messages.len()
+            );
+            if let Err(e) = self.agent_runtime.submit_turn(&msg) {
+                warn!("dispatch_next_queued: submit_turn failed: {e}");
+                self.timeline
+                    .push(TimelineEntry::warning(format!("Runtime error: {e}")));
+                // Don't re-queue on channel error — runtime is dead
+            }
+            self.scroll_offset = u16::MAX;
+        }
     }
 
     pub fn set_composer_text(&mut self, value: &str) {
@@ -374,6 +401,10 @@ impl ChatApp {
                     crossterm::event::KeyModifiers::NONE,
                 ));
             }
+            InputAction::Paste(text) => {
+                debug!("handle_action: paste len={}", text.len());
+                self.composer.insert_str(&text);
+            }
             _ => {}
         }
     }
@@ -478,6 +509,7 @@ impl ChatApp {
             }
             AgentEvent::TurnComplete => {
                 debug!("tick: TurnComplete");
+                self.dispatch_next_queued();
             }
             AgentEvent::TurnFailed { error } => {
                 if error == "cancelled" {
@@ -488,6 +520,7 @@ impl ChatApp {
                     self.timeline
                         .push(TimelineEntry::warning(format!("Agent error: {error}")));
                 }
+                self.dispatch_next_queued();
                 self.scroll_offset = u16::MAX;
             }
         }
@@ -650,5 +683,88 @@ mod tests {
             result.is_ok(),
             "tick should not panic on multibyte tool output"
         );
+    }
+
+    #[test]
+    fn send_message_queues_when_agent_busy() {
+        let repo_path = env!("CARGO_MANIFEST_DIR");
+        let mut app = ChatApp::new_for_test(repo_path);
+
+        // First message dispatches normally
+        app.send_message("first message");
+        assert!(app.pending_messages.is_empty());
+
+        // Simulate agent becoming busy
+        app.apply_agent_event_for_test(AgentEvent::TurnStarted {
+            turn_id: "t1".into(),
+        });
+        assert!(app.agent_state.is_busy());
+
+        // Second and third messages should be queued, not dropped
+        app.send_message("second message");
+        app.send_message("third message");
+        assert_eq!(app.pending_messages.len(), 2);
+        assert_eq!(app.pending_messages[0], "second message");
+        assert_eq!(app.pending_messages[1], "third message");
+
+        // Both still appear in timeline (UI not lost)
+        let user_messages: Vec<&str> = app
+            .timeline
+            .iter()
+            .filter(|e| e.actor == Actor::User)
+            .map(|e| e.body.as_str())
+            .collect();
+        assert!(user_messages.contains(&"second message"));
+        assert!(user_messages.contains(&"third message"));
+    }
+
+    #[test]
+    fn dispatch_next_queued_drains_fifo_on_turn_complete() {
+        let repo_path = env!("CARGO_MANIFEST_DIR");
+        let mut app = ChatApp::new_for_test(repo_path);
+
+        // Queue two messages
+        app.pending_messages.push_back("queued-a".into());
+        app.pending_messages.push_back("queued-b".into());
+
+        // Simulate TurnComplete — should dispatch first queued message
+        app.apply_agent_event_for_test(AgentEvent::TurnComplete);
+        assert_eq!(app.pending_messages.len(), 1);
+        assert_eq!(app.pending_messages[0], "queued-b");
+    }
+
+    #[test]
+    fn dispatch_next_queued_drains_on_turn_failed() {
+        let repo_path = env!("CARGO_MANIFEST_DIR");
+        let mut app = ChatApp::new_for_test(repo_path);
+
+        app.pending_messages.push_back("queued-after-fail".into());
+
+        // TurnFailed should also drain the queue
+        app.apply_agent_event_for_test(AgentEvent::TurnFailed {
+            error: "test error".into(),
+        });
+        assert!(app.pending_messages.is_empty());
+    }
+
+    #[test]
+    fn paste_action_inserts_into_composer_without_submitting() {
+        let repo_path = env!("CARGO_MANIFEST_DIR");
+        let mut app = ChatApp::new_for_test(repo_path);
+
+        let pasted = "line one\nline two\nline three";
+        app.handle_action(InputAction::Paste(pasted.to_owned()));
+
+        let text = app.composer_text();
+        assert!(text.contains("line one"));
+        assert!(text.contains("line two"));
+        assert!(text.contains("line three"));
+        // No message was sent — timeline should only have the welcome message
+        let user_msgs: Vec<_> = app
+            .timeline
+            .iter()
+            .filter(|e| e.actor == Actor::User)
+            .collect();
+        assert!(user_msgs.is_empty(), "paste should not auto-submit");
     }
 }
