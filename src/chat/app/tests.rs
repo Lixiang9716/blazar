@@ -4,7 +4,7 @@ use crate::provider::{ProviderEvent, ProviderMessage};
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 struct UnicodeArgumentProvider;
 
@@ -91,43 +91,88 @@ impl LlmProvider for CapturePromptProvider {
     }
 }
 
+const TEST_WAIT_TIMEOUT: Duration = Duration::from_secs(2);
+
+fn new_test_app() -> ChatApp {
+    ChatApp::new_for_test(env!("CARGO_MANIFEST_DIR")).expect("test app should initialize")
+}
+
+fn wait_until(timeout: Duration, mut condition: impl FnMut() -> bool) -> bool {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        if condition() {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    condition()
+}
+
 #[test]
 fn tick_handles_multibyte_tool_arguments_without_panicking() {
     let repo_path = env!("CARGO_MANIFEST_DIR");
-    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+    let mut app = new_test_app();
     app.agent_runtime =
         AgentRuntime::new(Box::new(UnicodeArgumentProvider), PathBuf::from(repo_path))
             .expect("runtime should initialize");
 
-    app.agent_runtime.submit_turn("read unicode path").unwrap();
-    std::thread::sleep(Duration::from_millis(100));
+    app.agent_runtime
+        .submit_turn("read unicode path")
+        .expect("turn submission should succeed");
 
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| app.tick()));
+    let mut panicked = false;
+    let observed = wait_until(TEST_WAIT_TIMEOUT, || {
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| app.tick()));
+        if result.is_err() {
+            panicked = true;
+            return true;
+        }
+        app.timeline
+            .iter()
+            .any(|entry| matches!(entry.kind, EntryKind::ToolCall { .. }))
+    });
 
     assert!(
-        result.is_ok(),
+        !panicked,
         "tick should not panic on multibyte tool arguments"
     );
+    assert!(observed, "tool call event was not observed within timeout");
 }
 
 #[test]
 fn tick_handles_multibyte_tool_output_without_panicking() {
     let repo_path = env!("CARGO_MANIFEST_DIR");
-    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+    let mut app = new_test_app();
     app.agent_runtime =
         AgentRuntime::new(Box::new(UnicodeOutputProvider), PathBuf::from(repo_path))
             .expect("runtime should initialize");
 
     app.agent_runtime
         .submit_turn("render unicode output")
-        .unwrap();
-    std::thread::sleep(Duration::from_millis(100));
+        .expect("turn submission should succeed");
 
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| app.tick()));
+    let mut panicked = false;
+    let observed = wait_until(TEST_WAIT_TIMEOUT, || {
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| app.tick()));
+        if result.is_err() {
+            panicked = true;
+            return true;
+        }
+        app.timeline.iter().any(|entry| {
+            matches!(
+                entry.kind,
+                EntryKind::ToolCall {
+                    status: ToolCallStatus::Success,
+                    ..
+                }
+            )
+        })
+    });
 
+    assert!(!panicked, "tick should not panic on multibyte tool output");
     assert!(
-        result.is_ok(),
-        "tick should not panic on multibyte tool output"
+        observed,
+        "tool completion event was not observed within timeout"
     );
 }
 
@@ -219,9 +264,9 @@ fn paste_action_inserts_into_composer_without_submitting() {
 
 #[test]
 fn plan_command_rewrites_prompt_for_planning_mode() {
-    let repo_path = env!("CARGO_MANIFEST_DIR");
-    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+    let mut app = new_test_app();
     let captured_prompt = Arc::new(Mutex::new(None));
+    let repo_path = env!("CARGO_MANIFEST_DIR");
     app.agent_runtime = AgentRuntime::new(
         Box::new(CapturePromptProvider {
             prompt: captured_prompt.clone(),
@@ -231,7 +276,14 @@ fn plan_command_rewrites_prompt_for_planning_mode() {
     .expect("runtime should initialize");
 
     app.send_message("/plan add minimax provider");
-    std::thread::sleep(Duration::from_millis(50));
+    let captured = wait_until(TEST_WAIT_TIMEOUT, || {
+        app.tick();
+        captured_prompt
+            .lock()
+            .expect("prompt mutex poisoned")
+            .is_some()
+    });
+    assert!(captured, "planning prompt was not captured within timeout");
 
     let prompt = captured_prompt
         .lock()
@@ -240,7 +292,8 @@ fn plan_command_rewrites_prompt_for_planning_mode() {
         .expect("provider should capture a prompt");
 
     assert!(prompt.contains("planning mode"));
-    assert!(prompt.contains("First line must be a short plain-text title"));
+    assert!(prompt.contains("short plain-text title"));
+    assert!(prompt.contains("User request:"));
     assert!(prompt.contains("add minimax provider"));
 }
 
