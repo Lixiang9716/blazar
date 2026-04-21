@@ -48,6 +48,7 @@ pub enum EntryKind {
 pub struct TimelineEntry {
     pub actor: Actor,
     pub kind: EntryKind,
+    pub title: Option<String>,
     pub body: String,
     /// Expanded detail content shown when Ctrl+O is toggled.
     pub details: String,
@@ -64,6 +65,7 @@ impl TimelineEntry {
         Self {
             actor: Actor::Assistant,
             kind: EntryKind::Message,
+            title: None,
             body: body.into(),
             details: String::new(),
         }
@@ -73,6 +75,7 @@ impl TimelineEntry {
         Self {
             actor: Actor::User,
             kind: EntryKind::Message,
+            title: None,
             body: body.into(),
             details: String::new(),
         }
@@ -93,6 +96,7 @@ impl TimelineEntry {
                 additions,
                 deletions,
             },
+            title: None,
             body: body.into(),
             details: String::new(),
         }
@@ -104,6 +108,7 @@ impl TimelineEntry {
             kind: EntryKind::Bash {
                 command: command.into(),
             },
+            title: None,
             body: body.into(),
             details: String::new(),
         }
@@ -123,6 +128,7 @@ impl TimelineEntry {
                 tool_name: tool_name.into(),
                 status,
             },
+            title: None,
             body: body.into(),
             details: details.into(),
         }
@@ -132,6 +138,7 @@ impl TimelineEntry {
         Self {
             actor: Actor::Assistant,
             kind: EntryKind::Thinking,
+            title: None,
             body: body.into(),
             details: String::new(),
         }
@@ -143,6 +150,7 @@ impl TimelineEntry {
             kind: EntryKind::CodeBlock {
                 language: language.into(),
             },
+            title: None,
             body: body.into(),
             details: String::new(),
         }
@@ -152,6 +160,7 @@ impl TimelineEntry {
         Self {
             actor: Actor::System,
             kind: EntryKind::Warning,
+            title: None,
             body: body.into(),
             details: String::new(),
         }
@@ -161,6 +170,7 @@ impl TimelineEntry {
         Self {
             actor: Actor::System,
             kind: EntryKind::Hint,
+            title: None,
             body: body.into(),
             details: String::new(),
         }
@@ -169,6 +179,11 @@ impl TimelineEntry {
     /// Set the expanded detail content.
     pub fn with_details(mut self, details: impl Into<String>) -> Self {
         self.details = details.into();
+        self
+    }
+
+    pub fn with_title(mut self, title: impl Into<String>) -> Self {
+        self.title = Some(title.into());
         self
     }
 }

@@ -64,7 +64,13 @@ pub(super) fn render_timeline(frame: &mut Frame, area: Rect, app: &ChatApp, them
                 }
                 lines.push(Line::from(vec![
                     Span::raw(MARGIN),
-                    Span::styled(format!("Blazar #{assistant_turn}"), theme.marker_response),
+                    Span::styled(
+                        entry
+                            .title
+                            .clone()
+                            .unwrap_or_else(|| format!("Blazar #{assistant_turn}")),
+                        theme.marker_response,
+                    ),
                 ]));
             }
             last_actor = Some(Actor::Assistant);

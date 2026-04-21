@@ -72,6 +72,7 @@ impl ModalPicker {
                 PickerItem::new("/mcp", "Manage MCP server configuration"),
                 PickerItem::new("/theme", "Switch the color theme"),
                 PickerItem::new("/history", "Browse conversation history"),
+                PickerItem::new("/plan", "Generate a plan with an auto-titled summary"),
                 PickerItem::new("/export", "Export conversation to file"),
                 PickerItem::new("/compact", "Compact conversation context"),
                 PickerItem::new("/config", "Open configuration settings"),
@@ -270,5 +271,20 @@ mod tests {
 
         picker.push_filter('h');
         assert_eq!(picker.selected_index(), Some(0));
+    }
+
+    #[test]
+    fn command_palette_includes_plan_command() {
+        let picker = ModalPicker::command_palette();
+        let commands: Vec<&str> = picker
+            .items
+            .iter()
+            .map(|item| item.label.as_str())
+            .collect();
+
+        assert!(
+            commands.contains(&"/plan"),
+            "command palette should expose /plan"
+        );
     }
 }

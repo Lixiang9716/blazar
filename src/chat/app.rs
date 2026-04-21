@@ -40,13 +40,28 @@ pub struct ChatApp {
     agent_runtime: AgentRuntime,
     agent_state: AgentRuntimeState,
     /// Messages queued while agent was busy, dispatched FIFO on turn completion.
-    pending_messages: VecDeque<String>,
+    pending_messages: VecDeque<PendingTurn>,
     /// Workspace root for recreating the provider on model switch.
     workspace_root: PathBuf,
     /// Display name of the active model (e.g. "Qwen/Qwen3-8B").
     model_name: String,
     /// True once the user has sent at least one message (collapses welcome banner).
     has_user_sent: bool,
+    active_turn_kind: Option<TurnKind>,
+    active_turn_title: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TurnKind {
+    Chat,
+    Plan,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PendingTurn {
+    user_text: String,
+    runtime_prompt: String,
+    kind: TurnKind,
 }
 
 impl ChatApp {
@@ -109,6 +124,8 @@ impl ChatApp {
             workspace_root,
             model_name,
             has_user_sent: false,
+            active_turn_kind: None,
+            active_turn_title: None,
         }
     }
 
@@ -159,7 +176,14 @@ impl ChatApp {
     pub fn status_label(&self) -> String {
         match &self.agent_state.turn_state {
             TurnState::Idle => "ready".to_owned(),
-            TurnState::Streaming { .. } => "streaming…".to_owned(),
+            TurnState::Streaming { .. } => {
+                self.active_turn_title
+                    .clone()
+                    .unwrap_or_else(|| match self.active_turn_kind {
+                        Some(TurnKind::Plan) => "thinking".to_owned(),
+                        _ => "streaming…".to_owned(),
+                    })
+            }
             TurnState::Done => "ready".to_owned(),
             TurnState::Failed { error } => format!("error: {error}"),
         }
@@ -291,6 +315,8 @@ impl ChatApp {
             return;
         }
 
+        let turn = build_pending_turn(trimmed);
+
         info!(
             "send_message: len={} preview={:.60}",
             trimmed.len(),
@@ -308,13 +334,14 @@ impl ChatApp {
 
         self.messages.push(ChatMessage {
             author: Author::User,
-            body: trimmed.to_owned(),
+            body: turn.user_text.clone(),
         });
 
         self.has_user_sent = true;
 
         // Add user message to timeline
-        self.timeline.push(TimelineEntry::user_message(trimmed));
+        self.timeline
+            .push(TimelineEntry::user_message(turn.user_text.clone()));
 
         // Admission control: queue if agent is busy instead of dropping
         if self.agent_state.is_busy() {
@@ -322,13 +349,17 @@ impl ChatApp {
                 "send_message: queued (agent busy) queue_depth={}",
                 self.pending_messages.len() + 1
             );
-            self.pending_messages.push_back(trimmed.to_owned());
+            self.pending_messages.push_back(turn);
             return;
         }
 
         // Dispatch to agent runtime — response arrives via events in tick()
-        if let Err(e) = self.agent_runtime.submit_turn(trimmed) {
+        self.active_turn_kind = Some(turn.kind);
+        self.active_turn_title = self.streaming_title_for_turn(turn.kind);
+        if let Err(e) = self.agent_runtime.submit_turn(&turn.runtime_prompt) {
             warn!("send_message: submit_turn failed: {e}");
+            self.active_turn_kind = None;
+            self.active_turn_title = None;
             self.timeline
                 .push(TimelineEntry::warning(format!("Runtime error: {e}")));
         }
@@ -340,14 +371,18 @@ impl ChatApp {
     /// Dispatches the next queued message to the agent runtime (FIFO).
     /// Called after any terminal turn event (TurnComplete, TurnFailed).
     fn dispatch_next_queued(&mut self) {
-        if let Some(msg) = self.pending_messages.pop_front() {
+        if let Some(turn) = self.pending_messages.pop_front() {
             info!(
                 "dispatch_next_queued: dispatching len={} remaining={}",
-                msg.len(),
+                turn.user_text.len(),
                 self.pending_messages.len()
             );
-            if let Err(e) = self.agent_runtime.submit_turn(&msg) {
+            self.active_turn_kind = Some(turn.kind);
+            self.active_turn_title = self.streaming_title_for_turn(turn.kind);
+            if let Err(e) = self.agent_runtime.submit_turn(&turn.runtime_prompt) {
                 warn!("dispatch_next_queued: submit_turn failed: {e}");
+                self.active_turn_kind = None;
+                self.active_turn_title = None;
                 self.timeline
                     .push(TimelineEntry::warning(format!("Runtime error: {e}")));
                 // Don't re-queue on channel error — runtime is dead
@@ -446,6 +481,11 @@ impl ChatApp {
                                 PickerContext::ModelSelect,
                             );
                             self.picker.open();
+                            return;
+                        }
+
+                        if cmd == "/plan" {
+                            self.set_composer_text("/plan ");
                             return;
                         }
 
@@ -615,6 +655,11 @@ impl ChatApp {
             }
             AgentEvent::TurnComplete => {
                 debug!("tick: TurnComplete");
+                if self.active_turn_kind == Some(TurnKind::Plan) {
+                    self.finalize_plan_response();
+                }
+                self.active_turn_kind = None;
+                self.active_turn_title = None;
                 self.dispatch_next_queued();
             }
             AgentEvent::TurnFailed { error } => {
@@ -626,11 +671,90 @@ impl ChatApp {
                     self.timeline
                         .push(TimelineEntry::warning(format!("Agent error: {error}")));
                 }
+                self.active_turn_kind = None;
+                self.active_turn_title = None;
                 self.dispatch_next_queued();
                 self.scroll_offset = u16::MAX;
             }
         }
     }
+
+    fn finalize_plan_response(&mut self) {
+        let Some(entry) = self
+            .timeline
+            .iter_mut()
+            .rev()
+            .find(|entry| entry.actor == Actor::Assistant && entry.kind == EntryKind::Message)
+        else {
+            return;
+        };
+
+        let Some((title, body)) = extract_plan_title_and_body(&entry.body) else {
+            return;
+        };
+
+        entry.title = Some(title);
+        entry.body = body;
+    }
+
+    fn streaming_title_for_turn(&self, kind: TurnKind) -> Option<String> {
+        match kind {
+            TurnKind::Plan => None,
+            TurnKind::Chat => self.latest_plan_title(),
+        }
+    }
+
+    fn latest_plan_title(&self) -> Option<String> {
+        self.timeline
+            .iter()
+            .rev()
+            .find_map(|entry| (entry.actor == Actor::Assistant).then(|| entry.title.clone()))
+            .flatten()
+    }
+}
+
+fn build_pending_turn(input: &str) -> PendingTurn {
+    let trimmed = input.trim();
+    if let Some(request) = trimmed.strip_prefix("/plan") {
+        return PendingTurn {
+            user_text: trimmed.to_owned(),
+            runtime_prompt: build_plan_prompt(request.trim()),
+            kind: TurnKind::Plan,
+        };
+    }
+
+    PendingTurn {
+        user_text: trimmed.to_owned(),
+        runtime_prompt: trimmed.to_owned(),
+        kind: TurnKind::Chat,
+    }
+}
+
+fn build_plan_prompt(request: &str) -> String {
+    format!(
+        "You are in planning mode.\n\
+         Generate a concise implementation plan only.\n\
+         First line must be a short plain-text title with no markdown, no numbering, and no label.\n\
+         After a blank line, write the plan body as concise ordered steps.\n\
+         Keep the answer focused on planning.\n\n\
+         User request:\n{request}"
+    )
+}
+
+fn extract_plan_title_and_body(text: &str) -> Option<(String, String)> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let mut lines = trimmed.lines();
+    let title = lines.next()?.trim().trim_matches('#').trim().to_owned();
+    if title.is_empty() {
+        return None;
+    }
+
+    let body = lines.collect::<Vec<_>>().join("\n").trim().to_owned();
+    Some((title, body))
 }
 
 /// Shorten `/home/<user>/...` to `~/...` for display.
@@ -688,9 +812,11 @@ fn detect_branch(repo_path: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::chat::view::render_to_lines_for_test;
     use crate::provider::{ProviderEvent, ProviderMessage};
     use std::path::PathBuf;
     use std::sync::mpsc::Sender;
+    use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
     struct UnicodeArgumentProvider;
@@ -753,6 +879,31 @@ mod tests {
         }
     }
 
+    struct CapturePromptProvider {
+        prompt: Arc<Mutex<Option<String>>>,
+    }
+
+    impl LlmProvider for CapturePromptProvider {
+        fn stream_turn(
+            &self,
+            messages: &[ProviderMessage],
+            _tools: &[crate::agent::tools::ToolSpec],
+            tx: Sender<ProviderEvent>,
+        ) {
+            let prompt = messages
+                .iter()
+                .rev()
+                .find_map(|message| match message {
+                    ProviderMessage::User { content } => Some(content.clone()),
+                    _ => None,
+                })
+                .expect("provider should receive the user prompt");
+
+            *self.prompt.lock().expect("prompt mutex poisoned") = Some(prompt);
+            let _ = tx.send(ProviderEvent::TurnComplete);
+        }
+    }
+
     #[test]
     fn tick_handles_multibyte_tool_arguments_without_panicking() {
         let repo_path = env!("CARGO_MANIFEST_DIR");
@@ -810,8 +961,8 @@ mod tests {
         app.send_message("second message");
         app.send_message("third message");
         assert_eq!(app.pending_messages.len(), 2);
-        assert_eq!(app.pending_messages[0], "second message");
-        assert_eq!(app.pending_messages[1], "third message");
+        assert_eq!(app.pending_messages[0].user_text, "second message");
+        assert_eq!(app.pending_messages[1].user_text, "third message");
 
         // Both still appear in timeline (UI not lost)
         let user_messages: Vec<&str> = app
@@ -830,13 +981,15 @@ mod tests {
         let mut app = ChatApp::new_for_test(repo_path);
 
         // Queue two messages
-        app.pending_messages.push_back("queued-a".into());
-        app.pending_messages.push_back("queued-b".into());
+        app.pending_messages
+            .push_back(build_pending_turn("queued-a"));
+        app.pending_messages
+            .push_back(build_pending_turn("queued-b"));
 
         // Simulate TurnComplete — should dispatch first queued message
         app.apply_agent_event_for_test(AgentEvent::TurnComplete);
         assert_eq!(app.pending_messages.len(), 1);
-        assert_eq!(app.pending_messages[0], "queued-b");
+        assert_eq!(app.pending_messages[0].user_text, "queued-b");
     }
 
     #[test]
@@ -844,7 +997,8 @@ mod tests {
         let repo_path = env!("CARGO_MANIFEST_DIR");
         let mut app = ChatApp::new_for_test(repo_path);
 
-        app.pending_messages.push_back("queued-after-fail".into());
+        app.pending_messages
+            .push_back(build_pending_turn("queued-after-fail"));
 
         // TurnFailed should also drain the queue
         app.apply_agent_event_for_test(AgentEvent::TurnFailed {
@@ -872,5 +1026,95 @@ mod tests {
             .filter(|e| e.actor == Actor::User)
             .collect();
         assert!(user_msgs.is_empty(), "paste should not auto-submit");
+    }
+
+    #[test]
+    fn plan_command_rewrites_prompt_for_planning_mode() {
+        let repo_path = env!("CARGO_MANIFEST_DIR");
+        let mut app = ChatApp::new_for_test(repo_path);
+        let captured_prompt = Arc::new(Mutex::new(None));
+        app.agent_runtime = AgentRuntime::new(
+            Box::new(CapturePromptProvider {
+                prompt: captured_prompt.clone(),
+            }),
+            PathBuf::from(repo_path),
+        );
+
+        app.send_message("/plan add minimax provider");
+        std::thread::sleep(Duration::from_millis(50));
+
+        let prompt = captured_prompt
+            .lock()
+            .expect("prompt mutex poisoned")
+            .clone()
+            .expect("provider should capture a prompt");
+
+        assert!(prompt.contains("planning mode"));
+        assert!(prompt.contains("First line must be a short plain-text title"));
+        assert!(prompt.contains("add minimax provider"));
+    }
+
+    #[test]
+    fn planning_turn_uses_thinking_while_streaming_then_sets_title() {
+        let repo_path = env!("CARGO_MANIFEST_DIR");
+        let mut app = ChatApp::new_for_test(repo_path);
+
+        app.send_message("/plan add minimax provider");
+        app.apply_agent_event_for_test(AgentEvent::TurnStarted {
+            turn_id: "plan-1".into(),
+        });
+
+        let streaming_lines = render_to_lines_for_test(&mut app, 90, 24);
+        let streaming_text = streaming_lines.join("\n");
+        assert!(
+            streaming_text.contains("thinking"),
+            "planning turns should show thinking while streaming"
+        );
+
+        app.apply_agent_event_for_test(AgentEvent::TextDelta {
+            text: "MiniMax Provider Integration\n\n1. Review current provider abstraction\n2. Add provider config\n".into(),
+        });
+        app.apply_agent_event_for_test(AgentEvent::TurnComplete);
+
+        let assistant_entry = app
+            .timeline
+            .iter()
+            .rev()
+            .find(|entry| entry.actor == Actor::Assistant && entry.kind == EntryKind::Message)
+            .expect("assistant response entry should exist");
+
+        assert_eq!(
+            assistant_entry.title.as_deref(),
+            Some("MiniMax Provider Integration")
+        );
+        assert_eq!(
+            assistant_entry.body,
+            "1. Review current provider abstraction\n2. Add provider config"
+        );
+
+        let completed_lines = render_to_lines_for_test(&mut app, 90, 24);
+        let completed_text = completed_lines.join("\n");
+        assert!(completed_text.contains("MiniMax Provider Integration"));
+        assert!(!completed_text.contains("Blazar #2"));
+    }
+
+    #[test]
+    fn follow_up_turn_reuses_latest_plan_title_while_streaming() {
+        let repo_path = env!("CARGO_MANIFEST_DIR");
+        let mut app = ChatApp::new_for_test(repo_path);
+        app.timeline.push(
+            TimelineEntry::response("1. Review current provider abstraction")
+                .with_title("MiniMax Provider Integration"),
+        );
+        app.active_turn_kind = Some(TurnKind::Chat);
+        app.active_turn_title = Some("MiniMax Provider Integration".into());
+        app.apply_agent_event_for_test(AgentEvent::TurnStarted {
+            turn_id: "exec-1".into(),
+        });
+
+        let lines = render_to_lines_for_test(&mut app, 90, 24);
+        let text = lines.join("\n");
+        assert!(text.contains("MiniMax Provider Integration"));
+        assert!(!text.contains("streaming…"));
     }
 }

@@ -88,7 +88,7 @@ pub fn render_frame(frame: &mut Frame, app: &mut ChatApp, tick_ms: u64) {
     timeline::render_timeline(frame, timeline_area, app, &theme);
 
     if streaming {
-        streaming::render_streaming_indicator(frame, streaming_area, tick_ms, &theme);
+        streaming::render_streaming_indicator(frame, streaming_area, tick_ms, app, &theme);
     }
 
     status::render_separator(frame, sep_top, &theme);
