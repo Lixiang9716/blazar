@@ -19,6 +19,12 @@ cargo install just bacon cargo-nextest cargo-deny cargo-llvm-cov cargo-outdated
 - `just deps` — inspect outdated dependencies
 - `just snapshots` — run snapshot-oriented tests
 - `just preflight` — run the default local quality gate
+- `just eval-self-test` — validate benchmark harness logic
+- `just eval-prepare smoke bfcl,toolbench,swebench_lite 250` — pull benchmark samples
+- `just eval-run smoke bfcl,toolbench,swebench_lite 20` — run model benchmark
+- `just eval-run-dry smoke bfcl,toolbench,swebench_lite 20` — benchmark pipeline dry-run without provider calls
+- `just eval-smoke` — one-command smoke benchmark
+- `just eval-smoke-dry` — one-command smoke dry-run
 
 ## Knowledge-base workflow
 
@@ -58,3 +64,26 @@ The repository CI mirrors the shared local quality gate on GitHub Actions.
 - Checks: `just fmt-check`, `just lint`, `just test`, `just audit`
 
 If CI fails, reproduce the same command locally through `just` before pushing a fix.
+
+## Open benchmark automation
+
+Blazar includes a benchmark harness at `scripts/eval/open_benchmark_runner.py` with default deployment for:
+
+- BFCL (`gorilla-llm/Berkeley-Function-Calling-Leaderboard`)
+- ToolBench (`Maurus/ToolBench`)
+- SWE-bench Lite (`princeton-nlp/SWE-bench_Lite`)
+
+Typical local flow:
+
+```bash
+just eval-prepare smoke bfcl,toolbench,swebench_lite 250
+BLAZAR_EVAL_API_KEY=... just eval-run smoke bfcl,toolbench,swebench_lite 10
+```
+
+Artifacts:
+
+- Prepared datasets: `target/evals/datasets/<dataset>/<mode>.jsonl`
+- Predictions: `target/evals/reports/<dataset>_<mode>_predictions.jsonl`
+- Summary report: `target/evals/reports/report_<mode>.json`
+
+GitHub Actions workflow: `.github/workflows/benchmark-evals.yml` (manual trigger).

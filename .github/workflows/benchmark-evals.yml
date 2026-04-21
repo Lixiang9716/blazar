@@ -1,0 +1,67 @@
+name: Benchmark Evals
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Evaluation mode"
+        required: true
+        type: choice
+        options: [smoke, full]
+        default: smoke
+      datasets:
+        description: "Comma-separated dataset keys (bfcl,toolbench,swebench_lite)"
+        required: true
+        type: string
+        default: bfcl,toolbench,swebench_lite
+      max_cases:
+        description: "Maximum prepared cases to run per dataset"
+        required: true
+        type: string
+        default: "20"
+
+permissions:
+  contents: read
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Harness self-test
+        run: |
+          python3 scripts/eval/open_benchmark_runner.py self-test
+          python3 -m unittest tests/eval/test_open_benchmark_runner.py
+
+      - name: Prepare benchmark datasets
+        run: |
+          python3 scripts/eval/open_benchmark_runner.py prepare \
+            --mode "${{ inputs.mode }}" \
+            --datasets "${{ inputs.datasets }}"
+
+      - name: Run benchmark evaluation
+        env:
+          BLAZAR_EVAL_API_KEY: ${{ secrets.SILICONFLOW_API_KEY }}
+          BLAZAR_EVAL_BASE_URL: ${{ vars.BLAZAR_EVAL_BASE_URL || 'https://api.siliconflow.cn/v1' }}
+          BLAZAR_EVAL_MODEL: ${{ vars.BLAZAR_EVAL_MODEL || 'Qwen/Qwen3-8B' }}
+        run: |
+          python3 scripts/eval/open_benchmark_runner.py run \
+            --mode "${{ inputs.mode }}" \
+            --datasets "${{ inputs.datasets }}" \
+            --max-cases "${{ inputs.max_cases }}"
+
+      - name: Upload evaluation reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-report-${{ inputs.mode }}
+          path: target/evals/reports/
