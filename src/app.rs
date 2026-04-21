@@ -374,8 +374,16 @@ fn init_logger() {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_schema, collect_submission, run_app_with_io, run_prompt_flow};
+    use super::{
+        PromptError, bool_at, build_schema, collect_submission, init_logger, prompt_bool,
+        prompt_enum, prompt_string, read_prompt, run_app_with_io, run_prompt_flow, string_at,
+        string_list_at, write_section_header,
+    };
     use serde_json::json;
+    use std::error::Error;
+    use std::sync::{Mutex, OnceLock};
+
+    static LOGGER_ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
     #[test]
     fn collect_submission_uses_defaults_for_blank_answers() {
@@ -471,6 +479,184 @@ mod tests {
         let transcript = String::from_utf8(output).expect("app output should be utf-8");
         assert!(transcript.contains("\"delivery\""));
         assert!(transcript.contains("\"responseStyle\": \"balanced\""));
+    }
+
+    #[test]
+    fn prompt_string_returns_custom_value_when_provided() {
+        let mut input = std::io::Cursor::new("custom\n");
+        let mut output = Vec::new();
+
+        let value =
+            prompt_string(&mut input, &mut output, "Task", "default").expect("prompt succeeds");
+        assert_eq!(value, "custom");
+    }
+
+    #[test]
+    fn prompt_enum_validates_default_and_reprompts_invalid_answer() {
+        let mut input = std::io::Cursor::new("bad\nhigh\n");
+        let mut output = Vec::new();
+        let choices = vec!["low".to_string(), "high".to_string()];
+
+        let value = prompt_enum(
+            &mut input,
+            &mut output,
+            "Priority",
+            "low",
+            &choices,
+            "/pointer/default",
+        )
+        .expect("enum prompt succeeds");
+        let transcript = String::from_utf8(output).expect("utf-8");
+
+        assert_eq!(value, "high");
+        assert!(transcript.contains("Please choose one of: low, high"));
+    }
+
+    #[test]
+    fn prompt_enum_rejects_default_not_in_choices() {
+        let mut input = std::io::Cursor::new("");
+        let mut output = Vec::new();
+        let choices = vec!["low".to_string(), "high".to_string()];
+
+        let err = prompt_enum(
+            &mut input,
+            &mut output,
+            "Priority",
+            "normal",
+            &choices,
+            "/invalid/default",
+        )
+        .expect_err("default must be validated");
+        assert!(matches!(
+            err,
+            PromptError::InvalidEnumDefault {
+                pointer: "/invalid/default",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn prompt_bool_handles_yes_no_and_reprompts_unknown_values() {
+        let mut input = std::io::Cursor::new("maybe\ny\n");
+        let mut output = Vec::new();
+        let yes = prompt_bool(&mut input, &mut output, "Run validation", false)
+            .expect("bool prompt succeeds");
+        let transcript = String::from_utf8(output).expect("utf-8");
+        assert!(yes);
+        assert!(transcript.contains("Please answer yes or no."));
+
+        let mut input = std::io::Cursor::new("0\n");
+        let mut output = Vec::new();
+        let no = prompt_bool(&mut input, &mut output, "Run validation", true)
+            .expect("bool prompt succeeds");
+        assert!(!no);
+    }
+
+    #[test]
+    fn read_prompt_returns_empty_string_on_eof() {
+        let mut input = std::io::Cursor::new("");
+        let mut output = Vec::new();
+
+        let value = read_prompt(&mut input, &mut output, "Prompt: ").expect("read_prompt");
+        assert_eq!(value, "");
+    }
+
+    #[test]
+    fn schema_accessors_validate_types_and_pointers() {
+        let schema = json!({
+            "name": "Blazar",
+            "enabled": true,
+            "items": ["a", "b"]
+        });
+        assert_eq!(
+            string_at(&schema, "/name").expect("string at"),
+            "Blazar".to_string()
+        );
+        assert!(bool_at(&schema, "/enabled").expect("bool at"));
+        assert_eq!(
+            string_list_at(&schema, "/items").expect("list at"),
+            vec!["a".to_string(), "b".to_string()]
+        );
+
+        assert!(matches!(
+            string_at(&schema, "/enabled"),
+            Err(PromptError::InvalidSchema {
+                pointer: "/enabled",
+                expected: "string"
+            })
+        ));
+        assert!(matches!(
+            bool_at(&schema, "/name"),
+            Err(PromptError::InvalidSchema {
+                pointer: "/name",
+                expected: "boolean"
+            })
+        ));
+        assert!(matches!(
+            string_list_at(&json!({"items": [1]}), "/items"),
+            Err(PromptError::InvalidSchema {
+                pointer: "/items",
+                expected: "array of strings"
+            })
+        ));
+    }
+
+    #[test]
+    fn write_section_header_writes_title_and_underline() {
+        let mut output = Vec::new();
+        write_section_header(&mut output, "Task").expect("header writes");
+        let text = String::from_utf8(output).expect("utf-8");
+        assert_eq!(text, "Task\n----\n");
+    }
+
+    #[test]
+    fn prompt_error_display_and_source_are_descriptive() {
+        let io_error = std::io::Error::other("boom");
+        let err = PromptError::Io(io_error);
+        assert_eq!(err.to_string(), "boom");
+        assert!(err.source().is_some());
+
+        let invalid_schema = PromptError::InvalidSchema {
+            pointer: "/x",
+            expected: "string",
+        };
+        assert!(
+            invalid_schema
+                .to_string()
+                .contains("invalid schema at /x: expected string")
+        );
+        assert!(invalid_schema.source().is_none());
+
+        let invalid_default = PromptError::InvalidEnumDefault {
+            pointer: "/y",
+            default: "z".to_string(),
+        };
+        assert!(
+            invalid_default
+                .to_string()
+                .contains("invalid schema at /y: default \"z\" is not in enum")
+        );
+    }
+
+    #[test]
+    fn init_logger_is_safe_to_call_multiple_times() {
+        let _guard = LOGGER_ENV_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .expect("lock env");
+
+        let old = std::env::var("BLAZAR_LOG").ok();
+        unsafe { std::env::set_var("BLAZAR_LOG", "warn, blazar=debug") };
+        init_logger();
+        init_logger();
+
+        unsafe {
+            match old {
+                Some(value) => std::env::set_var("BLAZAR_LOG", value),
+                None => std::env::remove_var("BLAZAR_LOG"),
+            }
+        }
     }
 
     fn schema_property_names() -> Vec<String> {
