@@ -344,7 +344,10 @@ fn build_request_truncates_old_context_to_recent_user_turns() {
     // MAX_CONTEXT_USER_TURNS=10: keeps turns 5-14 (10 user + 10 assistant + 1 system = 21).
     assert_eq!(request.messages.len(), 21);
     assert_eq!(request.messages[1].content.as_deref(), Some("user-5"));
-    assert_eq!(request.messages[20].content.as_deref(), Some("assistant-14"));
+    assert_eq!(
+        request.messages[20].content.as_deref(),
+        Some("assistant-14")
+    );
 }
 
 #[test]
