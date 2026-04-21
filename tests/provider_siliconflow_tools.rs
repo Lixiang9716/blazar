@@ -330,7 +330,7 @@ fn build_request_truncates_old_context_to_recent_user_turns() {
     });
 
     let mut messages = Vec::new();
-    for turn in 0..10 {
+    for turn in 0..15 {
         messages.push(ProviderMessage::User {
             content: format!("user-{turn}"),
         });
@@ -341,9 +341,10 @@ fn build_request_truncates_old_context_to_recent_user_turns() {
 
     let request = provider.build_request_for_test(&messages, &[]);
 
-    assert_eq!(request.messages.len(), 13);
-    assert_eq!(request.messages[1].content.as_deref(), Some("user-4"));
-    assert_eq!(request.messages[12].content.as_deref(), Some("assistant-9"));
+    // MAX_CONTEXT_USER_TURNS=10: keeps turns 5-14 (10 user + 10 assistant + 1 system = 21).
+    assert_eq!(request.messages.len(), 21);
+    assert_eq!(request.messages[1].content.as_deref(), Some("user-5"));
+    assert_eq!(request.messages[20].content.as_deref(), Some("assistant-14"));
 }
 
 #[test]

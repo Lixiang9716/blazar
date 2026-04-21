@@ -733,7 +733,7 @@ fn collect_tool_call_batch(messages: &[ProviderMessage], start: usize) -> (Vec<T
     (collected, index)
 }
 
-const MAX_CONTEXT_USER_TURNS: usize = 6;
+const MAX_CONTEXT_USER_TURNS: usize = 10;
 const MAX_CONTEXT_PROVIDER_MESSAGES: usize = 80;
 
 fn truncate_provider_messages(messages: &[ProviderMessage]) -> Vec<ProviderMessage> {
