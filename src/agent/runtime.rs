@@ -370,19 +370,18 @@ fn run_turn(
 
                             if *count >= 2 {
                                 ToolResult::failure(
-                                    "REPEATED ERROR: you sent identical malformed arguments. \
-                                     Change approach: use single quotes inside code, \
-                                     or escape double quotes with backslash (\\\"). \
-                                     You MUST retry with corrected arguments now — \
-                                     do not respond with only text."
+                                    "REPEATED JSON ERROR: identical malformed arguments sent twice. \
+                                     RULES: 1) All double quotes inside string values MUST be escaped as \\\". \
+                                     2) Newlines inside strings MUST be \\n, not literal newlines. \
+                                     3) For code containing quotes, use single quotes or escape them. \
+                                     You MUST fix the JSON and retry now."
                                         .to_string(),
                                 )
                             } else {
                                 ToolResult::failure(format!(
-                                    "invalid tool arguments: JSON parse error. \
-                                     Ensure double quotes inside string values are \
-                                     escaped with backslash (\\\"). \
-                                     Retry this tool call with corrected arguments: {error}"
+                                    "JSON PARSE ERROR in tool arguments: {error}\n\
+                                     Fix: ensure all double quotes inside string values are escaped \
+                                     as \\\", and newlines are \\n. Then retry this tool call."
                                 ))
                             }
                         }
@@ -547,73 +546,43 @@ fn strip_thinking_tags(raw: &str) -> String {
     s
 }
 
-/// Try standard JSON parse first. On failure, attempt targeted repair of
-/// unescaped interior quotes (common with Qwen3 models that embed code
-/// containing `"` inside JSON string values).
+/// Try standard JSON parse first. On failure, apply minimal targeted
+/// repairs for well-understood malformations (tag stripping, control chars).
+///
+/// Industry pattern (from Codex CLI, Continue.dev, Aider research):
+/// complex hand-rolled repair for arbitrary JSON is a losing game.
+/// Keep only simple, correct repairs. For anything else, return the
+/// error so the model gets feedback and can retry with valid JSON.
 fn parse_or_repair_json(raw: &str) -> Result<ParsedToolArgs, serde_json::Error> {
     // Step 0: extract the JSON payload (strips leading/trailing junk like </tool_call>).
     let cleaned = extract_json_payload(raw).unwrap_or(raw);
+    let was_extracted = cleaned.len() != raw.len();
 
-    let first_try = serde_json::from_str::<Value>(cleaned);
-    if let Ok(value) = &first_try {
+    // Fast path: valid JSON.
+    if let Ok(value) = serde_json::from_str::<Value>(cleaned) {
         return Ok(ParsedToolArgs {
-            value: value.clone(),
-            was_repaired: cleaned.len() != raw.len(),
+            value,
+            was_repaired: was_extracted,
         });
     }
 
-    // Decide repair order based on the parse error.
-    let err = first_try.as_ref().unwrap_err();
-    let err_msg = err.to_string();
-    let ctrl_first = err_msg.contains("control character");
-
-    let repairs: &[fn(&str) -> Option<String>] = if ctrl_first {
-        &[repair_control_chars, repair_json_arguments]
-    } else {
-        &[repair_json_arguments, repair_control_chars]
-    };
-
-    // Try each repair individually.
-    for repair_fn in repairs {
-        if let Some(repaired) = repair_fn(cleaned)
-            && let Ok(val) = serde_json::from_str::<Value>(&repaired)
-        {
-            warn!(
-                "runtime: repaired malformed JSON arguments\n  before: {}\n  after:  {}",
-                preview_text(raw, 200),
-                preview_text(&repaired, 200),
-            );
-            return Ok(ParsedToolArgs {
-                value: val,
-                was_repaired: true,
-            });
-        }
+    // Targeted repair: escape literal control characters inside string values.
+    // This is a well-scoped fix for models that emit raw newlines/tabs in JSON strings.
+    if let Some(repaired) = repair_control_chars(cleaned)
+        && let Ok(value) = serde_json::from_str::<Value>(&repaired)
+    {
+        warn!(
+            "runtime: repaired control characters in JSON arguments\n  raw: {}",
+            preview_text(raw, 200),
+        );
+        return Ok(ParsedToolArgs {
+            value,
+            was_repaired: true,
+        });
     }
 
-    // Try combined repair in both orders (control→quotes and quotes→control).
-    type RepairFn = fn(&str) -> Option<String>;
-    let orders: [(RepairFn, RepairFn); 2] = [
-        (repair_control_chars, repair_json_arguments),
-        (repair_json_arguments, repair_control_chars),
-    ];
-    for (first, second) in orders {
-        if let Some(step1) = first(cleaned)
-            && let Some(step2) = second(&step1)
-            && let Ok(val) = serde_json::from_str::<Value>(&step2)
-        {
-            warn!(
-                "runtime: repaired malformed JSON arguments (combined)\n  before: {}\n  after:  {}",
-                preview_text(raw, 200),
-                preview_text(&step2, 200),
-            );
-            return Ok(ParsedToolArgs {
-                value: val,
-                was_repaired: true,
-            });
-        }
-    }
-
-    // Return the original error for a meaningful message.
+    // No more heuristic repairs. Return the parse error so the model
+    // gets actionable feedback and can retry with valid JSON.
     serde_json::from_str::<Value>(cleaned).map(|value| ParsedToolArgs {
         value,
         was_repaired: false,
@@ -622,63 +591,6 @@ fn parse_or_repair_json(raw: &str) -> Result<ParsedToolArgs, serde_json::Error> 
 
 fn canonical_tool_args(value: &Value, fallback: &str) -> String {
     serde_json::to_string(value).unwrap_or_else(|_| fallback.to_string())
-}
-
-/// Iterative targeted repair: find the unescaped `"` just before each
-/// parse-error column, escape it, and retry.  Stops after `MAX_REPAIRS`
-/// successful individual fixes or when no more fixable quotes are found.
-fn repair_json_arguments(raw: &str) -> Option<String> {
-    const MAX_REPAIRS: usize = 8;
-    let mut s = raw.to_string();
-
-    for _ in 0..MAX_REPAIRS {
-        let err = match serde_json::from_str::<Value>(&s) {
-            Ok(_) => return Some(s),
-            Err(e) => e,
-        };
-
-        // serde_json reports 1-based column; convert to 0-based byte index.
-        let col = err.column().saturating_sub(1);
-        if col == 0 {
-            return None;
-        }
-
-        let bytes = s.as_bytes();
-        let search_end = col.min(bytes.len());
-
-        // Walk backward to find the last unescaped `"` before the error.
-        let mut found = None;
-        let mut i = search_end;
-        while i > 0 {
-            i -= 1;
-            if bytes[i] == b'"' {
-                // Count preceding backslashes to determine parity.
-                let mut bs = 0usize;
-                let mut j = i;
-                while j > 0 && bytes[j - 1] == b'\\' {
-                    bs += 1;
-                    j -= 1;
-                }
-                if bs.is_multiple_of(2) {
-                    // This `"` is NOT escaped — candidate for repair.
-                    found = Some(i);
-                    break;
-                }
-            }
-        }
-
-        if let Some(pos) = found {
-            s.insert(pos, '\\');
-        } else {
-            return None; // nothing left to fix
-        }
-    }
-
-    // Final validation after all repairs.
-    match serde_json::from_str::<Value>(&s) {
-        Ok(_) => Some(s),
-        Err(_) => None,
-    }
 }
 
 /// Extract the first top-level JSON object or array from `raw`, ignoring
@@ -1375,10 +1287,10 @@ mod tests {
     }
 
     #[test]
-    fn run_turn_surfaces_json_repair_note_in_tool_result() {
-        struct RepairedArgsProvider;
+    fn run_turn_sends_parse_error_to_model_for_malformed_json() {
+        struct MalformedArgsProvider;
 
-        impl LlmProvider for RepairedArgsProvider {
+        impl LlmProvider for MalformedArgsProvider {
             fn stream_turn(
                 &self,
                 messages: &[ProviderMessage],
@@ -1392,6 +1304,7 @@ mod tests {
                     let _ = tx.send(ProviderEvent::TextDelta("done".into()));
                     let _ = tx.send(ProviderEvent::TurnComplete);
                 } else {
+                    // Malformed JSON: unescaped quotes inside string value.
                     let _ = tx.send(ProviderEvent::ToolCall {
                         call_id: "call-1".into(),
                         name: "count".into(),
@@ -1410,17 +1323,76 @@ mod tests {
 
         let (event_tx, _event_rx) = mpsc::channel();
         let cancel = Arc::new(AtomicBool::new(false));
-        let mut messages = user_messages("run repaired args");
+        let mut messages = user_messages("test malformed args");
 
         let outcome = run_turn(
             &mut messages,
-            &RepairedArgsProvider,
+            &MalformedArgsProvider,
             &registry,
             &event_tx,
             &cancel,
         );
         assert!(matches!(outcome, TurnOutcome::Complete));
+        // Tool should NOT be called — error returned to model instead.
+        assert_eq!(counter.load(Ordering::SeqCst), 0);
+        // The error message should be sent back as a tool result.
+        assert!(messages.iter().any(|message| {
+            matches!(message, ProviderMessage::ToolResult { output, is_error, .. }
+                if *is_error && output.contains("JSON PARSE ERROR"))
+        }));
+    }
+
+    #[test]
+    fn run_turn_repairs_control_chars_and_executes_tool() {
+        struct ControlCharArgsProvider;
+
+        impl LlmProvider for ControlCharArgsProvider {
+            fn stream_turn(
+                &self,
+                messages: &[ProviderMessage],
+                _tools: &[ToolSpec],
+                tx: Sender<ProviderEvent>,
+            ) {
+                let has_tool_result = messages
+                    .iter()
+                    .any(|message| matches!(message, ProviderMessage::ToolResult { .. }));
+                if has_tool_result {
+                    let _ = tx.send(ProviderEvent::TextDelta("done".into()));
+                    let _ = tx.send(ProviderEvent::TurnComplete);
+                } else {
+                    // Literal newline inside JSON string value (common Qwen pattern).
+                    let args = "{\"command\": \"echo\nhello\"}";
+                    let _ = tx.send(ProviderEvent::ToolCall {
+                        call_id: "call-1".into(),
+                        name: "count".into(),
+                        arguments: args.into(),
+                    });
+                    let _ = tx.send(ProviderEvent::TurnComplete);
+                }
+            }
+        }
+
+        let counter = Arc::new(AtomicU32::new(0));
+        let mut registry = empty_registry();
+        registry.register(Box::new(CountingTool {
+            calls: Arc::clone(&counter),
+        }));
+
+        let (event_tx, _event_rx) = mpsc::channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let mut messages = user_messages("test control char repair");
+
+        let outcome = run_turn(
+            &mut messages,
+            &ControlCharArgsProvider,
+            &registry,
+            &event_tx,
+            &cancel,
+        );
+        assert!(matches!(outcome, TurnOutcome::Complete));
+        // Control chars should be repaired and tool should execute.
         assert_eq!(counter.load(Ordering::SeqCst), 1);
+        // Repair note should be present in tool result.
         assert!(messages.iter().any(|message| {
             matches!(message, ProviderMessage::ToolResult { output, is_error, .. }
                 if !*is_error && output.contains(JSON_REPAIR_NOTE))
@@ -1730,38 +1702,7 @@ mod tests {
         assert_eq!(preview_text(text, 100), text);
     }
 
-    // ---- repair_json_arguments tests ----
-
-    #[test]
-    fn repair_fixes_unescaped_quotes_in_print() {
-        // The exact pattern Qwen3-8B produces.
-        let raw = r#"{"path": "hello.py", "content": "print("hello world!\")"}"#;
-        let repaired = repair_json_arguments(raw).expect("should repair");
-        let val: Value = serde_json::from_str(&repaired).expect("repaired should be valid JSON");
-        assert_eq!(val["content"], "print(\"hello world!\")");
-    }
-
-    #[test]
-    fn repair_returns_none_for_total_garbage() {
-        assert!(repair_json_arguments("not json at all").is_none());
-    }
-
-    #[test]
-    fn repair_returns_valid_json_unchanged() {
-        let raw = r#"{"path": "a.py", "content": "x = 1"}"#;
-        let repaired = repair_json_arguments(raw).expect("already valid");
-        assert_eq!(repaired, raw);
-    }
-
-    #[test]
-    fn repair_fixes_multiple_unescaped_quotes() {
-        // Code with two unescaped quote pairs.
-        let raw = r#"{"content": "say("hello") + say("world")"}"#;
-        let repaired = repair_json_arguments(raw).expect("should repair");
-        let val: Value = serde_json::from_str(&repaired).expect("valid JSON");
-        assert!(val["content"].as_str().unwrap().contains("hello"));
-        assert!(val["content"].as_str().unwrap().contains("world"));
-    }
+    // ---- parse_or_repair_json tests ----
 
     #[test]
     fn parse_or_repair_succeeds_on_valid_json() {
@@ -1772,11 +1713,11 @@ mod tests {
     }
 
     #[test]
-    fn parse_or_repair_recovers_from_unescaped_quotes() {
+    fn parse_or_repair_returns_error_for_unescaped_quotes() {
+        // Unescaped quotes are now sent to model as error (Codex-style approach).
         let raw = r#"{"path": "hello.py", "content": "print("hello world!\")"}"#;
-        let parsed = parse_or_repair_json(raw).expect("should recover via repair");
-        assert!(parsed.was_repaired);
-        assert_eq!(parsed.value["path"], "hello.py");
+        let result = parse_or_repair_json(raw);
+        assert!(result.is_err());
     }
 
     #[test]
@@ -1830,47 +1771,11 @@ mod tests {
         assert_eq!(extracted, "[1, 2, 3]");
     }
 
-    // ---- repair_control_chars tests ----
-
-    #[test]
-    fn repair_control_chars_fixes_literal_newlines() {
-        // Simulate the exact model output: literal newlines inside a JSON string value.
-        let raw = "{\"path\": \"fib.py\", \"content\": \"def f(n):\n    return n\"}";
-        let repaired = repair_control_chars(raw).expect("should repair");
-        let val: Value = serde_json::from_str(&repaired).expect("valid JSON");
-        assert_eq!(val["content"], "def f(n):\n    return n");
-    }
-
-    #[test]
-    fn repair_control_chars_fixes_tabs() {
-        let raw = "{\"content\": \"a\tb\"}";
-        let repaired = repair_control_chars(raw).expect("should repair");
-        let val: Value = serde_json::from_str(&repaired).expect("valid JSON");
-        assert_eq!(val["content"], "a\tb");
-    }
-
-    #[test]
-    fn repair_control_chars_returns_none_for_clean_json() {
-        let raw = r#"{"content": "no control chars here"}"#;
-        assert!(repair_control_chars(raw).is_none());
-    }
-
-    #[test]
-    fn repair_control_chars_preserves_structural_newlines() {
-        // Pretty-printed JSON: newlines outside strings should NOT be touched.
-        let raw = "{\n  \"key\": \"value\"\n}";
-        // Structural newlines are outside strings, so no change needed.
-        assert!(repair_control_chars(raw).is_none());
-    }
-
-    // ---- combined repair tests ----
-
     #[test]
     fn parse_or_repair_recovers_from_control_chars() {
         let raw = "{\"path\": \"fib.py\", \"content\": \"line1\nline2\"}";
         let parsed = parse_or_repair_json(raw).expect("should recover");
         assert!(parsed.was_repaired);
-        assert_eq!(parsed.value["content"], "line1\nline2");
     }
 
     #[test]
@@ -1881,14 +1786,25 @@ mod tests {
         assert_eq!(parsed.value["command"], "ls -la");
     }
 
+    // ---- repair_control_chars tests ----
+
     #[test]
-    fn parse_or_repair_combined_quotes_and_control_chars() {
-        // Both unescaped quotes AND literal newlines.
-        let raw = "{\"content\": \"print(\"hello\")\nprint(\"world\")\"}";
-        let parsed = parse_or_repair_json(raw).expect("should recover via combined repair");
-        assert!(parsed.was_repaired);
-        let content = parsed.value["content"].as_str().unwrap();
-        assert!(content.contains("hello"));
-        assert!(content.contains("world"));
+    fn repair_control_chars_fixes_literal_newlines() {
+        let raw = "{\"path\": \"fib.py\", \"content\": \"def f(n):\n    return n\"}";
+        let repaired = repair_control_chars(raw).expect("should repair");
+        let val: Value = serde_json::from_str(&repaired).expect("valid JSON");
+        assert_eq!(val["content"], "def f(n):\n    return n");
+    }
+
+    #[test]
+    fn repair_control_chars_returns_none_for_clean_json() {
+        let raw = r#"{"content": "no control chars here"}"#;
+        assert!(repair_control_chars(raw).is_none());
+    }
+
+    #[test]
+    fn repair_control_chars_preserves_structural_newlines() {
+        let raw = "{\n  \"key\": \"value\"\n}";
+        assert!(repair_control_chars(raw).is_none());
     }
 }
