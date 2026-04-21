@@ -338,7 +338,7 @@ fn render_entry<'a>(entry: &TimelineEntry, theme: &ChatTheme, width: u16) -> Vec
             if !subtitle.is_empty() {
                 lines.push(Line::from(vec![
                     Span::raw(INDENT),
-                    Span::styled(subtitle, theme.dim_text),
+                    Span::styled(subtitle, theme.tool_target),
                 ]));
             }
 

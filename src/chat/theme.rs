@@ -71,30 +71,35 @@ pub fn available_themes() -> Vec<ThemeInfo> {
 
 fn map_opaline_theme(theme: &opaline::Theme) -> ChatTheme {
     let bg_base = to_color(theme.color("bg.base"));
+    let bg_panel = to_color(theme.color("bg.panel"));
+    let bg_code = to_color(theme.color("bg.code"));
     let text_primary = to_color(theme.color("text.primary"));
     let text_secondary = to_color(theme.color("text.secondary"));
     let text_muted = to_color(theme.color("text.muted"));
     let accent_primary = to_color(theme.color("accent.primary"));
+    let accent_secondary = to_color(theme.color("accent.secondary"));
+    let accent_tertiary = to_color(theme.color("accent.tertiary"));
     let accent_info = to_color(theme.color("accent.info"));
     let accent_warning = to_color(theme.color("accent.warning"));
     let accent_error = to_color(theme.color("accent.error"));
     let accent_success = to_color(theme.color("accent.success"));
-    let code_plain = to_color(theme.color("code.plain"));
-    let code_bg = to_color(theme.color("code.background"));
+    let code_keyword = to_color(theme.color("code.keyword"));
+    let code_string = to_color(theme.color("code.string"));
+    let code_function = to_color(theme.color("code.function"));
 
     let mad_skin = build_mad_skin(
         theme.color("text.primary"),
         theme.color("text.muted"),
         theme.color("accent.info"),
         theme.color("accent.primary"),
-        theme.color("code.plain"),
-        theme.color("code.background"),
+        theme.color("text.primary"),
+        theme.color("bg.code"),
     );
 
     ChatTheme {
-        title_bar: Style::default().fg(text_secondary),
+        title_bar: Style::default().fg(text_secondary).bg(bg_panel),
         title_text: Style::default()
-            .fg(text_primary)
+            .fg(accent_primary)
             .add_modifier(Modifier::BOLD),
         timeline_bg: Style::default().fg(text_primary),
         body_text: Style::default().fg(text_primary),
@@ -104,21 +109,23 @@ fn map_opaline_theme(theme: &opaline::Theme) -> ChatTheme {
             .add_modifier(Modifier::BOLD),
         marker_response: Style::default().fg(accent_primary),
         marker_tool: Style::default().fg(accent_success),
-        marker_bash: Style::default().fg(accent_success),
-        marker_thinking: Style::default().fg(accent_warning),
+        marker_bash: Style::default().fg(accent_secondary),
+        marker_thinking: Style::default()
+            .fg(accent_tertiary)
+            .add_modifier(Modifier::ITALIC),
         marker_warning: Style::default().fg(accent_error),
         marker_hint: Style::default().fg(accent_warning),
         tool_label: Style::default()
-            .fg(text_primary)
+            .fg(code_function)
             .add_modifier(Modifier::BOLD),
-        tool_target: Style::default().fg(accent_info),
+        tool_target: Style::default().fg(code_string),
         diff_add: Style::default().fg(accent_success),
         diff_del: Style::default().fg(accent_error),
-        code_block: Style::default().fg(code_plain),
+        code_block: Style::default().fg(text_primary),
         input_prompt: Style::default().fg(accent_info),
         input_placeholder: Style::default().fg(text_muted),
-        status_bar: Style::default().fg(text_secondary),
-        status_right: Style::default().fg(text_muted),
+        status_bar: Style::default().fg(text_secondary).bg(bg_panel),
+        status_right: Style::default().fg(accent_info),
         picker_title: Style::default()
             .fg(accent_primary)
             .add_modifier(Modifier::BOLD),
@@ -127,9 +134,11 @@ fn map_opaline_theme(theme: &opaline::Theme) -> ChatTheme {
             .fg(accent_info)
             .add_modifier(Modifier::BOLD),
         picker_desc: Style::default().fg(text_muted),
-        spinner: Style::default().fg(accent_warning),
-        tip_command: Style::default().fg(accent_warning),
-        code_bg,
+        spinner: Style::default()
+            .fg(accent_warning)
+            .add_modifier(Modifier::BOLD),
+        tip_command: Style::default().fg(code_keyword),
+        code_bg: bg_code,
         backdrop_color: bg_base,
         mad_skin,
     }
