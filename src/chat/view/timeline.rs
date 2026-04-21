@@ -333,6 +333,15 @@ fn render_entry<'a>(entry: &TimelineEntry, theme: &ChatTheme, width: u16) -> Vec
                 Span::styled(status_marker, status_style),
             ]));
 
+            // Show key argument (file path / command) as a subtitle
+            let subtitle = extract_tool_subtitle(tool_name, &entry.details);
+            if !subtitle.is_empty() {
+                lines.push(Line::from(vec![
+                    Span::raw(INDENT),
+                    Span::styled(subtitle, theme.dim_text),
+                ]));
+            }
+
             for body_line in entry.body.lines() {
                 lines.push(Line::from(vec![
                     Span::raw(INDENT),
@@ -363,11 +372,31 @@ fn render_entry<'a>(entry: &TimelineEntry, theme: &ChatTheme, width: u16) -> Vec
                 ),
             ]));
 
-            for output_line in entry.body.lines() {
+            // Output lines — cap to last MAX_BASH_OUTPUT_LINES
+            const MAX_BASH_OUTPUT_LINES: usize = 8;
+            let output_lines: Vec<&str> = entry.body.lines().collect();
+            let (shown, skipped) = if output_lines.len() > MAX_BASH_OUTPUT_LINES {
+                (
+                    &output_lines[output_lines.len() - MAX_BASH_OUTPUT_LINES..],
+                    output_lines.len() - MAX_BASH_OUTPUT_LINES,
+                )
+            } else {
+                (output_lines.as_slice(), 0)
+            };
+            if skipped > 0 {
+                lines.push(Line::from(vec![
+                    Span::raw(INDENT),
+                    Span::styled(
+                        format!("  … {skipped} lines hidden (Ctrl+O to expand)"),
+                        theme.dim_text,
+                    ),
+                ]));
+            }
+            for output_line in shown {
                 lines.push(Line::from(vec![
                     Span::raw(INDENT),
                     Span::raw("  "),
-                    Span::styled(output_line.to_owned(), theme.dim_text),
+                    Span::styled((*output_line).to_owned(), theme.dim_text),
                 ]));
             }
         }
@@ -396,21 +425,53 @@ fn render_entry<'a>(entry: &TimelineEntry, theme: &ChatTheme, width: u16) -> Vec
             }
         }
         EntryKind::Thinking => {
-            // Show a compact single-line summary with truncation.
-            // Full thinking text is available via Ctrl+O detail toggle.
-            let collapsed = entry.body.replace('\n', " ");
-            let max_chars = (width as usize / 3).max(30);
-            let summary = if collapsed.chars().count() > max_chars {
-                let truncated: String = collapsed.chars().take(max_chars).collect();
-                format!("{truncated}…")
-            } else {
-                collapsed
-            };
+            // Bordered thinking block — shows first few lines collapsed.
+            // Full content available via Ctrl+O detail toggle.
+            let text_width = width.saturating_sub(INDENT_WIDTH);
+            let w = text_width as usize;
+            let border_style = theme.marker_thinking;
+            let content_style = Style::default()
+                .fg(theme.dim_text.fg.unwrap_or(Color::Reset))
+                .bg(theme.code_bg);
+
+            // Top border with label
+            let label = " 🧠 Thinking ";
+            let label_w = UnicodeWidthStr::width(label);
+            let bar_len = w.saturating_sub(label_w);
             lines.push(Line::from(vec![
-                Span::raw(MARGIN),
-                Span::styled("● ", marker_style),
-                Span::styled("Thinking ", theme.dim_text),
-                Span::styled(summary, theme.dim_text),
+                Span::raw(INDENT),
+                Span::styled(label, border_style),
+                Span::styled("─".repeat(bar_len), border_style),
+            ]));
+
+            // Content — show first MAX_THINKING_LINES
+            const MAX_THINKING_LINES: usize = 4;
+            let body = entry.body.replace('\n', " ");
+            let all_lines = wrap_text(&body, text_width);
+            let total = all_lines.len();
+            let shown = total.min(MAX_THINKING_LINES);
+            for line_text in &all_lines[..shown] {
+                let display_w = UnicodeWidthStr::width(line_text.as_str());
+                let padding = w.saturating_sub(display_w);
+                lines.push(Line::from(vec![
+                    Span::raw(INDENT),
+                    Span::styled(format!("{line_text}{}", " ".repeat(padding)), content_style),
+                ]));
+            }
+            if total > MAX_THINKING_LINES {
+                let note = format!("… +{} lines (Ctrl+O)", total - shown);
+                let note_w = UnicodeWidthStr::width(note.as_str());
+                let note_pad = w.saturating_sub(note_w);
+                lines.push(Line::from(vec![
+                    Span::raw(INDENT),
+                    Span::styled(format!("{note}{}", " ".repeat(note_pad)), content_style),
+                ]));
+            }
+
+            // Bottom border
+            lines.push(Line::from(vec![
+                Span::raw(INDENT),
+                Span::styled("─".repeat(w), border_style),
             ]));
         }
         EntryKind::CodeBlock { language } => {
@@ -439,6 +500,33 @@ fn marker_style_for(entry: &TimelineEntry, theme: &ChatTheme) -> Style {
         (_, EntryKind::CodeBlock { .. }) => theme.marker_tool,
         _ => theme.marker_response,
     }
+}
+
+/// Extract a short subtitle from tool-call arguments (stored in `details`).
+/// Shows the most useful field — file path for read/write, command for bash.
+fn extract_tool_subtitle(tool_name: &str, details: &str) -> String {
+    let val: serde_json::Value = match serde_json::from_str(details) {
+        Ok(v) => v,
+        Err(_) => return String::new(),
+    };
+
+    let key = match tool_name {
+        "read_file" | "write_file" => "path",
+        "bash" => "command",
+        "list_dir" => "path",
+        _ => return String::new(),
+    };
+
+    val.get(key)
+        .and_then(|v| v.as_str())
+        .map(|s| {
+            if s.len() > 80 {
+                format!("{}…", &s[..77])
+            } else {
+                s.to_owned()
+            }
+        })
+        .unwrap_or_default()
 }
 
 /// Break `text` into chunks that each fit within `max_cols` display columns.
