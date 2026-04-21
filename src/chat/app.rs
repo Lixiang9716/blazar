@@ -1,5 +1,5 @@
 use crate::agent::protocol::AgentEvent;
-use crate::agent::runtime::AgentRuntime;
+use crate::agent::runtime::{AgentRuntime, AgentRuntimeError};
 use crate::agent::state::{AgentRuntimeState, TurnState};
 
 use crate::chat::input::InputAction;
@@ -65,7 +65,7 @@ struct PendingTurn {
 }
 
 impl ChatApp {
-    pub fn new(repo_path: &str) -> Self {
+    pub fn new(repo_path: &str) -> Result<Self, AgentRuntimeError> {
         let display_path = shorten_home(repo_path);
         let branch = detect_branch(repo_path);
 
@@ -94,7 +94,7 @@ impl ChatApp {
 
         let workspace_root = PathBuf::from(repo_path);
 
-        Self {
+        Ok(Self {
             messages: vec![ChatMessage {
                 author: Author::Spirit,
                 body: "Spirit: Tell me what you'd like to explore.".to_owned(),
@@ -118,7 +118,7 @@ impl ChatApp {
             timeline_visible_height: Cell::new(0),
             theme_name: crate::chat::theme::DEFAULT_THEME.to_owned(),
             theme,
-            agent_runtime: AgentRuntime::new(provider, workspace_root.clone()),
+            agent_runtime: AgentRuntime::new(provider, workspace_root.clone())?,
             agent_state: AgentRuntimeState::default(),
             pending_messages: VecDeque::new(),
             workspace_root,
@@ -126,11 +126,11 @@ impl ChatApp {
             has_user_sent: false,
             active_turn_kind: None,
             active_turn_title: None,
-        }
+        })
     }
 
-    pub fn new_for_test(_repo_path: &str) -> Self {
-        let mut app = Self::new(_repo_path);
+    pub fn new_for_test(_repo_path: &str) -> Result<Self, AgentRuntimeError> {
+        let mut app = Self::new(_repo_path)?;
         // Use a fixed display path so snapshots are environment-independent.
         app.display_path = "~/blazar".to_owned();
         // Stable branch for tests.
@@ -141,16 +141,16 @@ impl ChatApp {
         app.agent_runtime = AgentRuntime::new(
             Box::new(EchoProvider::new(0)),
             std::path::PathBuf::from(_repo_path),
-        );
-        app
+        )?;
+        Ok(app)
     }
 
     /// Creates a ChatApp pre-loaded with demo timeline entries for visual testing.
     #[cfg(test)]
-    pub fn new_with_demo_timeline(repo_path: &str) -> Self {
-        let mut app = Self::new(repo_path);
+    pub fn new_with_demo_timeline(repo_path: &str) -> Result<Self, AgentRuntimeError> {
+        let mut app = Self::new(repo_path)?;
         app.timeline = crate::chat::demo::demo_timeline();
-        app
+        Ok(app)
     }
 
     pub fn messages(&self) -> &[ChatMessage] {
@@ -250,13 +250,23 @@ impl ChatApp {
                 cfg.model = model.to_owned();
                 let provider: Box<dyn LlmProvider> =
                     Box::new(crate::provider::siliconflow::SiliconFlowProvider::new(cfg));
-                self.agent_runtime = AgentRuntime::new(provider, self.workspace_root.clone());
-                self.agent_state = AgentRuntimeState::default();
-                self.model_name = model.to_owned();
-                self.timeline.push(TimelineEntry::hint(format!(
-                    "Model switched to **{model}**"
-                )));
-                self.scroll_offset = u16::MAX;
+                match AgentRuntime::new(provider, self.workspace_root.clone()) {
+                    Ok(runtime) => {
+                        self.agent_runtime = runtime;
+                        self.agent_state = AgentRuntimeState::default();
+                        self.model_name = model.to_owned();
+                        self.timeline.push(TimelineEntry::hint(format!(
+                            "Model switched to **{model}**"
+                        )));
+                        self.scroll_offset = u16::MAX;
+                    }
+                    Err(e) => {
+                        self.timeline.push(TimelineEntry::warning(format!(
+                            "Failed to switch model: {e}"
+                        )));
+                        self.scroll_offset = u16::MAX;
+                    }
+                }
             }
             Err(e) => {
                 self.timeline.push(TimelineEntry::warning(format!(
@@ -907,9 +917,10 @@ mod tests {
     #[test]
     fn tick_handles_multibyte_tool_arguments_without_panicking() {
         let repo_path = env!("CARGO_MANIFEST_DIR");
-        let mut app = ChatApp::new_for_test(repo_path);
+        let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
         app.agent_runtime =
-            AgentRuntime::new(Box::new(UnicodeArgumentProvider), PathBuf::from(repo_path));
+            AgentRuntime::new(Box::new(UnicodeArgumentProvider), PathBuf::from(repo_path))
+                .expect("runtime should initialize");
 
         app.agent_runtime.submit_turn("read unicode path").unwrap();
         std::thread::sleep(Duration::from_millis(100));
@@ -925,9 +936,10 @@ mod tests {
     #[test]
     fn tick_handles_multibyte_tool_output_without_panicking() {
         let repo_path = env!("CARGO_MANIFEST_DIR");
-        let mut app = ChatApp::new_for_test(repo_path);
+        let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
         app.agent_runtime =
-            AgentRuntime::new(Box::new(UnicodeOutputProvider), PathBuf::from(repo_path));
+            AgentRuntime::new(Box::new(UnicodeOutputProvider), PathBuf::from(repo_path))
+                .expect("runtime should initialize");
 
         app.agent_runtime
             .submit_turn("render unicode output")
@@ -945,7 +957,7 @@ mod tests {
     #[test]
     fn send_message_queues_when_agent_busy() {
         let repo_path = env!("CARGO_MANIFEST_DIR");
-        let mut app = ChatApp::new_for_test(repo_path);
+        let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
 
         // First message dispatches normally
         app.send_message("first message");
@@ -978,7 +990,7 @@ mod tests {
     #[test]
     fn dispatch_next_queued_drains_fifo_on_turn_complete() {
         let repo_path = env!("CARGO_MANIFEST_DIR");
-        let mut app = ChatApp::new_for_test(repo_path);
+        let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
 
         // Queue two messages
         app.pending_messages
@@ -995,7 +1007,7 @@ mod tests {
     #[test]
     fn dispatch_next_queued_drains_on_turn_failed() {
         let repo_path = env!("CARGO_MANIFEST_DIR");
-        let mut app = ChatApp::new_for_test(repo_path);
+        let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
 
         app.pending_messages
             .push_back(build_pending_turn("queued-after-fail"));
@@ -1010,7 +1022,7 @@ mod tests {
     #[test]
     fn paste_action_inserts_into_composer_without_submitting() {
         let repo_path = env!("CARGO_MANIFEST_DIR");
-        let mut app = ChatApp::new_for_test(repo_path);
+        let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
 
         let pasted = "line one\nline two\nline three";
         app.handle_action(InputAction::Paste(pasted.to_owned()));
@@ -1031,14 +1043,15 @@ mod tests {
     #[test]
     fn plan_command_rewrites_prompt_for_planning_mode() {
         let repo_path = env!("CARGO_MANIFEST_DIR");
-        let mut app = ChatApp::new_for_test(repo_path);
+        let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
         let captured_prompt = Arc::new(Mutex::new(None));
         app.agent_runtime = AgentRuntime::new(
             Box::new(CapturePromptProvider {
                 prompt: captured_prompt.clone(),
             }),
             PathBuf::from(repo_path),
-        );
+        )
+        .expect("runtime should initialize");
 
         app.send_message("/plan add minimax provider");
         std::thread::sleep(Duration::from_millis(50));
@@ -1057,7 +1070,7 @@ mod tests {
     #[test]
     fn planning_turn_uses_thinking_while_streaming_then_sets_title() {
         let repo_path = env!("CARGO_MANIFEST_DIR");
-        let mut app = ChatApp::new_for_test(repo_path);
+        let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
 
         app.send_message("/plan add minimax provider");
         app.apply_agent_event_for_test(AgentEvent::TurnStarted {
@@ -1101,7 +1114,7 @@ mod tests {
     #[test]
     fn follow_up_turn_reuses_latest_plan_title_while_streaming() {
         let repo_path = env!("CARGO_MANIFEST_DIR");
-        let mut app = ChatApp::new_for_test(repo_path);
+        let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
         app.timeline.push(
             TimelineEntry::response("1. Review current provider abstraction")
                 .with_title("MiniMax Provider Integration"),

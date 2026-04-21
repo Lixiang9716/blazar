@@ -1,4 +1,6 @@
 use std::collections::{HashMap, HashSet};
+use std::fmt::{self, Display, Formatter};
+use std::io;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -46,32 +48,69 @@ Consider a more efficient approach (e.g., memoization/iterative rewrite), reduci
 const REPEATED_TIMEOUT_GUIDANCE: &str = "REPEATED TIMEOUT: the same tool call timed out multiple times. \
 Change strategy instead of retrying the same implementation.";
 
+type RuntimeWorker = Box<dyn FnOnce() + Send + 'static>;
+
+#[derive(Debug)]
+pub enum AgentRuntimeError {
+    ThreadSpawn(io::Error),
+}
+
+impl Display for AgentRuntimeError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ThreadSpawn(source) => {
+                write!(f, "failed to spawn agent runtime thread: {source}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for AgentRuntimeError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::ThreadSpawn(source) => Some(source),
+        }
+    }
+}
+
 impl AgentRuntime {
     /// Create a new runtime with the given provider.
-    pub fn new(provider: Box<dyn LlmProvider>, workspace_root: PathBuf) -> Self {
+    pub fn new(
+        provider: Box<dyn LlmProvider>,
+        workspace_root: PathBuf,
+    ) -> Result<Self, AgentRuntimeError> {
+        Self::new_with_spawner(provider, workspace_root, spawn_worker_thread)
+    }
+
+    fn new_with_spawner<F>(
+        provider: Box<dyn LlmProvider>,
+        workspace_root: PathBuf,
+        spawn_thread: F,
+    ) -> Result<Self, AgentRuntimeError>
+    where
+        F: FnOnce(RuntimeWorker) -> io::Result<JoinHandle<()>>,
+    {
         let (cmd_tx, cmd_rx) = mpsc::channel();
         let (event_tx, event_rx) = mpsc::channel();
         let cancel_flag = Arc::new(AtomicBool::new(false));
         let flag_clone = Arc::clone(&cancel_flag);
+        let worker: RuntimeWorker = Box::new(move || {
+            let mut tools = ToolRegistry::new(workspace_root.clone());
+            tools.register(Box::new(ReadFileTool::new(workspace_root.clone())));
+            tools.register(Box::new(WriteFileTool::new(workspace_root.clone())));
+            tools.register(Box::new(ListDirTool::new(workspace_root.clone())));
+            tools.register(Box::new(BashTool::new(workspace_root)));
+            runtime_loop(cmd_rx, event_tx, provider, tools, flag_clone)
+        });
 
-        let handle = std::thread::Builder::new()
-            .name("blazar-agent".into())
-            .spawn(move || {
-                let mut tools = ToolRegistry::new(workspace_root.clone());
-                tools.register(Box::new(ReadFileTool::new(workspace_root.clone())));
-                tools.register(Box::new(WriteFileTool::new(workspace_root.clone())));
-                tools.register(Box::new(ListDirTool::new(workspace_root.clone())));
-                tools.register(Box::new(BashTool::new(workspace_root)));
-                runtime_loop(cmd_rx, event_tx, provider, tools, flag_clone)
-            })
-            .expect("failed to spawn agent runtime thread");
+        let handle = spawn_thread(worker).map_err(AgentRuntimeError::ThreadSpawn)?;
 
-        Self {
+        Ok(Self {
             cmd_tx,
             event_rx,
             cancel_flag,
             handle: Some(handle),
-        }
+        })
     }
 
     /// Submit a new turn to the agent.
@@ -98,6 +137,12 @@ impl AgentRuntime {
     pub fn try_recv(&self) -> Option<AgentEvent> {
         self.event_rx.try_recv().ok()
     }
+}
+
+fn spawn_worker_thread(worker: RuntimeWorker) -> io::Result<JoinHandle<()>> {
+    std::thread::Builder::new()
+        .name("blazar-agent".into())
+        .spawn(worker)
 }
 
 impl Drop for AgentRuntime {
@@ -1806,5 +1851,22 @@ mod tests {
     fn repair_control_chars_preserves_structural_newlines() {
         let raw = "{\n  \"key\": \"value\"\n}";
         assert!(repair_control_chars(raw).is_none());
+    }
+
+    #[test]
+    fn new_surfaces_spawn_errors_instead_of_panicking() {
+        let provider = crate::provider::echo::EchoProvider::new(0);
+        let runtime = AgentRuntime::new_with_spawner(
+            Box::new(provider),
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")),
+            |_worker| Err(std::io::Error::other("spawn failed")),
+        );
+
+        assert!(
+            runtime.is_err(),
+            "spawn failures should return an explicit error"
+        );
+        let err = runtime.err().expect("runtime should carry a spawn error");
+        assert!(matches!(err, AgentRuntimeError::ThreadSpawn(_)));
     }
 }

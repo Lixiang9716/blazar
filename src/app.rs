@@ -336,8 +336,7 @@ pub fn run() -> AppResult<()> {
     init_logger();
     log::info!("Blazar starting");
     let schema = build_schema()?;
-    let mascot = config::load_mascot_config()?;
-    chat::event_loop::run_terminal_chat(schema, mascot)
+    chat::event_loop::run_terminal_chat(schema)
 }
 
 /// Initialize file-based logger.  Logs go to `logs/blazar.log` in the repo
