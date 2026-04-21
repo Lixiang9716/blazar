@@ -26,6 +26,20 @@ cargo install just bacon cargo-nextest cargo-deny cargo-llvm-cov cargo-outdated
 - `just eval-smoke` — one-command smoke benchmark
 - `just eval-smoke-dry` — one-command smoke dry-run
 
+## Cargo deny duplicate policy
+
+`just audit` includes `cargo deny check` with duplicate-crate warnings enabled.
+
+Current hygiene status:
+
+- `indexmap` is pinned to `2.12.0` in `Cargo.lock` to avoid pulling `hashbrown 0.17.x` via `toml_edit`, reducing one duplicate set.
+- A small set of transitive duplicates remains explicitly documented in `deny.toml` (`[bans].skip`) because upstream crates currently require incompatible major lines:
+  - `getrandom 0.2.x` (via `ring`/`rustls`) alongside `0.3.x`
+  - `unicode-width 0.1.x` (via `termimad`/`ratskin`) alongside `0.2.x`
+  - `windows-sys 0.52.x` (via `ring`) alongside `0.61.x`
+
+When upstream dependencies converge, remove those skip entries and re-run `just audit`.
+
 ## Knowledge-base workflow
 
 Before architecture, UI, or implementation work, read:

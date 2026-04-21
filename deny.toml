@@ -15,7 +15,10 @@ multiple-versions = "warn"
 wildcards = "allow"
 deny = []
 skip = [
-    { crate = "hashbrown@0.14.5", reason = "transitive dep version mismatch across ratatui/crossterm/serde" },
+    { crate = "hashbrown@0.14.5", reason = "rusqlite -> hashlink currently pins hashbrown 0.14.x" },
+    { crate = "getrandom@0.2.17", reason = "ring/rustls stack still requires getrandom 0.2.x while other deps use 0.3.x" },
+    { crate = "unicode-width@0.1.14", reason = "termimad/ratskin currently depend on unicode-width 0.1.x" },
+    { crate = "windows-sys@0.52.0", reason = "ring transitively pins windows-sys 0.52.x while newer crates require 0.61.x" },
 ]
 
 [sources]

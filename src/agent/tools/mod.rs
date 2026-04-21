@@ -7,6 +7,7 @@ use serde_json::Value;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
+/// Declarative metadata advertised to the model for each callable tool.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ToolSpec {
     pub name: String,
@@ -14,6 +15,7 @@ pub struct ToolSpec {
     pub parameters: Value,
 }
 
+/// Canonical tool execution payload returned to the runtime.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolResult {
     pub output: String,
@@ -23,6 +25,7 @@ pub struct ToolResult {
 }
 
 impl ToolResult {
+    /// Builds a successful tool result with plain-text output.
     pub fn success(output: impl Into<String>) -> Self {
         Self {
             output: output.into(),
@@ -32,6 +35,7 @@ impl ToolResult {
         }
     }
 
+    /// Builds an error tool result without attaching an OS exit code.
     pub fn failure(output: impl Into<String>) -> Self {
         Self {
             output: output.into(),
@@ -42,17 +46,23 @@ impl ToolResult {
     }
 }
 
+/// Trait implemented by all model-callable tools.
+///
+/// `execute` must be deterministic for identical inputs and should report
+/// user-facing validation errors in [`ToolResult::failure`].
 pub trait Tool: Send + Sync {
     fn spec(&self) -> ToolSpec;
     fn execute(&self, args: Value) -> ToolResult;
 }
 
+/// Runtime registry that owns tool implementations for a workspace.
 pub struct ToolRegistry {
     workspace_root: PathBuf,
     tools: Vec<Box<dyn Tool>>,
 }
 
 impl ToolRegistry {
+    /// Creates an empty registry scoped to `workspace_root`.
     pub fn new(workspace_root: PathBuf) -> Self {
         Self {
             workspace_root,
@@ -60,14 +70,17 @@ impl ToolRegistry {
         }
     }
 
+    /// Returns the configured workspace root used by path-aware tools.
     pub fn workspace_root(&self) -> &Path {
         &self.workspace_root
     }
 
+    /// Adds a tool implementation to the registry.
     pub fn register(&mut self, tool: Box<dyn Tool>) {
         self.tools.push(tool);
     }
 
+    /// Looks up a tool by its advertised `ToolSpec::name`.
     pub fn get(&self, name: &str) -> Option<&dyn Tool> {
         self.tools
             .iter()
@@ -75,10 +88,12 @@ impl ToolRegistry {
             .map(|tool| tool.as_ref())
     }
 
+    /// Returns the public specs for all registered tools.
     pub fn specs(&self) -> Vec<ToolSpec> {
         self.tools.iter().map(|tool| tool.spec()).collect()
     }
 
+    /// Executes a named tool and returns an error when the tool is unknown.
     pub fn execute(&self, name: &str, args: Value) -> Result<ToolResult, String> {
         match self.get(name) {
             Some(tool) => Ok(tool.execute(args)),
@@ -87,6 +102,10 @@ impl ToolRegistry {
     }
 }
 
+/// Validates a user-provided path is workspace-relative and traversal-safe.
+///
+/// This rejects absolute paths and components that can escape the workspace
+/// (`..`, root markers, and Windows prefixes).
 pub fn validate_workspace_relative_path(requested: &str) -> Result<(), String> {
     let path = Path::new(requested);
     if path.is_absolute() {
@@ -105,6 +124,7 @@ pub fn validate_workspace_relative_path(requested: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Canonicalizes `workspace_root` and emits a context-rich error on failure.
 pub fn canonical_workspace_root(workspace_root: &Path) -> Result<PathBuf, String> {
     fs::canonicalize(workspace_root).map_err(|error| {
         format!(
@@ -136,6 +156,9 @@ fn canonicalize_existing_ancestor(path: &Path) -> Result<PathBuf, String> {
     ))
 }
 
+/// Resolves a read path inside the workspace and returns its canonical path.
+///
+/// The target must already exist and remain under `workspace_root`.
 pub fn resolve_workspace_path(workspace_root: &Path, requested: &str) -> Result<PathBuf, String> {
     validate_workspace_relative_path(requested)?;
 
@@ -150,6 +173,13 @@ pub fn resolve_workspace_path(workspace_root: &Path, requested: &str) -> Result<
     Ok(canonical_path)
 }
 
+/// Resolves a safe write target relative to `workspace_root`.
+///
+/// Returns:
+/// - the unresolved full write path (preserving caller intent), and
+/// - the canonical workspace root used for containment checks.
+///
+/// Existing symlink targets are rejected to avoid writing through links.
 pub fn resolve_workspace_write_path(
     workspace_root: &Path,
     requested: &str,
