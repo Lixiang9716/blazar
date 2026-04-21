@@ -14,11 +14,11 @@ expression: "lines.join(\"\\n\")"
 │         ▀▀▀▀▀▀▀▀▀▀                                       │
 │                                                          │
 ╰──────────────────────────────────────────────────────────╯
+  Blazar #1                                                 
   ● Tell me what you'd like to explore.                     
-                                                            
                                                             
                                                             
 ────────────────────────────────────────────────────────────
 › Describe a task or ask a question…                        
 ────────────────────────────────────────────────────────────
-/ commands · ? help                           echo · ready
+blazar (main) · / commands                    echo · ready

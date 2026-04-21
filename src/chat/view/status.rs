@@ -17,7 +17,18 @@ pub(super) fn render_separator(frame: &mut Frame, area: Rect, theme: &ChatTheme)
 }
 
 pub(super) fn render_status_bar(frame: &mut Frame, area: Rect, app: &ChatApp, theme: &ChatTheme) {
-    let left = "/ commands · ? help";
+    // Left: workspace basename + git branch (repo awareness)
+    let ws_name = app
+        .display_path()
+        .rsplit('/')
+        .next()
+        .unwrap_or(app.display_path());
+    let branch = app.branch();
+    let left = if branch.is_empty() {
+        format!("{ws_name} · / commands")
+    } else {
+        format!("{ws_name} ({branch}) · / commands")
+    };
 
     let status = app.status_label();
     let status_style = if app.is_streaming() {
@@ -37,10 +48,20 @@ pub(super) fn render_status_bar(frame: &mut Frame, area: Rect, app: &ChatApp, th
     let right = format!("{model_short} · {status}");
 
     let available = area.width as usize;
-    let gap = available.saturating_sub(left.len() + right.len());
+    let right_len = right.len();
+
+    // Truncate left side if total exceeds available width
+    let max_left = available.saturating_sub(right_len + 1);
+    let left_display = if left.len() > max_left {
+        format!("{}…", &left[..max_left.saturating_sub(1)])
+    } else {
+        left
+    };
+
+    let gap = available.saturating_sub(left_display.len() + right_len);
 
     let line = Line::from(vec![
-        Span::styled(left, theme.status_bar),
+        Span::styled(left_display, theme.status_bar),
         Span::styled(" ".repeat(gap), theme.status_bar),
         Span::styled(right, status_style),
     ]);

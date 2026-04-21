@@ -45,6 +45,8 @@ pub struct ChatApp {
     workspace_root: PathBuf,
     /// Display name of the active model (e.g. "Qwen/Qwen3-8B").
     model_name: String,
+    /// True once the user has sent at least one message (collapses welcome banner).
+    has_user_sent: bool,
 }
 
 impl ChatApp {
@@ -106,6 +108,7 @@ impl ChatApp {
             pending_messages: VecDeque::new(),
             workspace_root,
             model_name,
+            has_user_sent: false,
         }
     }
 
@@ -113,6 +116,8 @@ impl ChatApp {
         let mut app = Self::new(_repo_path);
         // Use a fixed display path so snapshots are environment-independent.
         app.display_path = "~/blazar".to_owned();
+        // Stable branch for tests.
+        app.branch = "main".to_owned();
         // Stable model name for tests.
         app.model_name = "echo".to_owned();
         // Always use EchoProvider in tests — no network calls.
@@ -199,6 +204,11 @@ impl ChatApp {
 
     pub fn model_name(&self) -> &str {
         &self.model_name
+    }
+
+    /// Whether the user has sent at least one message this session.
+    pub fn has_user_sent(&self) -> bool {
+        self.has_user_sent
     }
 
     /// Switch the active LLM model by rebuilding the provider and agent runtime.
@@ -300,6 +310,8 @@ impl ChatApp {
             author: Author::User,
             body: trimmed.to_owned(),
         });
+
+        self.has_user_sent = true;
 
         // Add user message to timeline
         self.timeline.push(TimelineEntry::user_message(trimmed));
@@ -654,7 +666,7 @@ fn summarize_tool_output(output: &str) -> String {
     preview_text(first_line, 80).to_owned()
 }
 
-/// Detect the current git branch. Returns "main" as fallback.
+/// Detect the current git branch. Returns empty string if not in a git repo.
 fn detect_branch(repo_path: &str) -> String {
     std::process::Command::new("git")
         .args(["rev-parse", "--abbrev-ref", "HEAD"])
@@ -670,7 +682,7 @@ fn detect_branch(repo_path: &str) -> String {
                 None
             }
         })
-        .unwrap_or_else(|| "main".to_owned())
+        .unwrap_or_default()
 }
 
 #[cfg(test)]

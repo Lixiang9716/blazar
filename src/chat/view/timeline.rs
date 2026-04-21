@@ -23,7 +23,54 @@ pub(super) fn render_timeline(frame: &mut Frame, area: Rect, app: &ChatApp, them
 
     let content_width = area.width;
 
+    // Track logical turns for turn headers
+    let mut last_actor: Option<Actor> = None;
+    let mut user_turn = 0u16;
+    let mut assistant_turn = 0u16;
+
     for entry in app.timeline() {
+        // Insert turn header when actor changes between User and Assistant
+        let is_user = entry.actor == Actor::User && entry.kind == EntryKind::Message;
+        let is_assistant = entry.actor == Actor::Assistant && entry.kind == EntryKind::Message;
+
+        if is_user {
+            if last_actor != Some(Actor::User) {
+                user_turn += 1;
+                if !lines.is_empty() {
+                    // Subtle separator between turns
+                    let sep = "─".repeat(content_width.saturating_sub(4) as usize);
+                    lines.push(Line::from(vec![
+                        Span::raw(MARGIN),
+                        Span::styled(sep, theme.dim_text),
+                    ]));
+                    lines.push(Line::from(""));
+                }
+                lines.push(Line::from(vec![
+                    Span::raw(MARGIN),
+                    Span::styled(format!("You #{user_turn}"), theme.bold_text),
+                ]));
+            }
+            last_actor = Some(Actor::User);
+        } else if is_assistant {
+            if last_actor != Some(Actor::Assistant) {
+                assistant_turn += 1;
+                if !lines.is_empty() {
+                    let sep = "─".repeat(content_width.saturating_sub(4) as usize);
+                    lines.push(Line::from(vec![
+                        Span::raw(MARGIN),
+                        Span::styled(sep, theme.dim_text),
+                    ]));
+                    lines.push(Line::from(""));
+                }
+                lines.push(Line::from(vec![
+                    Span::raw(MARGIN),
+                    Span::styled(format!("Blazar #{assistant_turn}"), theme.marker_response),
+                ]));
+            }
+            last_actor = Some(Actor::Assistant);
+        }
+        // Tool/thinking/etc entries stay within the current assistant turn
+
         let entry_lines = render_entry(entry, theme, content_width);
         lines.extend(entry_lines);
 
@@ -511,22 +558,34 @@ fn extract_tool_subtitle(tool_name: &str, details: &str) -> String {
     };
 
     let key = match tool_name {
-        "read_file" | "write_file" => "path",
-        "bash" => "command",
-        "list_dir" => "path",
-        _ => return String::new(),
+        "read_file" | "write_file" | "create_file" | "list_dir" => "path",
+        "edit_file" => "path",
+        "bash" | "shell" => "command",
+        "grep" | "ripgrep" => "pattern",
+        "search" | "find_files" => "query",
+        _ => {
+            // Fallback: try common keys in order
+            for k in &["path", "file", "command", "query", "url"] {
+                if let Some(s) = val.get(*k).and_then(|v| v.as_str()) {
+                    return truncate_subtitle(s);
+                }
+            }
+            return String::new();
+        }
     };
 
     val.get(key)
         .and_then(|v| v.as_str())
-        .map(|s| {
-            if s.len() > 80 {
-                format!("{}…", &s[..77])
-            } else {
-                s.to_owned()
-            }
-        })
+        .map(truncate_subtitle)
         .unwrap_or_default()
+}
+
+fn truncate_subtitle(s: &str) -> String {
+    if s.len() > 80 {
+        format!("{}…", &s[..77])
+    } else {
+        s.to_owned()
+    }
 }
 
 /// Break `text` into chunks that each fit within `max_cols` display columns.

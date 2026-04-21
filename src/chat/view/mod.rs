@@ -60,6 +60,9 @@ pub fn render_frame(frame: &mut Frame, app: &mut ChatApp, tick_ms: u64) {
     // When streaming, allocate rows for the slime_run animation above input.
     let streaming_height: u16 = if streaming { 1 } else { 0 };
 
+    // Auto-collapse banner once user starts chatting.
+    let banner_height: u16 = if app.has_user_sent() { 0 } else { 12 };
+
     let [
         banner_area,
         timeline_area,
@@ -69,7 +72,7 @@ pub fn render_frame(frame: &mut Frame, app: &mut ChatApp, tick_ms: u64) {
         sep_bot,
         status_area,
     ] = vertical![
-        ==12,
+        ==(banner_height),
         >=1,
         ==(streaming_height),
         ==1,
@@ -79,7 +82,9 @@ pub fn render_frame(frame: &mut Frame, app: &mut ChatApp, tick_ms: u64) {
     ]
     .areas(area);
 
-    banner::render_welcome_banner(frame, banner_area, app, tick_ms, &theme);
+    if banner_height > 0 {
+        banner::render_welcome_banner(frame, banner_area, app, tick_ms, &theme);
+    }
     timeline::render_timeline(frame, timeline_area, app, &theme);
 
     if streaming {
