@@ -87,7 +87,8 @@ fn runtime_executes_tool_call_and_resumes_generation() {
             calls: Arc::new(AtomicU32::new(0)),
         }),
         workspace,
-    );
+    )
+    .expect("runtime should initialize");
 
     runtime.submit_turn("read the file").unwrap();
     let events = collect_events(&runtime, Duration::from_secs(2));
@@ -178,7 +179,8 @@ fn runtime_batches_tool_calls_before_replaying_tool_results() {
             calls: Arc::new(AtomicU32::new(0)),
         }),
         workspace,
-    );
+    )
+    .expect("runtime should initialize");
 
     runtime.submit_turn("compare both files").unwrap();
     let events = collect_events(&runtime, Duration::from_secs(2));

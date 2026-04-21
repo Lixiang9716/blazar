@@ -217,7 +217,8 @@ fn echo_provider_streams_full_response() {
 
 #[test]
 fn runtime_round_trip() {
-    let runtime = AgentRuntime::new(Box::new(EchoProvider::new(0)), workspace_root());
+    let runtime = AgentRuntime::new(Box::new(EchoProvider::new(0)), workspace_root())
+        .expect("runtime should initialize");
 
     runtime.submit_turn("hello").expect("submit should succeed");
 
@@ -242,7 +243,8 @@ fn runtime_round_trip() {
 
 #[test]
 fn submit_turn_returns_ok_when_channel_open() {
-    let runtime = AgentRuntime::new(Box::new(EchoProvider::new(0)), workspace_root());
+    let runtime = AgentRuntime::new(Box::new(EchoProvider::new(0)), workspace_root())
+        .expect("runtime should initialize");
     let result = runtime.submit_turn("test");
     assert!(result.is_ok());
     // Drain events to let the runtime finish cleanly
@@ -251,7 +253,8 @@ fn submit_turn_returns_ok_when_channel_open() {
 
 #[test]
 fn submit_turn_returns_err_after_shutdown() {
-    let runtime = AgentRuntime::new(Box::new(EchoProvider::new(0)), workspace_root());
+    let runtime = AgentRuntime::new(Box::new(EchoProvider::new(0)), workspace_root())
+        .expect("runtime should initialize");
     // Drop sends Shutdown command, closing the channel
     drop(runtime);
 
@@ -270,7 +273,8 @@ fn cancel_stops_streaming_turn() {
         barrier: Arc::clone(&barrier),
         post_barrier_chunks: 50,
     };
-    let runtime = AgentRuntime::new(Box::new(provider), workspace_root());
+    let runtime =
+        AgentRuntime::new(Box::new(provider), workspace_root()).expect("runtime should initialize");
 
     runtime.submit_turn("test").expect("submit should succeed");
 
@@ -303,7 +307,8 @@ fn transient_error_retries_and_recovers() {
         fail_count: AtomicU32::new(0),
         fail_times: 1, // fail once, then succeed
     };
-    let runtime = AgentRuntime::new(Box::new(provider), workspace_root());
+    let runtime =
+        AgentRuntime::new(Box::new(provider), workspace_root()).expect("runtime should initialize");
 
     runtime.submit_turn("test").expect("submit should succeed");
 
@@ -333,7 +338,8 @@ fn fatal_error_does_not_retry() {
         call_count: AtomicU32::new(0),
     };
 
-    let runtime = AgentRuntime::new(Box::new(provider), workspace_root());
+    let runtime =
+        AgentRuntime::new(Box::new(provider), workspace_root()).expect("runtime should initialize");
     runtime.submit_turn("test").expect("submit should succeed");
 
     let events = collect_events(&runtime, Duration::from_secs(2));
@@ -359,7 +365,8 @@ fn full_event_types_relayed_correctly() {
             calls: AtomicU32::new(0),
         }),
         workspace_root(),
-    );
+    )
+    .expect("runtime should initialize");
 
     runtime.submit_turn("test").expect("submit should succeed");
 
@@ -392,7 +399,8 @@ fn full_event_types_relayed_correctly() {
 
 #[test]
 fn multiple_sequential_turns_complete() {
-    let runtime = AgentRuntime::new(Box::new(EchoProvider::new(0)), workspace_root());
+    let runtime = AgentRuntime::new(Box::new(EchoProvider::new(0)), workspace_root())
+        .expect("runtime should initialize");
 
     for i in 0..3 {
         runtime
@@ -414,7 +422,8 @@ fn runtime_persists_history_across_turns() {
             turn: AtomicU32::new(0),
         }),
         workspace_root(),
-    );
+    )
+    .expect("runtime should initialize");
 
     runtime.submit_turn("first").expect("submit should succeed");
     let first_events = collect_events(&runtime, Duration::from_secs(2));
@@ -452,7 +461,8 @@ fn runtime_persists_history_across_turns() {
 
 #[test]
 fn drop_joins_thread_cleanly() {
-    let runtime = AgentRuntime::new(Box::new(EchoProvider::new(0)), workspace_root());
+    let runtime = AgentRuntime::new(Box::new(EchoProvider::new(0)), workspace_root())
+        .expect("runtime should initialize");
     runtime.submit_turn("hello").expect("submit should succeed");
     collect_events(&runtime, Duration::from_secs(2));
     // Drop should join the thread without panic or hang
@@ -466,7 +476,8 @@ fn drop_during_streaming_does_not_hang() {
         barrier: Arc::clone(&barrier),
         post_barrier_chunks: 100,
     };
-    let runtime = AgentRuntime::new(Box::new(provider), workspace_root());
+    let runtime =
+        AgentRuntime::new(Box::new(provider), workspace_root()).expect("runtime should initialize");
     runtime.submit_turn("test").expect("submit should succeed");
 
     // Let provider start
@@ -484,7 +495,8 @@ fn drop_during_streaming_does_not_hang() {
 fn state_machine_tracks_runtime_events() {
     use blazar::agent::state::AgentRuntimeState;
 
-    let runtime = AgentRuntime::new(Box::new(EchoProvider::new(0)), workspace_root());
+    let runtime = AgentRuntime::new(Box::new(EchoProvider::new(0)), workspace_root())
+        .expect("runtime should initialize");
     let mut state = AgentRuntimeState::default();
 
     runtime.submit_turn("hello").expect("submit should succeed");

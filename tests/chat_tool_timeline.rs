@@ -7,7 +7,7 @@ const REPO_ROOT: &str = env!("CARGO_MANIFEST_DIR");
 
 #[test]
 fn completed_tool_call_renders_summary_in_timeline() {
-    let mut app = ChatApp::new_for_test(REPO_ROOT);
+    let mut app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
 
     app.apply_agent_event_for_test(AgentEvent::ToolCallStarted {
         call_id: "call-1".into(),
@@ -28,7 +28,7 @@ fn completed_tool_call_renders_summary_in_timeline() {
 
 #[test]
 fn toggle_details_reveals_full_tool_output() {
-    let mut app = ChatApp::new_for_test(REPO_ROOT);
+    let mut app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
 
     app.apply_agent_event_for_test(AgentEvent::ToolCallStarted {
         call_id: "call-1".into(),

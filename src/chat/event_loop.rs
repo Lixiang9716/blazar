@@ -2,14 +2,10 @@
 
 use crate::chat::app::ChatApp;
 use crate::chat::input::InputAction;
-use crate::config::MascotConfig;
 use log::{debug, info, trace};
 use serde_json::Value;
 
-pub fn run_terminal_chat(
-    schema: Value,
-    _mascot: MascotConfig,
-) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run_terminal_chat(schema: Value) -> Result<(), Box<dyn std::error::Error>> {
     use crate::chat::view::render_frame;
     use crossterm::{
         ExecutableCommand,
@@ -23,7 +19,7 @@ pub fn run_terminal_chat(
 
     let repo_path = resolve_repo_path(&schema);
     info!("event_loop: repo_path={repo_path}");
-    let mut app = ChatApp::new(&repo_path);
+    let mut app = ChatApp::new(&repo_path)?;
 
     // Setup terminal; the guard ensures cleanup on any exit path including `?`.
     enable_raw_mode()?;

@@ -6,7 +6,7 @@ const REPO_ROOT: &str = env!("CARGO_MANIFEST_DIR");
 
 #[test]
 fn chat_view_renders_title_bar_and_timeline() {
-    let mut app = ChatApp::new_for_test(REPO_ROOT);
+    let mut app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
     let lines = render_to_lines_for_test(&mut app, 100, 35);
 
     assert!(
@@ -25,7 +25,7 @@ fn chat_view_renders_title_bar_and_timeline() {
 
 #[test]
 fn chat_view_renders_status_bar() {
-    let mut app = ChatApp::new_for_test(REPO_ROOT);
+    let mut app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
     let lines = render_to_lines_for_test(&mut app, 100, 35);
 
     assert!(
@@ -39,7 +39,7 @@ fn slash_opens_command_picker_overlay() {
     use blazar::chat::input::InputAction;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-    let mut app = ChatApp::new_for_test(REPO_ROOT);
+    let mut app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
 
     app.handle_action(InputAction::Key(KeyEvent::new(
         KeyCode::Char('/'),
@@ -63,7 +63,7 @@ fn picker_navigation_reaches_later_commands() {
     use blazar::chat::input::InputAction;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-    let mut app = ChatApp::new_for_test(REPO_ROOT);
+    let mut app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
 
     app.handle_action(InputAction::Key(KeyEvent::new(
         KeyCode::Char('/'),
@@ -90,7 +90,7 @@ fn closing_picker_routes_typing_back_to_composer() {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use std::time::Duration;
 
-    let mut app = ChatApp::new_for_test(REPO_ROOT);
+    let mut app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
     let animated_overlay = app
         .picker
         .overlay_state()
@@ -121,7 +121,7 @@ fn closing_picker_routes_typing_back_to_composer() {
 
 #[test]
 fn timeline_does_not_emit_raw_ansi_escape_sequences() {
-    let mut app = ChatApp::new_for_test(REPO_ROOT);
+    let mut app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
     let lines = render_to_lines_for_test(&mut app, 100, 35);
 
     assert!(
@@ -132,7 +132,7 @@ fn timeline_does_not_emit_raw_ansi_escape_sequences() {
 
 #[test]
 fn timeline_entries_have_identity_markers() {
-    let mut app = ChatApp::new_for_test(REPO_ROOT);
+    let mut app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
     let lines = render_to_lines_for_test(&mut app, 100, 35);
 
     assert!(
@@ -145,7 +145,7 @@ fn timeline_entries_have_identity_markers() {
 fn title_bar_uses_terminal_default_background() {
     let backend = TestBackend::new(100, 35);
     let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
-    let mut app = ChatApp::new_for_test(REPO_ROOT);
+    let mut app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
 
     terminal
         .draw(|frame| render_frame(frame, &mut app, 1_200))
@@ -167,7 +167,7 @@ fn picker_render_persists_overlay_layout_state() {
 
     let backend = TestBackend::new(100, 35);
     let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
-    let mut app = ChatApp::new_for_test(REPO_ROOT);
+    let mut app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
     app.handle_action(InputAction::Key(KeyEvent::new(
         KeyCode::Char('/'),
         KeyModifiers::NONE,
@@ -189,7 +189,7 @@ fn interactive_send_message_shows_echo_response() {
     use blazar::chat::input::InputAction;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-    let mut app = ChatApp::new_for_test(REPO_ROOT);
+    let mut app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
 
     // Step 1: initial state — only greeting visible
     let lines_before = render_to_lines_for_test(&mut app, 80, 35);
@@ -236,4 +236,37 @@ fn interactive_send_message_shows_echo_response() {
         lines_after.iter().any(|l| l.contains("hi")),
         "user message 'hi' should appear in timeline"
     );
+}
+
+#[test]
+fn render_to_lines_returns_empty_when_dimensions_are_zero() {
+    let mut app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
+    assert!(render_to_lines_for_test(&mut app, 0, 20).is_empty());
+    assert!(render_to_lines_for_test(&mut app, 20, 0).is_empty());
+}
+
+#[test]
+fn render_to_lines_handles_wide_unicode_cells() {
+    let mut app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
+    app.apply_agent_event_for_test(blazar::agent::protocol::AgentEvent::TextDelta {
+        text: "Emoji 😀 output and 你好".into(),
+    });
+
+    let lines = render_to_lines_for_test(&mut app, 60, 20);
+    let text = lines.join("\n");
+    assert!(text.contains('😀'));
+}
+
+#[test]
+fn render_frame_handles_streaming_indicator_in_tight_layouts() {
+    let backend = TestBackend::new(3, 6);
+    let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
+    let mut app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
+    app.apply_agent_event_for_test(blazar::agent::protocol::AgentEvent::TurnStarted {
+        turn_id: "tight-stream".into(),
+    });
+
+    terminal
+        .draw(|frame| render_frame(frame, &mut app, 0))
+        .expect("render should succeed even when streaming area is narrow");
 }
