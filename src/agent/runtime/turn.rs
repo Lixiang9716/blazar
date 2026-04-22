@@ -7,8 +7,7 @@ use log::{debug, info, warn};
 use serde_json::Value;
 
 use crate::agent::protocol::AgentEvent;
-use crate::agent::tools::ToolRegistry;
-use crate::agent::tools::ToolResult;
+use crate::agent::tools::{ContentPart, ToolRegistry, ToolResult};
 use crate::provider::{LlmProvider, ProviderEvent, ProviderMessage};
 
 use super::json_repair::{
@@ -211,8 +210,11 @@ pub(crate) fn execute_turn(
                                 let mut result =
                                     execute_tool_call(tools, &pending.name, parsed.value);
                                 if parsed.was_repaired {
-                                    result.output =
-                                        format!("{}\n\n{}", JSON_REPAIR_NOTE, result.output);
+                                    let output = result.text_output();
+                                    result.content = vec![ContentPart::text(format!(
+                                        "{}\n\n{}",
+                                        JSON_REPAIR_NOTE, output
+                                    ))];
                                 }
                                 if result.is_error {
                                     result = annotate_timeout_failure(
@@ -258,15 +260,12 @@ pub(crate) fn execute_turn(
                         }
                     };
 
-                    observer.on_tool_call_completed(
-                        &pending.call_id,
-                        &result.output,
-                        result.is_error,
-                    );
+                    let output = result.text_output();
+                    observer.on_tool_call_completed(&pending.call_id, &output, result.is_error);
 
                     messages.push(ProviderMessage::ToolResult {
                         tool_call_id: pending.call_id,
-                        output: result.output,
+                        output,
                         is_error: result.is_error,
                     });
                     tool_iterations += 1;
@@ -299,7 +298,8 @@ fn annotate_timeout_failure(
     failures: &mut HashMap<(String, String), usize>,
 ) -> ToolResult {
     let key = (tool_name.to_string(), canonical_args.to_string());
-    if !is_timeout_output(&result.output) {
+    let output = result.text_output();
+    if !is_timeout_output(&output) {
         failures.remove(&key);
         return result;
     }
@@ -308,9 +308,13 @@ fn annotate_timeout_failure(
         .entry(key)
         .and_modify(|current| *current += 1)
         .or_insert(1);
-    result.output = format!("{}\n\n{}", result.output, TIMEOUT_NOTE);
+    result.content = vec![ContentPart::text(format!("{}\n\n{}", output, TIMEOUT_NOTE))];
     if *count >= 2 {
-        result.output = format!("{}\n\n{}", result.output, REPEATED_TIMEOUT_GUIDANCE);
+        let output = result.text_output();
+        result.content = vec![ContentPart::text(format!(
+            "{}\n\n{}",
+            output, REPEATED_TIMEOUT_GUIDANCE
+        ))];
     }
     result
 }

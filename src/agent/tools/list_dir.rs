@@ -1,4 +1,6 @@
-use super::{Tool, ToolResult, ToolSpec, canonical_workspace_root, resolve_workspace_path};
+use super::{
+    ContentPart, Tool, ToolResult, ToolSpec, canonical_workspace_root, resolve_workspace_path,
+};
 use serde_json::{Value, json};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -124,7 +126,7 @@ impl Tool for ListDirTool {
             output.push_str("\n[list truncated]");
         }
         ToolResult {
-            output,
+            content: vec![ContentPart::text(output)],
             exit_code: None,
             is_error: false,
             output_truncated: truncated,

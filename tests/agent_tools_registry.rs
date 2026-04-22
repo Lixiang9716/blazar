@@ -44,7 +44,7 @@ fn registry_executes_registered_tool() {
         .execute("stub", json!({ "value": "ok" }))
         .expect("registered tool should execute");
 
-    assert_eq!(result.output, "stub:ok");
+    assert_eq!(result.text_output(), "stub:ok");
     assert!(!result.is_error);
     assert_eq!(result.exit_code, None);
     assert!(!result.output_truncated);

@@ -1,4 +1,4 @@
-use super::{Tool, ToolResult, ToolSpec, resolve_workspace_path};
+use super::{ResourceAccess, ResourceClaim, Tool, ToolResult, ToolSpec, resolve_workspace_path};
 use serde_json::{Value, json};
 use std::fs;
 use std::path::PathBuf;
@@ -32,6 +32,18 @@ impl Tool for ReadFileTool {
                 "additionalProperties": false
             }),
         }
+    }
+
+    fn resource_claims(&self, args: &Value) -> Vec<ResourceClaim> {
+        args.get("path")
+            .and_then(Value::as_str)
+            .map(|path| {
+                vec![ResourceClaim {
+                    resource: format!("fs:{path}"),
+                    access: ResourceAccess::ReadOnly,
+                }]
+            })
+            .unwrap_or_default()
     }
 
     fn execute(&self, args: Value) -> ToolResult {

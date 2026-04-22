@@ -16,10 +16,46 @@ pub struct ToolSpec {
     pub parameters: Value,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolKind {
+    Local,
+    Agent,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResourceAccess {
+    ReadOnly,
+    ReadWrite,
+    Exclusive,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResourceClaim {
+    pub resource: String,
+    pub access: ResourceAccess,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ContentPart {
+    Text {
+        text: String,
+    },
+    Resource {
+        uri: String,
+        mime_type: Option<String>,
+    },
+}
+
+impl ContentPart {
+    pub fn text(text: impl Into<String>) -> Self {
+        Self::Text { text: text.into() }
+    }
+}
+
 /// Canonical tool execution payload returned to the runtime.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolResult {
-    pub output: String,
+    pub content: Vec<ContentPart>,
     pub exit_code: Option<i32>,
     pub is_error: bool,
     pub output_truncated: bool,
@@ -29,7 +65,7 @@ impl ToolResult {
     /// Builds a successful tool result with plain-text output.
     pub fn success(output: impl Into<String>) -> Self {
         Self {
-            output: output.into(),
+            content: vec![ContentPart::text(output)],
             exit_code: None,
             is_error: false,
             output_truncated: false,
@@ -39,11 +75,21 @@ impl ToolResult {
     /// Builds an error tool result without attaching an OS exit code.
     pub fn failure(output: impl Into<String>) -> Self {
         Self {
-            output: output.into(),
+            content: vec![ContentPart::text(output)],
             exit_code: None,
             is_error: true,
             output_truncated: false,
         }
+    }
+
+    pub fn text_output(&self) -> String {
+        self.content
+            .iter()
+            .filter_map(|part| match part {
+                ContentPart::Text { text } => Some(text.as_str()),
+                ContentPart::Resource { .. } => None,
+            })
+            .collect::<String>()
     }
 }
 
@@ -53,6 +99,12 @@ impl ToolResult {
 /// user-facing validation errors in [`ToolResult::failure`].
 pub trait Tool: Send + Sync {
     fn spec(&self) -> ToolSpec;
+    fn kind(&self) -> ToolKind {
+        ToolKind::Local
+    }
+    fn resource_claims(&self, _args: &Value) -> Vec<ResourceClaim> {
+        Vec::new()
+    }
     fn execute(&self, args: Value) -> ToolResult;
 }
 
@@ -213,7 +265,9 @@ pub fn resolve_workspace_write_path(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::provider::echo::EchoProvider;
     use serde_json::json;
+    use std::sync::Arc;
 
     struct EchoTool;
 
@@ -244,12 +298,24 @@ mod tests {
     #[test]
     fn tool_result_helpers_build_expected_flags() {
         let ok = ToolResult::success("done");
-        assert_eq!(ok.output, "done");
+        assert_eq!(
+            ok.content,
+            vec![ContentPart::Text {
+                text: "done".into()
+            }]
+        );
+        assert_eq!(ok.text_output(), "done");
         assert!(!ok.is_error);
         assert_eq!(ok.exit_code, None);
 
         let err = ToolResult::failure("nope");
-        assert_eq!(err.output, "nope");
+        assert_eq!(
+            err.content,
+            vec![ContentPart::Text {
+                text: "nope".into()
+            }]
+        );
+        assert_eq!(err.text_output(), "nope");
         assert!(err.is_error);
         assert!(!err.output_truncated);
     }
@@ -268,11 +334,72 @@ mod tests {
         let result = registry
             .execute("echo", json!({"value":"x"}))
             .expect("tool should execute");
-        assert_eq!(result.output, r#"{"value":"x"}"#);
+        assert_eq!(result.text_output(), r#"{"value":"x"}"#);
         assert_eq!(
             registry.execute("missing", json!({})).expect_err("unknown"),
             "unknown tool: missing"
         );
+    }
+
+    #[test]
+    fn tool_defaults_report_local_kind_and_no_resource_claims() {
+        let tool = EchoTool;
+
+        assert_eq!(tool.kind(), ToolKind::Local);
+        assert!(tool.resource_claims(&json!({"value":"x"})).is_empty());
+    }
+
+    #[test]
+    fn tool_result_text_output_ignores_non_text_content_parts() {
+        let result = ToolResult {
+            content: vec![ContentPart::Resource {
+                uri: "file://workspace/out.txt".into(),
+                mime_type: Some("text/plain".into()),
+            }],
+            exit_code: None,
+            is_error: false,
+            output_truncated: false,
+        };
+
+        assert_eq!(result.text_output(), "");
+    }
+
+    #[test]
+    fn specialized_tools_report_expected_kind_and_resource_claims() {
+        let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let read_tool = read_file::ReadFileTool::new(workspace_root.clone());
+        let write_tool = write_file::WriteFileTool::new(workspace_root.clone());
+        let bash_tool = bash::BashTool::new(workspace_root.clone());
+        let agent_tool = agent::AgentTool::new(
+            "delegate",
+            "delegate work",
+            Arc::new(EchoProvider::new(0)),
+            "echo",
+            workspace_root,
+        );
+
+        assert_eq!(
+            read_tool.resource_claims(&json!({"path":"src/main.rs"})),
+            vec![ResourceClaim {
+                resource: "fs:src/main.rs".into(),
+                access: ResourceAccess::ReadOnly,
+            }]
+        );
+        assert_eq!(
+            write_tool.resource_claims(&json!({"path":"src/main.rs"})),
+            vec![ResourceClaim {
+                resource: "fs:src/main.rs".into(),
+                access: ResourceAccess::ReadWrite,
+            }]
+        );
+        assert_eq!(
+            bash_tool.resource_claims(&json!({"command":"pwd"})),
+            vec![ResourceClaim {
+                resource: "process:bash".into(),
+                access: ResourceAccess::Exclusive,
+            }]
+        );
+        assert_eq!(agent_tool.kind(), ToolKind::Agent);
     }
 
     #[test]

@@ -788,7 +788,9 @@ impl Tool for TimeoutTool {
     fn execute(&self, _args: serde_json::Value) -> crate::agent::tools::ToolResult {
         self.calls.fetch_add(1, Ordering::SeqCst);
         crate::agent::tools::ToolResult {
-            output: "command timed out after 30s".into(),
+            content: vec![crate::agent::tools::ContentPart::text(
+                "command timed out after 30s",
+            )],
             exit_code: None,
             is_error: true,
             output_truncated: false,

@@ -1,7 +1,8 @@
 #[cfg(not(unix))]
 use super::resolve_workspace_write_path;
 use super::{
-    Tool, ToolResult, ToolSpec, canonical_workspace_root, validate_workspace_relative_path,
+    ResourceAccess, ResourceClaim, Tool, ToolResult, ToolSpec, canonical_workspace_root,
+    validate_workspace_relative_path,
 };
 use serde_json::{Value, json};
 use std::ffi::CString;
@@ -60,6 +61,18 @@ impl Tool for WriteFileTool {
                 "additionalProperties": false
             }),
         }
+    }
+
+    fn resource_claims(&self, args: &Value) -> Vec<ResourceClaim> {
+        args.get("path")
+            .and_then(Value::as_str)
+            .map(|path| {
+                vec![ResourceClaim {
+                    resource: format!("fs:{path}"),
+                    access: ResourceAccess::ReadWrite,
+                }]
+            })
+            .unwrap_or_default()
     }
 
     fn execute(&self, args: Value) -> ToolResult {

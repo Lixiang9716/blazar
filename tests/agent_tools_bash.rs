@@ -77,7 +77,7 @@ fn bash_tool_captures_stdout_and_exit_code() {
     }));
 
     assert!(!result.is_error);
-    assert_eq!(result.output, "hello from bash");
+    assert_eq!(result.text_output(), "hello from bash");
     assert_eq!(result.exit_code, Some(0));
 }
 
@@ -88,10 +88,11 @@ fn bash_tool_captures_stderr_with_stdout() {
         "command": "echo stdout; echo stderr >&2",
         "timeout_secs": 5
     }));
+    let output = result.text_output();
 
     assert!(!result.is_error);
-    assert!(result.output.contains("stdout"));
-    assert!(result.output.contains("stderr"));
+    assert!(output.contains("stdout"));
+    assert!(output.contains("stderr"));
     assert_eq!(result.exit_code, Some(0));
 }
 
@@ -102,9 +103,10 @@ fn bash_tool_captures_shell_syntax_errors() {
         "command": "(",
         "timeout_secs": 5
     }));
+    let output = result.text_output();
 
     assert!(result.is_error);
-    assert!(result.output.contains("syntax error") || result.output.contains("unexpected end"));
+    assert!(output.contains("syntax error") || output.contains("unexpected end"));
     assert_eq!(result.exit_code, Some(2));
 }
 
@@ -127,11 +129,12 @@ fn bash_tool_truncates_large_output() {
         "command": "head -c 9000 </dev/zero | tr '\\0' x",
         "timeout_secs": 5
     }));
+    let output = result.text_output();
 
     assert!(!result.is_error);
     assert!(result.output_truncated);
-    assert!(result.output.contains("[output truncated]"));
-    assert!(result.output.len() <= MAX_OUTPUT_BYTES + 32);
+    assert!(output.contains("[output truncated]"));
+    assert!(output.len() <= MAX_OUTPUT_BYTES + 32);
 }
 
 #[test]
@@ -141,11 +144,12 @@ fn bash_tool_caps_combined_stdout_and_stderr_output() {
         "command": "head -c 5000 </dev/zero | tr '\\0' o; head -c 5000 </dev/zero | tr '\\0' e >&2",
         "timeout_secs": 5
     }));
+    let output = result.text_output();
 
     assert!(!result.is_error);
     assert!(result.output_truncated);
-    assert!(result.output.contains("[output truncated]"));
-    assert!(result.output.len() <= MAX_OUTPUT_BYTES + 32);
+    assert!(output.contains("[output truncated]"));
+    assert!(output.len() <= MAX_OUTPUT_BYTES + 32);
 }
 
 #[test]
@@ -155,10 +159,11 @@ fn bash_tool_times_out_and_returns_error() {
         "command": "sleep 2",
         "timeout_secs": 1
     }));
+    let output = result.text_output();
 
     assert!(result.is_error);
     assert_eq!(result.exit_code, None);
-    assert!(result.output.contains("timed out"));
+    assert!(output.contains("timed out"));
 }
 
 #[test]
@@ -169,9 +174,10 @@ fn bash_tool_timeout_stays_bounded_when_descendant_escapes_process_group() {
         "command": "setsid sh -c 'sleep 5' & sleep 5",
         "timeout_secs": 1
     }));
+    let output = result.text_output();
 
     assert!(result.is_error);
-    assert!(result.output.contains("timed out"));
+    assert!(output.contains("timed out"));
     assert!(
         started.elapsed() < Duration::from_secs(3),
         "timeout took {:?}",
@@ -187,9 +193,10 @@ fn bash_tool_timeout_stays_bounded_with_unbounded_output() {
         "command": "python - <<'PY'\nimport os, time\nend = time.time() + 2\nchunk = b'x' * 65536\nwhile time.time() < end:\n    os.write(1, chunk)\nPY",
         "timeout_secs": 1
     }));
+    let output = result.text_output();
 
     assert!(result.is_error);
-    assert!(result.output.contains("timed out"));
+    assert!(output.contains("timed out"));
     assert!(result.output_truncated);
     assert!(
         started.elapsed() < Duration::from_secs(3),
@@ -251,7 +258,7 @@ fn bash_tool_uses_noninteractive_stdin() {
     }));
 
     assert!(!result.is_error);
-    assert_eq!(result.output, "eof");
+    assert_eq!(result.text_output(), "eof");
 }
 
 #[test]
@@ -262,7 +269,7 @@ fn bash_tool_missing_command_returns_error() {
     }));
 
     assert!(result.is_error);
-    assert!(result.output.contains("requires a string command"));
+    assert!(result.text_output().contains("requires a string command"));
 }
 
 #[test]
@@ -274,7 +281,7 @@ fn bash_tool_rejects_invalid_timeout_argument() {
     }));
 
     assert!(result.is_error);
-    assert!(result.output.contains("timeout_secs"));
+    assert!(result.text_output().contains("timeout_secs"));
 }
 
 #[test]
@@ -287,7 +294,7 @@ fn bash_tool_uses_workspace_as_current_dir() {
     }));
 
     assert!(!result.is_error);
-    assert_eq!(PathBuf::from(result.output.trim()), workspace);
+    assert_eq!(PathBuf::from(result.text_output().trim()), workspace);
 }
 
 #[test]
