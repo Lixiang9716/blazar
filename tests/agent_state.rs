@@ -161,6 +161,60 @@ fn tool_call_events_track_multiple_active_tools_by_call_id() {
 }
 
 #[test]
+fn duplicate_tool_call_started_is_ignored_without_overwriting_active_tool() {
+    let mut state = AgentRuntimeState::default();
+    state.apply_event(&AgentEvent::TurnStarted {
+        turn_id: "turn-1".into(),
+    });
+    state.apply_event(&AgentEvent::ToolCallStarted {
+        call_id: "call-1".into(),
+        tool_name: "read_file".into(),
+        kind: ToolKind::Local,
+        arguments: "{\"path\":\"Cargo.toml\"}".into(),
+    });
+
+    state.apply_event(&AgentEvent::ToolCallStarted {
+        call_id: "call-1".into(),
+        tool_name: "delegate".into(),
+        kind: ToolKind::Agent,
+        arguments: "{\"prompt\":\"review\"}".into(),
+    });
+
+    assert_eq!(state.tool_call_count, 1);
+    assert_eq!(state.active_tools.len(), 1);
+    assert_eq!(state.active_tools[0].tool_name, "read_file");
+    assert_eq!(state.active_tools[0].kind, ToolKind::Local);
+    assert_eq!(state.active_tools[0].status, ActiveToolStatus::Running);
+}
+
+#[test]
+fn unknown_tool_call_completed_is_ignored_without_changing_state() {
+    let mut state = AgentRuntimeState::default();
+    state.apply_event(&AgentEvent::TurnStarted {
+        turn_id: "turn-1".into(),
+    });
+    state.apply_event(&AgentEvent::ToolCallStarted {
+        call_id: "call-1".into(),
+        tool_name: "read_file".into(),
+        kind: ToolKind::Local,
+        arguments: "{\"path\":\"Cargo.toml\"}".into(),
+    });
+
+    let changed = state.apply_event(&AgentEvent::ToolCallCompleted {
+        call_id: "missing".into(),
+        output: "ignored".into(),
+        is_error: true,
+    });
+
+    assert!(!changed);
+    assert_eq!(state.tool_call_count, 1);
+    assert_eq!(state.active_tools.len(), 1);
+    assert_eq!(state.active_tools[0].call_id, "call-1");
+    assert_eq!(state.active_tools[0].status, ActiveToolStatus::Running);
+    assert!(state.is_busy());
+}
+
+#[test]
 fn full_lifecycle_idle_streaming_done_idle() {
     let mut state = AgentRuntimeState::default();
     assert_eq!(state.turn_state, TurnState::Idle);

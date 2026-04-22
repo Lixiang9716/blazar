@@ -1,5 +1,6 @@
 use super::protocol::AgentEvent;
 use crate::agent::tools::ToolKind;
+use log::warn;
 
 /// The state of the current turn in the agent loop.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -79,14 +80,15 @@ impl AgentRuntimeState {
                 kind,
                 ..
             } => {
-                if let Some(active_tool) = self
+                if self
                     .active_tools
-                    .iter_mut()
+                    .iter()
                     .find(|active_tool| active_tool.call_id == *call_id)
+                    .is_some()
                 {
-                    active_tool.tool_name = tool_name.clone();
-                    active_tool.kind = *kind;
-                    active_tool.status = ActiveToolStatus::Running;
+                    warn!(
+                        "agent state: duplicate ToolCallStarted for call_id={call_id} tool={tool_name}; ignoring duplicate start"
+                    );
                 } else {
                     self.active_tools.push(ActiveTool {
                         call_id: call_id.clone(),
@@ -111,6 +113,10 @@ impl AgentRuntimeState {
                     } else {
                         ActiveToolStatus::Success
                     };
+                } else {
+                    warn!(
+                        "agent state: ToolCallCompleted for unknown call_id={call_id}; ignoring completion"
+                    );
                 }
                 false
             }
