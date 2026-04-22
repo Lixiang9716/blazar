@@ -1,20 +1,24 @@
 use std::fmt::{self, Display, Formatter};
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::JoinHandle;
 
 use log::{debug, info, warn};
+use std::collections::HashSet;
 
+use super::acp_discovery::{AcpDiscovery, AcpTransport, ReqwestAcpTransport, normalize_endpoint};
 use super::protocol::{AgentCommand, AgentEvent};
 use super::tools::ToolRegistry;
+use crate::agent::tools::acp::AcpAgentTool;
 use crate::agent::tools::agent::AgentTool;
 use crate::agent::tools::bash::BashTool;
 use crate::agent::tools::list_dir::ListDirTool;
 use crate::agent::tools::read_file::ReadFileTool;
 use crate::agent::tools::write_file::WriteFileTool;
+use crate::config::{AGENTS_CONFIG_PATH, load_agents_config_from_path};
 use crate::provider::{LlmProvider, ProviderMessage};
 
 mod json_repair;
@@ -71,6 +75,7 @@ type RuntimeWorker = Box<dyn FnOnce() + Send + 'static>;
 #[derive(Debug)]
 pub enum AgentRuntimeError {
     ThreadSpawn(io::Error),
+    ToolInitialization(String),
 }
 
 impl Display for AgentRuntimeError {
@@ -78,6 +83,9 @@ impl Display for AgentRuntimeError {
         match self {
             Self::ThreadSpawn(source) => {
                 write!(f, "failed to spawn agent runtime thread: {source}")
+            }
+            Self::ToolInitialization(message) => {
+                write!(f, "failed to initialize agent tools: {message}")
             }
         }
     }
@@ -87,6 +95,7 @@ impl std::error::Error for AgentRuntimeError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::ThreadSpawn(source) => Some(source),
+            Self::ToolInitialization(_) => None,
         }
     }
 }
@@ -115,21 +124,10 @@ impl AgentRuntime {
         let cancel_flag = Arc::new(AtomicBool::new(false));
         let flag_clone = Arc::clone(&cancel_flag);
         let provider: Arc<dyn LlmProvider> = Arc::from(provider);
-        let worker: RuntimeWorker = Box::new(move || {
-            let mut tools = ToolRegistry::new(workspace_root.clone());
-            tools.register(Box::new(ReadFileTool::new(workspace_root.clone())));
-            tools.register(Box::new(WriteFileTool::new(workspace_root.clone())));
-            tools.register(Box::new(ListDirTool::new(workspace_root.clone())));
-            tools.register(Box::new(BashTool::new(workspace_root.clone())));
-            tools.register(Box::new(AgentTool::new(
-                "sub_agent",
-                "Delegate a task to a sub-agent that can read files, write files, list directories, and run bash commands. Use when the task is self-contained and benefits from independent reasoning.",
-                Arc::clone(&provider),
-                &model,
-                workspace_root,
-            )));
-            runtime_loop(cmd_rx, event_tx, provider, model, tools, flag_clone)
-        });
+        let tools = build_tool_registry(Arc::clone(&provider), &workspace_root, &model)
+            .map_err(AgentRuntimeError::ToolInitialization)?;
+        let worker: RuntimeWorker =
+            Box::new(move || runtime_loop(cmd_rx, event_tx, provider, model, tools, flag_clone));
 
         let handle = spawn_thread(worker).map_err(AgentRuntimeError::ThreadSpawn)?;
 
@@ -316,4 +314,86 @@ fn run_turn_with_retry(
     }
 
     None
+}
+
+fn build_tool_registry(
+    provider: Arc<dyn LlmProvider>,
+    workspace_root: &Path,
+    model: &str,
+) -> Result<ToolRegistry, String> {
+    let mut tools = ToolRegistry::new(workspace_root.to_path_buf());
+    tools.register(Box::new(ReadFileTool::new(workspace_root.to_path_buf())));
+    tools.register(Box::new(WriteFileTool::new(workspace_root.to_path_buf())));
+    tools.register(Box::new(ListDirTool::new(workspace_root.to_path_buf())));
+    tools.register(Box::new(BashTool::new(workspace_root.to_path_buf())));
+    tools.register(Box::new(AgentTool::new(
+        "sub_agent",
+        "Delegate a task to a sub-agent that can read files, write files, list directories, and run bash commands. Use when the task is self-contained and benefits from independent reasoning.",
+        Arc::clone(&provider),
+        model,
+        workspace_root.to_path_buf(),
+    )));
+
+    register_acp_tools(&mut tools, workspace_root)?;
+
+    Ok(tools)
+}
+
+fn register_acp_tools(tools: &mut ToolRegistry, workspace_root: &Path) -> Result<(), String> {
+    let config_path = workspace_root.join(AGENTS_CONFIG_PATH);
+    if !config_path.exists() {
+        return Ok(());
+    }
+
+    let config = load_agents_config_from_path(&config_path)
+        .map_err(|error| format!("{}: {error}", config_path.display()))?;
+    let transport = ReqwestAcpTransport::new().map_err(|error| error.to_string())?;
+    let mut seen_agent_keys = HashSet::new();
+    let mut seen_tool_names = HashSet::new();
+
+    for configured in config.agents.into_iter().filter(|agent| agent.enabled) {
+        let metadata = transport
+            .get_agent(&configured.endpoint, &configured.agent_id)
+            .map_err(|error| error.to_string())?;
+        if !seen_tool_names.insert(configured.name.clone()) {
+            return Err(format!("duplicate ACP tool name: {}", configured.name));
+        }
+        seen_agent_keys.insert((
+            normalize_endpoint(&configured.endpoint),
+            configured.agent_id,
+        ));
+        tools.register(Box::new(AcpAgentTool::with_transport(
+            configured.name,
+            normalize_endpoint(&configured.endpoint),
+            metadata,
+            transport.clone(),
+        )));
+    }
+
+    let discovery = AcpDiscovery::new(config.discovery.endpoints, transport.clone());
+    let report = discovery.discover(&seen_agent_keys);
+    if !report.errors.is_empty() {
+        let message = report
+            .errors
+            .into_iter()
+            .map(|error| error.to_string())
+            .collect::<Vec<_>>()
+            .join("; ");
+        return Err(format!("ACP discovery failed: {message}"));
+    }
+    for discovered in report.agents {
+        let tool_name = discovered.metadata.name.clone();
+        if !seen_tool_names.insert(tool_name.clone()) {
+            warn!("runtime: skipped discovered ACP agent with duplicate tool name {tool_name}");
+            continue;
+        }
+        tools.register(Box::new(AcpAgentTool::with_transport(
+            tool_name,
+            discovered.endpoint,
+            discovered.metadata,
+            transport.clone(),
+        )));
+    }
+
+    Ok(())
 }

@@ -1,3 +1,4 @@
+pub mod acp;
 pub mod agent;
 pub mod bash;
 pub mod list_dir;
