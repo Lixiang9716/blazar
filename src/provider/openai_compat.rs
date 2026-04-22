@@ -17,6 +17,9 @@ use super::{LlmProvider, ProviderEvent, ProviderMessage};
 /// Configuration for an OpenAI-compatible API provider.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct OpenAiConfig {
+    /// Provider backend: `"openai"` (default) or `"openrouter"`.
+    #[serde(default)]
+    pub provider_type: Option<String>,
     pub api_key: String,
     pub base_url: String,
     #[serde(default = "default_model")]
@@ -468,7 +471,7 @@ pub fn merge_tool_call_fragment(tool_calls: &mut Vec<ToolCall>, dtc: &DeltaToolC
     }
 }
 
-fn render_system_prompt(base: &str) -> String {
+pub(crate) fn render_system_prompt(base: &str) -> String {
     match build_runtime_context_block() {
         Some(context) => format!("{base}\n\n{context}"),
         None => base.to_owned(),
@@ -554,7 +557,7 @@ fn collect_tool_call_batch(messages: &[ProviderMessage], start: usize) -> (Vec<T
 const MAX_CONTEXT_USER_TURNS: usize = 10;
 const MAX_CONTEXT_PROVIDER_MESSAGES: usize = 80;
 
-fn truncate_provider_messages(messages: &[ProviderMessage]) -> Vec<ProviderMessage> {
+pub(crate) fn truncate_provider_messages(messages: &[ProviderMessage]) -> Vec<ProviderMessage> {
     if messages.is_empty() {
         return Vec::new();
     }
@@ -586,7 +589,10 @@ fn truncate_provider_messages(messages: &[ProviderMessage]) -> Vec<ProviderMessa
     messages[start..].to_vec()
 }
 
-fn determine_tool_choice(messages: &[ProviderMessage], has_tools: bool) -> Option<ToolChoice> {
+pub(crate) fn determine_tool_choice(
+    messages: &[ProviderMessage],
+    has_tools: bool,
+) -> Option<ToolChoice> {
     if !has_tools {
         return None;
     }

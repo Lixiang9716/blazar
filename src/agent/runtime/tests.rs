@@ -49,7 +49,7 @@ fn runtime_loop_handles_cancel_and_shutdown_commands() {
         runtime_loop(
             cmd_rx,
             event_tx,
-            Box::new(crate::provider::echo::EchoProvider::new(0)),
+            Arc::new(crate::provider::echo::EchoProvider::new(0)),
             "echo".to_owned(),
             tools,
             cancel_for_thread,
@@ -125,12 +125,12 @@ fn run_turn_completes_with_echo_provider() {
     let cancel = Arc::new(AtomicBool::new(false));
 
     let mut messages = user_messages("hi");
-    let outcome = run_turn(
+    let outcome = execute_turn(
         &mut messages,
         &provider,
         "echo",
         &empty_registry(),
-        &event_tx,
+        &ChannelObserver { tx: &event_tx },
         &cancel,
     );
     assert!(matches!(outcome, TurnOutcome::Complete));
@@ -188,12 +188,12 @@ fn run_turn_stops_on_cancel_flag() {
     std::thread::scope(|scope| {
         scope.spawn(|| {
             let mut messages = user_messages("test");
-            run_turn(
+            execute_turn(
                 &mut messages,
                 &provider,
                 "echo",
                 &empty_registry(),
-                &event_tx,
+                &ChannelObserver { tx: &event_tx },
                 &cancel2,
             );
         });
@@ -228,12 +228,12 @@ fn run_turn_returns_transient_on_timeout_error() {
     let (event_tx, _event_rx) = mpsc::channel();
     let cancel = Arc::new(AtomicBool::new(false));
     let mut messages = user_messages("hi");
-    let outcome = run_turn(
+    let outcome = execute_turn(
         &mut messages,
         &TimeoutProvider,
         "echo",
         &empty_registry(),
-        &event_tx,
+        &ChannelObserver { tx: &event_tx },
         &cancel,
     );
     assert!(matches!(outcome, TurnOutcome::TransientError(_)));
@@ -258,12 +258,12 @@ fn run_turn_returns_fatal_on_auth_error() {
     let (event_tx, _event_rx) = mpsc::channel();
     let cancel = Arc::new(AtomicBool::new(false));
     let mut messages = user_messages("hi");
-    let outcome = run_turn(
+    let outcome = execute_turn(
         &mut messages,
         &AuthErrorProvider,
         "echo",
         &empty_registry(),
-        &event_tx,
+        &ChannelObserver { tx: &event_tx },
         &cancel,
     );
     assert!(matches!(outcome, TurnOutcome::FatalError(_)));
@@ -560,12 +560,12 @@ fn run_turn_enforces_tool_iteration_limit() {
     let cancel = Arc::new(AtomicBool::new(false));
 
     let mut messages = user_messages("count forever");
-    let outcome = run_turn(
+    let outcome = execute_turn(
         &mut messages,
         &InfiniteToolProvider,
         "echo",
         &registry,
-        &event_tx,
+        &ChannelObserver { tx: &event_tx },
         &cancel,
     );
 
@@ -634,12 +634,12 @@ fn run_turn_blocks_repeated_identical_successful_tool_calls() {
     let cancel = Arc::new(AtomicBool::new(false));
     let mut messages = user_messages("count once");
 
-    let outcome = run_turn(
+    let outcome = execute_turn(
         &mut messages,
         &DuplicateSuccessProvider,
         "echo",
         &registry,
-        &event_tx,
+        &ChannelObserver { tx: &event_tx },
         &cancel,
     );
 
@@ -691,12 +691,12 @@ fn run_turn_sends_parse_error_to_model_for_malformed_json() {
     let cancel = Arc::new(AtomicBool::new(false));
     let mut messages = user_messages("test malformed args");
 
-    let outcome = run_turn(
+    let outcome = execute_turn(
         &mut messages,
         &MalformedArgsProvider,
         "echo",
         &registry,
-        &event_tx,
+        &ChannelObserver { tx: &event_tx },
         &cancel,
     );
     assert!(matches!(outcome, TurnOutcome::Complete));
@@ -750,12 +750,12 @@ fn run_turn_repairs_control_chars_and_executes_tool() {
     let cancel = Arc::new(AtomicBool::new(false));
     let mut messages = user_messages("test control char repair");
 
-    let outcome = run_turn(
+    let outcome = execute_turn(
         &mut messages,
         &ControlCharArgsProvider,
         "echo",
         &registry,
-        &event_tx,
+        &ChannelObserver { tx: &event_tx },
         &cancel,
     );
     assert!(matches!(outcome, TurnOutcome::Complete));
@@ -836,12 +836,12 @@ fn run_turn_adds_timeout_guidance_on_first_timeout_error() {
     let cancel = Arc::new(AtomicBool::new(false));
     let mut messages = user_messages("run once");
 
-    let outcome = run_turn(
+    let outcome = execute_turn(
         &mut messages,
         &SingleTimeoutProvider,
         "echo",
         &registry,
-        &event_tx,
+        &ChannelObserver { tx: &event_tx },
         &cancel,
     );
 
@@ -899,12 +899,12 @@ fn run_turn_escalates_guidance_after_repeated_timeout_errors() {
     let cancel = Arc::new(AtomicBool::new(false));
     let mut messages = user_messages("run with retries");
 
-    let outcome = run_turn(
+    let outcome = execute_turn(
         &mut messages,
         &RepeatedTimeoutProvider,
         "echo",
         &registry,
-        &event_tx,
+        &ChannelObserver { tx: &event_tx },
         &cancel,
     );
 
@@ -993,12 +993,12 @@ fn run_turn_blocks_repeated_success_for_batched_tool_calls() {
     let cancel = Arc::new(AtomicBool::new(false));
     let mut messages = user_messages("run batch once");
 
-    let outcome = run_turn(
+    let outcome = execute_turn(
         &mut messages,
         &BatchedDuplicateProvider,
         "echo",
         &registry,
-        &event_tx,
+        &ChannelObserver { tx: &event_tx },
         &cancel,
     );
 
@@ -1035,7 +1035,7 @@ fn provider_that_sends_no_terminal_event_gets_auto_complete() {
         "echo",
         &user_messages("hi"),
         &[],
-        &event_tx,
+        &ChannelObserver { tx: &event_tx },
         &cancel,
     );
     assert!(matches!(pass.outcome, TurnOutcome::Complete));

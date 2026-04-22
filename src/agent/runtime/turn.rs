@@ -19,7 +19,75 @@ use super::{
     TIMEOUT_NOTE,
 };
 
-pub(super) enum TurnOutcome {
+// ── Turn observer ──────────────────────────────────────────────────
+//
+// Abstracts the event side-channel so the core turn logic can be reused
+// both by the root agent (streaming events to the UI) and by sub-agent
+// tools (which silently collect the final result).
+
+/// Observer that receives lifecycle events during a turn.
+///
+/// The root runtime sends these to the UI via `Sender<AgentEvent>`.
+/// Sub-agent tool invocations use [`SilentObserver`] which discards them.
+pub(crate) trait TurnObserver {
+    fn on_text_delta(&self, text: &str);
+    fn on_thinking_delta(&self, text: &str);
+    fn on_tool_call_started(&self, call_id: &str, tool_name: &str, arguments: &str);
+    fn on_tool_call_completed(&self, call_id: &str, output: &str, is_error: bool);
+    fn on_turn_failed(&self, error: &str);
+}
+
+/// Observer that forwards events to a `Sender<AgentEvent>` (UI channel).
+pub(super) struct ChannelObserver<'a> {
+    pub(super) tx: &'a Sender<AgentEvent>,
+}
+
+impl TurnObserver for ChannelObserver<'_> {
+    fn on_text_delta(&self, text: &str) {
+        let _ = self.tx.send(AgentEvent::TextDelta {
+            text: text.to_owned(),
+        });
+    }
+    fn on_thinking_delta(&self, text: &str) {
+        let _ = self.tx.send(AgentEvent::ThinkingDelta {
+            text: text.to_owned(),
+        });
+    }
+    fn on_tool_call_started(&self, call_id: &str, tool_name: &str, arguments: &str) {
+        let _ = self.tx.send(AgentEvent::ToolCallStarted {
+            call_id: call_id.to_owned(),
+            tool_name: tool_name.to_owned(),
+            arguments: arguments.to_owned(),
+        });
+    }
+    fn on_tool_call_completed(&self, call_id: &str, output: &str, is_error: bool) {
+        let _ = self.tx.send(AgentEvent::ToolCallCompleted {
+            call_id: call_id.to_owned(),
+            output: output.to_owned(),
+            is_error,
+        });
+    }
+    fn on_turn_failed(&self, error: &str) {
+        let _ = self.tx.send(AgentEvent::TurnFailed {
+            error: error.to_owned(),
+        });
+    }
+}
+
+/// Observer that silently discards all events.
+///
+/// Used by sub-agent tool invocations where only the final text matters.
+pub(crate) struct SilentObserver;
+
+impl TurnObserver for SilentObserver {
+    fn on_text_delta(&self, _text: &str) {}
+    fn on_thinking_delta(&self, _text: &str) {}
+    fn on_tool_call_started(&self, _call_id: &str, _tool_name: &str, _arguments: &str) {}
+    fn on_tool_call_completed(&self, _call_id: &str, _output: &str, _is_error: bool) {}
+    fn on_turn_failed(&self, _error: &str) {}
+}
+
+pub(crate) enum TurnOutcome {
     Complete,
     Cancelled,
     TransientError(String),
@@ -50,12 +118,16 @@ pub(crate) fn is_transient_error(err: &str) -> bool {
 }
 
 /// Execute a single turn, including bounded tool-call re-entry.
-pub(super) fn run_turn(
+///
+/// This is the core agentic loop.  It is generic over [`TurnObserver`]
+/// so the same logic serves both the root runtime (streaming to UI)
+/// and sub-agent tool calls (silent).
+pub(crate) fn execute_turn(
     messages: &mut Vec<ProviderMessage>,
     provider: &dyn LlmProvider,
     model: &str,
     tools: &ToolRegistry,
-    event_tx: &Sender<AgentEvent>,
+    observer: &dyn TurnObserver,
     cancel_flag: &Arc<AtomicBool>,
 ) -> TurnOutcome {
     let tool_specs = tools.specs();
@@ -67,9 +139,7 @@ pub(super) fn run_turn(
 
     loop {
         if cancel_flag.load(Ordering::SeqCst) {
-            let _ = event_tx.send(AgentEvent::TurnFailed {
-                error: "cancelled".to_string(),
-            });
+            observer.on_turn_failed("cancelled");
             return TurnOutcome::Cancelled;
         }
 
@@ -78,7 +148,7 @@ pub(super) fn run_turn(
             model,
             messages,
             &tool_specs,
-            event_tx,
+            observer,
             cancel_flag,
         );
 
@@ -111,9 +181,7 @@ pub(super) fn run_turn(
                 let mut current_pass_successes: HashSet<(String, String)> = HashSet::new();
                 for pending in pending_calls {
                     if cancel_flag.load(Ordering::SeqCst) {
-                        let _ = event_tx.send(AgentEvent::TurnFailed {
-                            error: "cancelled".to_string(),
-                        });
+                        observer.on_turn_failed("cancelled");
                         return TurnOutcome::Cancelled;
                     }
 
@@ -121,11 +189,11 @@ pub(super) fn run_turn(
                         return TurnOutcome::FatalError("tool iteration limit exceeded".into());
                     }
 
-                    let _ = event_tx.send(AgentEvent::ToolCallStarted {
-                        call_id: pending.call_id.clone(),
-                        tool_name: pending.name.clone(),
-                        arguments: pending.arguments.clone(),
-                    });
+                    observer.on_tool_call_started(
+                        &pending.call_id,
+                        &pending.name,
+                        &pending.arguments,
+                    );
 
                     let cleaned_args = strip_thinking_tags(&pending.arguments);
                     let result = match parse_or_repair_json(&cleaned_args) {
@@ -190,11 +258,11 @@ pub(super) fn run_turn(
                         }
                     };
 
-                    let _ = event_tx.send(AgentEvent::ToolCallCompleted {
-                        call_id: pending.call_id.clone(),
-                        output: result.output.clone(),
-                        is_error: result.is_error,
-                    });
+                    observer.on_tool_call_completed(
+                        &pending.call_id,
+                        &result.output,
+                        result.is_error,
+                    );
 
                     messages.push(ProviderMessage::ToolResult {
                         tool_call_id: pending.call_id,
@@ -257,7 +325,7 @@ pub(super) fn stream_provider_pass(
     model: &str,
     messages: &[ProviderMessage],
     tool_specs: &[crate::agent::tools::ToolSpec],
-    event_tx: &Sender<AgentEvent>,
+    observer: &dyn TurnObserver,
     cancel_flag: &Arc<AtomicBool>,
 ) -> ProviderPass {
     let (chunk_tx, chunk_rx) = mpsc::channel::<ProviderEvent>();
@@ -273,9 +341,7 @@ pub(super) fn stream_provider_pass(
         for event in &chunk_rx {
             if cancel_flag.load(Ordering::SeqCst) {
                 info!("stream_provider_pass: cancel flag observed, stopping relay");
-                let _ = event_tx.send(AgentEvent::TurnFailed {
-                    error: "cancelled".to_string(),
-                });
+                observer.on_turn_failed("cancelled");
                 pass.outcome = TurnOutcome::Cancelled;
                 return;
             }
@@ -283,14 +349,10 @@ pub(super) fn stream_provider_pass(
             match event {
                 ProviderEvent::TextDelta(text) => {
                     pass.assistant_text.push_str(&text);
-                    if event_tx.send(AgentEvent::TextDelta { text }).is_err() {
-                        break;
-                    }
+                    observer.on_text_delta(&text);
                 }
                 ProviderEvent::ThinkingDelta(text) => {
-                    if event_tx.send(AgentEvent::ThinkingDelta { text }).is_err() {
-                        break;
-                    }
+                    observer.on_thinking_delta(&text);
                 }
                 ProviderEvent::ToolCall {
                     call_id,

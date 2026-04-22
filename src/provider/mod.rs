@@ -1,5 +1,6 @@
 pub mod echo;
 pub mod openai_compat;
+pub mod openrouter;
 
 use crate::agent::tools::ToolSpec;
 use std::sync::mpsc::Sender;
@@ -87,7 +88,15 @@ pub fn load_provider(repo_root: &str) -> (Box<dyn LlmProvider>, String) {
     match openai_compat::OpenAiConfig::load(repo_root) {
         Ok(cfg) => {
             let name = cfg.model.clone();
-            (Box::new(openai_compat::OpenAiProvider::new(cfg)), name)
+            let is_openrouter = cfg
+                .provider_type
+                .as_deref()
+                .is_some_and(|t| t.eq_ignore_ascii_case("openrouter"));
+            if is_openrouter {
+                (Box::new(openrouter::OpenRouterProvider::new(cfg)), name)
+            } else {
+                (Box::new(openai_compat::OpenAiProvider::new(cfg)), name)
+            }
         }
         Err(_) => (Box::new(echo::EchoProvider::default()), "echo".to_owned()),
     }

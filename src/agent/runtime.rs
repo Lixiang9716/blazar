@@ -10,6 +10,7 @@ use log::{debug, info, warn};
 
 use super::protocol::{AgentCommand, AgentEvent};
 use super::tools::ToolRegistry;
+use crate::agent::tools::agent::AgentTool;
 use crate::agent::tools::bash::BashTool;
 use crate::agent::tools::list_dir::ListDirTool;
 use crate::agent::tools::read_file::ReadFileTool;
@@ -17,12 +18,12 @@ use crate::agent::tools::write_file::WriteFileTool;
 use crate::provider::{LlmProvider, ProviderMessage};
 
 mod json_repair;
-mod turn;
+pub(crate) mod turn;
 
 #[cfg(test)]
 mod tests;
 
-use turn::{TurnOutcome, run_turn};
+use turn::{ChannelObserver, TurnOutcome, execute_turn};
 
 #[cfg(test)]
 use crate::provider::ProviderEvent;
@@ -113,12 +114,20 @@ impl AgentRuntime {
         let (event_tx, event_rx) = mpsc::channel();
         let cancel_flag = Arc::new(AtomicBool::new(false));
         let flag_clone = Arc::clone(&cancel_flag);
+        let provider: Arc<dyn LlmProvider> = Arc::from(provider);
         let worker: RuntimeWorker = Box::new(move || {
             let mut tools = ToolRegistry::new(workspace_root.clone());
             tools.register(Box::new(ReadFileTool::new(workspace_root.clone())));
             tools.register(Box::new(WriteFileTool::new(workspace_root.clone())));
             tools.register(Box::new(ListDirTool::new(workspace_root.clone())));
-            tools.register(Box::new(BashTool::new(workspace_root)));
+            tools.register(Box::new(BashTool::new(workspace_root.clone())));
+            tools.register(Box::new(AgentTool::new(
+                "sub_agent",
+                "Delegate a task to a sub-agent that can read files, write files, list directories, and run bash commands. Use when the task is self-contained and benefits from independent reasoning.",
+                Arc::clone(&provider),
+                &model,
+                workspace_root,
+            )));
             runtime_loop(cmd_rx, event_tx, provider, model, tools, flag_clone)
         });
 
@@ -187,7 +196,7 @@ impl Drop for AgentRuntime {
 fn runtime_loop(
     cmd_rx: Receiver<AgentCommand>,
     event_tx: Sender<AgentEvent>,
-    provider: Box<dyn LlmProvider>,
+    provider: Arc<dyn LlmProvider>,
     mut model: String,
     tools: ToolRegistry,
     cancel_flag: Arc<AtomicBool>,
@@ -270,7 +279,15 @@ fn run_turn_with_retry(
         messages.push(ProviderMessage::User {
             content: prompt.to_string(),
         });
-        let result = run_turn(&mut messages, provider, model, tools, event_tx, cancel_flag);
+        let observer = ChannelObserver { tx: event_tx };
+        let result = execute_turn(
+            &mut messages,
+            provider,
+            model,
+            tools,
+            &observer,
+            cancel_flag,
+        );
 
         match result {
             TurnOutcome::Complete => {

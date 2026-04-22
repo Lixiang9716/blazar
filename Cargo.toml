@@ -20,6 +20,7 @@ opaline = "0.4"
 tui-overlay = "0.1"
 tui-widget-list = "0.15"
 async-openai = { version = "0.35", default-features = false, features = ["chat-completion", "model", "byot"] }
+openrouter-rs = "0.8"
 tokio = { version = "1", features = ["rt"] }
 futures = "0.3"
 ratskin = "0.3.1"

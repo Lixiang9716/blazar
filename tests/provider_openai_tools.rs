@@ -9,6 +9,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 fn make_provider() -> OpenAiProvider {
     OpenAiProvider::new(OpenAiConfig {
+        provider_type: None,
         api_key: "test".into(),
         base_url: "https://example.com/v1".into(),
         model: "Qwen/Qwen3-8B".into(),
