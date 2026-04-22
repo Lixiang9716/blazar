@@ -1,12 +1,25 @@
 use super::*;
-use crate::agent::tools::{Tool, ToolSpec};
+use crate::agent::tools::{ResourceAccess, ResourceClaim, Tool, ToolKind, ToolSpec};
 use serde_json::json;
 use std::error::Error;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::atomic::AtomicU32;
+use std::time::{Duration, Instant};
 
 fn empty_registry() -> ToolRegistry {
     ToolRegistry::new(PathBuf::from(env!("CARGO_MANIFEST_DIR")))
+}
+
+fn wait_until(timeout: Duration, mut condition: impl FnMut() -> bool) -> bool {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        if condition() {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    condition()
 }
 
 #[test]
@@ -51,6 +64,7 @@ fn runtime_loop_handles_cancel_and_shutdown_commands() {
             event_tx,
             Arc::new(crate::provider::echo::EchoProvider::new(0)),
             "echo".to_owned(),
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")),
             tools,
             cancel_for_thread,
         );
@@ -61,6 +75,51 @@ fn runtime_loop_handles_cancel_and_shutdown_commands() {
     handle.join().expect("runtime loop should stop");
 
     assert!(cancel_flag.load(Ordering::SeqCst));
+}
+
+#[test]
+fn refresh_acp_agents_reports_invalid_config_errors() {
+    let base = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target");
+    std::fs::create_dir_all(&base).expect("target dir should exist");
+    let unique = format!(
+        "runtime-refresh-acp-invalid-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock should be monotonic")
+            .as_nanos()
+    );
+    let workspace_root = base.join(unique);
+    std::fs::create_dir_all(workspace_root.join("config")).expect("create config dir");
+    std::fs::write(workspace_root.join("config/agents.toml"), "")
+        .expect("write empty agents config");
+
+    let runtime = AgentRuntime::new(
+        Box::new(crate::provider::echo::EchoProvider::new(0)),
+        workspace_root.clone(),
+        "echo".to_owned(),
+    )
+    .expect("runtime should initialize");
+
+    std::fs::write(
+        workspace_root.join("config/agents.toml"),
+        "[discovery]\nendpoints = [\"\"]\n",
+    )
+    .expect("overwrite invalid agents config");
+
+    runtime
+        .refresh_acp_agents()
+        .expect("refresh request should reach runtime");
+
+    let refreshed = wait_until(Duration::from_secs(2), || {
+        matches!(
+            runtime.try_recv(),
+            Some(AgentEvent::AcpAgentsRefreshFailed { .. })
+        )
+    });
+
+    assert!(refreshed, "refresh failure event was not observed");
+
+    std::fs::remove_dir_all(&workspace_root).expect("cleanup scratch workspace");
 }
 
 fn user_messages(prompt: &str) -> Vec<ProviderMessage> {
@@ -90,6 +149,180 @@ impl Tool for CountingTool {
         self.calls.fetch_add(1, Ordering::SeqCst);
         crate::agent::tools::ToolResult::success("counted")
     }
+}
+
+struct ResourceOnlyTool;
+
+impl Tool for ResourceOnlyTool {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "resource_tool".into(),
+            description: "returns a resource".into(),
+            parameters: json!({
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+            }),
+        }
+    }
+
+    fn execute(&self, _args: serde_json::Value) -> crate::agent::tools::ToolResult {
+        crate::agent::tools::ToolResult {
+            content: vec![crate::agent::tools::ContentPart::Resource {
+                uri: "file://workspace/report.json".into(),
+                mime_type: Some("application/json".into()),
+            }],
+            exit_code: None,
+            is_error: false,
+            output_truncated: false,
+        }
+    }
+}
+
+#[test]
+fn tool_call_started_event_includes_registry_tool_kind() {
+    struct ToolKindProvider;
+
+    impl LlmProvider for ToolKindProvider {
+        fn stream_turn(
+            &self,
+            _model: &str,
+            messages: &[ProviderMessage],
+            _tools: &[ToolSpec],
+            tx: Sender<ProviderEvent>,
+        ) {
+            let saw_tool_result = messages
+                .iter()
+                .any(|message| matches!(message, ProviderMessage::ToolResult { .. }));
+            if saw_tool_result {
+                let _ = tx.send(ProviderEvent::TurnComplete);
+                return;
+            }
+
+            let _ = tx.send(ProviderEvent::ToolCall {
+                call_id: "call-agent".into(),
+                name: "delegate".into(),
+                arguments: "{}".into(),
+            });
+            let _ = tx.send(ProviderEvent::TurnComplete);
+        }
+    }
+
+    struct AgentKindTool;
+
+    impl Tool for AgentKindTool {
+        fn spec(&self) -> ToolSpec {
+            ToolSpec {
+                name: "delegate".into(),
+                description: "delegate to an agent".into(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": false
+                }),
+            }
+        }
+
+        fn kind(&self) -> ToolKind {
+            ToolKind::Agent { is_acp: false }
+        }
+
+        fn execute(&self, _args: serde_json::Value) -> crate::agent::tools::ToolResult {
+            crate::agent::tools::ToolResult::success("delegated")
+        }
+    }
+
+    let mut registry = empty_registry();
+    registry.register(Box::new(AgentKindTool));
+
+    let (event_tx, event_rx) = mpsc::channel();
+    let cancel = Arc::new(AtomicBool::new(false));
+    let mut messages = user_messages("delegate work");
+
+    let outcome = execute_turn(
+        &mut messages,
+        &ToolKindProvider,
+        "echo",
+        &registry,
+        &ChannelObserver { tx: &event_tx },
+        &cancel,
+    );
+
+    assert!(matches!(outcome, TurnOutcome::Complete));
+
+    let started_event = event_rx
+        .try_iter()
+        .find_map(|event| match event {
+            AgentEvent::ToolCallStarted {
+                call_id,
+                tool_name,
+                kind,
+                ..
+            } => Some((call_id, tool_name, kind)),
+            _ => None,
+        })
+        .expect("tool start event should be emitted");
+    assert_eq!(started_event.0, "call-agent");
+    assert_eq!(started_event.1, "delegate");
+    assert_eq!(started_event.2, ToolKind::Agent { is_acp: false });
+}
+
+#[test]
+fn run_turn_preserves_resource_only_tool_results_in_provider_messages() {
+    struct ResourceResultProvider;
+
+    impl LlmProvider for ResourceResultProvider {
+        fn stream_turn(
+            &self,
+            _model: &str,
+            messages: &[ProviderMessage],
+            _tools: &[ToolSpec],
+            tx: Sender<ProviderEvent>,
+        ) {
+            let saw_resource_summary = messages.iter().any(|message| {
+                matches!(message, ProviderMessage::ToolResult { output, is_error, .. }
+                        if !*is_error
+                            && output.contains("[resource] file://workspace/report.json")
+                            && output.contains("application/json"))
+            });
+
+            if saw_resource_summary {
+                let _ = tx.send(ProviderEvent::TextDelta("done".into()));
+                let _ = tx.send(ProviderEvent::TurnComplete);
+                return;
+            }
+
+            let _ = tx.send(ProviderEvent::ToolCall {
+                call_id: "call-resource".into(),
+                name: "resource_tool".into(),
+                arguments: "{}".into(),
+            });
+            let _ = tx.send(ProviderEvent::TurnComplete);
+        }
+    }
+
+    let mut registry = empty_registry();
+    registry.register(Box::new(ResourceOnlyTool));
+
+    let (event_tx, _event_rx) = mpsc::channel();
+    let cancel = Arc::new(AtomicBool::new(false));
+    let mut messages = user_messages("return resource");
+
+    let outcome = execute_turn(
+        &mut messages,
+        &ResourceResultProvider,
+        "echo",
+        &registry,
+        &ChannelObserver { tx: &event_tx },
+        &cancel,
+    );
+
+    assert!(matches!(outcome, TurnOutcome::Complete));
+    assert!(messages.iter().any(|message| {
+        matches!(message, ProviderMessage::ToolResult { output, is_error, .. }
+                if !*is_error
+                    && output == "[resource] file://workspace/report.json (application/json)")
+    }));
 }
 
 #[test]
@@ -788,7 +1021,9 @@ impl Tool for TimeoutTool {
     fn execute(&self, _args: serde_json::Value) -> crate::agent::tools::ToolResult {
         self.calls.fetch_add(1, Ordering::SeqCst);
         crate::agent::tools::ToolResult {
-            output: "command timed out after 30s".into(),
+            content: vec![crate::agent::tools::ContentPart::text(
+                "command timed out after 30s",
+            )],
             exit_code: None,
             is_error: true,
             output_truncated: false,
@@ -1009,6 +1244,377 @@ fn run_turn_blocks_repeated_success_for_batched_tool_calls() {
         matches!(message, ProviderMessage::ToolResult { output, is_error, .. }
                 if *is_error && output.contains("REPEATED SUCCESS"))
     }));
+}
+
+struct TrackedClaimedTool {
+    name: &'static str,
+    resource: &'static str,
+    access: ResourceAccess,
+    delay: Duration,
+    active_calls: Arc<AtomicU32>,
+    max_parallel_calls: Arc<AtomicU32>,
+    completion_log: Arc<Mutex<Vec<&'static str>>>,
+}
+
+impl Tool for TrackedClaimedTool {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: self.name.into(),
+            description: "tracked claimed tool".into(),
+            parameters: json!({
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+            }),
+        }
+    }
+
+    fn resource_claims(&self, _args: &serde_json::Value) -> Vec<ResourceClaim> {
+        vec![ResourceClaim {
+            resource: self.resource.into(),
+            access: self.access,
+        }]
+    }
+
+    fn execute(&self, _args: serde_json::Value) -> crate::agent::tools::ToolResult {
+        let active = self.active_calls.fetch_add(1, Ordering::SeqCst) + 1;
+        self.max_parallel_calls.fetch_max(active, Ordering::SeqCst);
+        std::thread::sleep(self.delay);
+        self.active_calls.fetch_sub(1, Ordering::SeqCst);
+        self.completion_log
+            .lock()
+            .expect("log lock")
+            .push(self.name);
+        crate::agent::tools::ToolResult::success(self.name)
+    }
+}
+
+#[test]
+fn run_turn_executes_non_conflicting_calls_in_parallel_batches_with_stable_result_order() {
+    struct ParallelBatchProvider;
+
+    impl LlmProvider for ParallelBatchProvider {
+        fn stream_turn(
+            &self,
+            _model: &str,
+            messages: &[ProviderMessage],
+            _tools: &[ToolSpec],
+            tx: Sender<ProviderEvent>,
+        ) {
+            let saw_tool_results = messages
+                .iter()
+                .any(|message| matches!(message, ProviderMessage::ToolResult { .. }));
+            if saw_tool_results {
+                let _ = tx.send(ProviderEvent::TextDelta("done".into()));
+                let _ = tx.send(ProviderEvent::TurnComplete);
+                return;
+            }
+
+            let _ = tx.send(ProviderEvent::ToolCall {
+                call_id: "call-slow".into(),
+                name: "slow_read".into(),
+                arguments: "{}".into(),
+            });
+            let _ = tx.send(ProviderEvent::ToolCall {
+                call_id: "call-fast".into(),
+                name: "fast_read".into(),
+                arguments: "{}".into(),
+            });
+            let _ = tx.send(ProviderEvent::TurnComplete);
+        }
+    }
+
+    let active_calls = Arc::new(AtomicU32::new(0));
+    let max_parallel_calls = Arc::new(AtomicU32::new(0));
+    let completion_log = Arc::new(Mutex::new(Vec::new()));
+
+    let mut registry = empty_registry();
+    registry.register(Box::new(TrackedClaimedTool {
+        name: "slow_read",
+        resource: "fs:src/slow.rs",
+        access: ResourceAccess::ReadOnly,
+        delay: Duration::from_millis(80),
+        active_calls: Arc::clone(&active_calls),
+        max_parallel_calls: Arc::clone(&max_parallel_calls),
+        completion_log: Arc::clone(&completion_log),
+    }));
+    registry.register(Box::new(TrackedClaimedTool {
+        name: "fast_read",
+        resource: "fs:src/fast.rs",
+        access: ResourceAccess::ReadOnly,
+        delay: Duration::from_millis(10),
+        active_calls,
+        max_parallel_calls: Arc::clone(&max_parallel_calls),
+        completion_log: Arc::clone(&completion_log),
+    }));
+
+    let (event_tx, event_rx) = mpsc::channel();
+    let cancel = Arc::new(AtomicBool::new(false));
+    let mut messages = user_messages("run in parallel");
+
+    let outcome = execute_turn(
+        &mut messages,
+        &ParallelBatchProvider,
+        "echo",
+        &registry,
+        &ChannelObserver { tx: &event_tx },
+        &cancel,
+    );
+
+    assert!(matches!(outcome, TurnOutcome::Complete));
+    assert_eq!(max_parallel_calls.load(Ordering::SeqCst), 2);
+    assert_eq!(
+        completion_log.lock().expect("log lock").as_slice(),
+        ["fast_read", "slow_read"]
+    );
+
+    let tool_results = messages
+        .iter()
+        .filter_map(|message| match message {
+            ProviderMessage::ToolResult { tool_call_id, .. } => Some(tool_call_id.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(tool_results, vec!["call-slow", "call-fast"]);
+
+    let completion_events = event_rx
+        .try_iter()
+        .filter_map(|event| match event {
+            AgentEvent::ToolCallCompleted { call_id, .. } => Some(call_id),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(completion_events, vec!["call-slow", "call-fast"]);
+}
+
+#[test]
+fn run_turn_serializes_conflicting_calls_into_separate_batches() {
+    struct ConflictingBatchProvider;
+
+    impl LlmProvider for ConflictingBatchProvider {
+        fn stream_turn(
+            &self,
+            _model: &str,
+            messages: &[ProviderMessage],
+            _tools: &[ToolSpec],
+            tx: Sender<ProviderEvent>,
+        ) {
+            let saw_tool_results = messages
+                .iter()
+                .any(|message| matches!(message, ProviderMessage::ToolResult { .. }));
+            if saw_tool_results {
+                let _ = tx.send(ProviderEvent::TextDelta("done".into()));
+                let _ = tx.send(ProviderEvent::TurnComplete);
+                return;
+            }
+
+            let _ = tx.send(ProviderEvent::ToolCall {
+                call_id: "call-read".into(),
+                name: "shared_read".into(),
+                arguments: "{}".into(),
+            });
+            let _ = tx.send(ProviderEvent::ToolCall {
+                call_id: "call-write".into(),
+                name: "shared_write".into(),
+                arguments: "{}".into(),
+            });
+            let _ = tx.send(ProviderEvent::TurnComplete);
+        }
+    }
+
+    let active_calls = Arc::new(AtomicU32::new(0));
+    let max_parallel_calls = Arc::new(AtomicU32::new(0));
+    let completion_log = Arc::new(Mutex::new(Vec::new()));
+
+    let mut registry = empty_registry();
+    registry.register(Box::new(TrackedClaimedTool {
+        name: "shared_read",
+        resource: "fs:src/shared.rs",
+        access: ResourceAccess::ReadOnly,
+        delay: Duration::from_millis(25),
+        active_calls: Arc::clone(&active_calls),
+        max_parallel_calls: Arc::clone(&max_parallel_calls),
+        completion_log: Arc::clone(&completion_log),
+    }));
+    registry.register(Box::new(TrackedClaimedTool {
+        name: "shared_write",
+        resource: "fs:src/shared.rs",
+        access: ResourceAccess::ReadWrite,
+        delay: Duration::from_millis(25),
+        active_calls,
+        max_parallel_calls: Arc::clone(&max_parallel_calls),
+        completion_log: Arc::clone(&completion_log),
+    }));
+
+    let (event_tx, _event_rx) = mpsc::channel();
+    let cancel = Arc::new(AtomicBool::new(false));
+    let mut messages = user_messages("serialize conflicts");
+
+    let outcome = execute_turn(
+        &mut messages,
+        &ConflictingBatchProvider,
+        "echo",
+        &registry,
+        &ChannelObserver { tx: &event_tx },
+        &cancel,
+    );
+
+    assert!(matches!(outcome, TurnOutcome::Complete));
+    assert_eq!(max_parallel_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        completion_log.lock().expect("log lock").as_slice(),
+        ["shared_read", "shared_write"]
+    );
+}
+
+struct CancellingObserver {
+    cancel_flag: Arc<AtomicBool>,
+    started: Arc<Mutex<Vec<String>>>,
+    completed: Arc<Mutex<Vec<String>>>,
+}
+
+impl crate::agent::runtime::turn::TurnObserver for CancellingObserver {
+    fn on_text_delta(&self, _text: &str) {}
+
+    fn on_thinking_delta(&self, _text: &str) {}
+
+    fn on_tool_call_started(
+        &self,
+        call_id: &str,
+        _tool_name: &str,
+        _kind: ToolKind,
+        _arguments: &str,
+    ) {
+        let mut started = self.started.lock().expect("started lock");
+        started.push(call_id.to_string());
+        if started.len() == 1 {
+            self.cancel_flag.store(true, Ordering::SeqCst);
+        }
+    }
+
+    fn on_tool_call_completed(&self, call_id: &str, _output: &str, _is_error: bool) {
+        self.completed
+            .lock()
+            .expect("completed lock")
+            .push(call_id.to_string());
+    }
+
+    fn on_turn_failed(&self, _error: &str) {}
+}
+
+#[test]
+fn run_turn_stops_launching_additional_parallel_calls_after_cancel() {
+    struct CancelBatchProvider;
+
+    impl LlmProvider for CancelBatchProvider {
+        fn stream_turn(
+            &self,
+            _model: &str,
+            _messages: &[ProviderMessage],
+            _tools: &[ToolSpec],
+            tx: Sender<ProviderEvent>,
+        ) {
+            let _ = tx.send(ProviderEvent::ToolCall {
+                call_id: "call-1".into(),
+                name: "first_read".into(),
+                arguments: "{}".into(),
+            });
+            let _ = tx.send(ProviderEvent::ToolCall {
+                call_id: "call-2".into(),
+                name: "second_read".into(),
+                arguments: "{}".into(),
+            });
+            let _ = tx.send(ProviderEvent::TurnComplete);
+        }
+    }
+
+    let first_calls = Arc::new(AtomicU32::new(0));
+    let second_calls = Arc::new(AtomicU32::new(0));
+    let completion_log = Arc::new(Mutex::new(Vec::new()));
+
+    struct CountingWrapper {
+        inner: TrackedClaimedTool,
+        calls: Arc<AtomicU32>,
+    }
+
+    impl Tool for CountingWrapper {
+        fn spec(&self) -> ToolSpec {
+            self.inner.spec()
+        }
+
+        fn resource_claims(&self, args: &serde_json::Value) -> Vec<ResourceClaim> {
+            self.inner.resource_claims(args)
+        }
+
+        fn execute(&self, args: serde_json::Value) -> crate::agent::tools::ToolResult {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            self.inner.execute(args)
+        }
+    }
+
+    let mut registry = empty_registry();
+    registry.register(Box::new(CountingWrapper {
+        inner: TrackedClaimedTool {
+            name: "first_read",
+            resource: "fs:src/first.rs",
+            access: ResourceAccess::ReadOnly,
+            delay: Duration::from_millis(20),
+            active_calls: Arc::new(AtomicU32::new(0)),
+            max_parallel_calls: Arc::new(AtomicU32::new(0)),
+            completion_log: Arc::clone(&completion_log),
+        },
+        calls: Arc::clone(&first_calls),
+    }));
+    registry.register(Box::new(CountingWrapper {
+        inner: TrackedClaimedTool {
+            name: "second_read",
+            resource: "fs:src/second.rs",
+            access: ResourceAccess::ReadOnly,
+            delay: Duration::from_millis(20),
+            active_calls: Arc::new(AtomicU32::new(0)),
+            max_parallel_calls: Arc::new(AtomicU32::new(0)),
+            completion_log: Arc::clone(&completion_log),
+        },
+        calls: Arc::clone(&second_calls),
+    }));
+
+    let cancel = Arc::new(AtomicBool::new(false));
+    let started = Arc::new(Mutex::new(Vec::new()));
+    let completed = Arc::new(Mutex::new(Vec::new()));
+    let observer = CancellingObserver {
+        cancel_flag: Arc::clone(&cancel),
+        started: Arc::clone(&started),
+        completed: Arc::clone(&completed),
+    };
+    let mut messages = user_messages("cancel parallel batch");
+
+    let outcome = execute_turn(
+        &mut messages,
+        &CancelBatchProvider,
+        "echo",
+        &registry,
+        &observer,
+        &cancel,
+    );
+
+    assert!(matches!(outcome, TurnOutcome::Cancelled));
+    assert_eq!(first_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(second_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(started.lock().expect("started lock").as_slice(), ["call-1"]);
+    assert_eq!(
+        completed.lock().expect("completed lock").as_slice(),
+        ["call-1"]
+    );
+    assert_eq!(
+        messages
+            .iter()
+            .filter_map(|message| match message {
+                ProviderMessage::ToolResult { tool_call_id, .. } => Some(tool_call_id.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>(),
+        vec!["call-1"]
+    );
 }
 
 #[test]

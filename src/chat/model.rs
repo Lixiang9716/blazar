@@ -1,3 +1,5 @@
+use crate::agent::tools::ToolKind;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Author {
     User,
@@ -33,6 +35,7 @@ pub enum EntryKind {
     ToolCall {
         call_id: String,
         tool_name: String,
+        kind: ToolKind,
         status: ToolCallStatus,
     },
     Bash {
@@ -117,6 +120,7 @@ impl TimelineEntry {
     pub fn tool_call(
         call_id: impl Into<String>,
         tool_name: impl Into<String>,
+        kind: ToolKind,
         body: impl Into<String>,
         details: impl Into<String>,
         status: ToolCallStatus,
@@ -126,6 +130,7 @@ impl TimelineEntry {
             kind: EntryKind::ToolCall {
                 call_id: call_id.into(),
                 tool_name: tool_name.into(),
+                kind,
                 status,
             },
             title: None,

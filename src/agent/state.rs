@@ -1,4 +1,6 @@
 use super::protocol::AgentEvent;
+use crate::agent::tools::ToolKind;
+use log::warn;
 
 /// The state of the current turn in the agent loop.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -7,6 +9,21 @@ pub enum TurnState {
     Streaming { turn_id: String },
     Done,
     Failed { error: String },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActiveToolStatus {
+    Running,
+    Success,
+    Error,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActiveTool {
+    pub call_id: String,
+    pub tool_name: String,
+    pub kind: ToolKind,
+    pub status: ActiveToolStatus,
 }
 
 /// Blazar-owned agent runtime state.
@@ -20,7 +37,7 @@ pub struct AgentRuntimeState {
     pub turn_count: u64,
     /// Partial response text accumulated during the current streaming turn.
     pub streaming_text: String,
-    pub active_tool_name: Option<String>,
+    pub active_tools: Vec<ActiveTool>,
     pub tool_call_count: u64,
 }
 
@@ -30,7 +47,7 @@ impl Default for AgentRuntimeState {
             turn_state: TurnState::Idle,
             turn_count: 0,
             streaming_text: String::new(),
-            active_tool_name: None,
+            active_tools: Vec::new(),
             tool_call_count: 0,
         }
     }
@@ -46,7 +63,7 @@ impl AgentRuntimeState {
                 };
                 self.turn_count += 1;
                 self.streaming_text.clear();
-                self.active_tool_name = None;
+                self.active_tools.clear();
                 true
             }
             AgentEvent::TextDelta { text } => {
@@ -57,25 +74,63 @@ impl AgentRuntimeState {
                 // Thinking deltas don't accumulate in state — only in timeline.
                 false
             }
-            AgentEvent::ToolCallStarted { tool_name, .. } => {
-                self.active_tool_name = Some(tool_name.clone());
-                self.tool_call_count += 1;
+            AgentEvent::ToolCallStarted {
+                call_id,
+                tool_name,
+                kind,
+                ..
+            } => {
+                if self
+                    .active_tools
+                    .iter()
+                    .find(|active_tool| active_tool.call_id == *call_id)
+                    .is_some()
+                {
+                    warn!(
+                        "agent state: duplicate ToolCallStarted for call_id={call_id} tool={tool_name}; ignoring duplicate start"
+                    );
+                } else {
+                    self.active_tools.push(ActiveTool {
+                        call_id: call_id.clone(),
+                        tool_name: tool_name.clone(),
+                        kind: *kind,
+                        status: ActiveToolStatus::Running,
+                    });
+                    self.tool_call_count += 1;
+                }
                 false
             }
-            AgentEvent::ToolCallCompleted { .. } => {
-                self.active_tool_name = None;
+            AgentEvent::ToolCallCompleted {
+                call_id, is_error, ..
+            } => {
+                if let Some(active_tool) = self
+                    .active_tools
+                    .iter_mut()
+                    .find(|active_tool| active_tool.call_id == *call_id)
+                {
+                    active_tool.status = if *is_error {
+                        ActiveToolStatus::Error
+                    } else {
+                        ActiveToolStatus::Success
+                    };
+                } else {
+                    warn!(
+                        "agent state: ToolCallCompleted for unknown call_id={call_id}; ignoring completion"
+                    );
+                }
                 false
             }
+            AgentEvent::AcpAgentsRefreshed | AgentEvent::AcpAgentsRefreshFailed { .. } => false,
             AgentEvent::TurnComplete => {
                 self.turn_state = TurnState::Done;
-                self.active_tool_name = None;
+                self.active_tools.clear();
                 true
             }
             AgentEvent::TurnFailed { error } => {
                 self.turn_state = TurnState::Failed {
                     error: error.clone(),
                 };
-                self.active_tool_name = None;
+                self.active_tools.clear();
                 true
             }
         }

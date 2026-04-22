@@ -83,6 +83,11 @@ impl ChatApp {
                             return;
                         }
 
+                        if cmd == "/discover-agents" {
+                            self.send_message(&cmd);
+                            return;
+                        }
+
                         self.send_message(&cmd);
                     }
                 }

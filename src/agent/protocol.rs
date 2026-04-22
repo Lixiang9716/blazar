@@ -1,9 +1,13 @@
+use crate::agent::tools::ToolKind;
+
 /// Commands sent from the UI thread to the agent runtime.
 pub enum AgentCommand {
     /// Submit a new turn with the given user prompt.
     SubmitTurn { prompt: String },
     /// Switch the active model without rebuilding the runtime.
     SetModel { model: String },
+    /// Refresh ACP-discovered agents and rebuild runtime tool registry.
+    RefreshAcpAgents,
     /// Cancel the current turn (future use).
     Cancel,
     /// Shut down the runtime thread.
@@ -23,6 +27,7 @@ pub enum AgentEvent {
     ToolCallStarted {
         call_id: String,
         tool_name: String,
+        kind: ToolKind,
         arguments: String,
     },
     /// A tool call finished executing.
@@ -31,6 +36,10 @@ pub enum AgentEvent {
         output: String,
         is_error: bool,
     },
+    /// ACP agent discovery finished and tools were refreshed.
+    AcpAgentsRefreshed,
+    /// ACP agent discovery failed.
+    AcpAgentsRefreshFailed { error: String },
     /// The current turn completed successfully.
     TurnComplete,
     /// The current turn failed.

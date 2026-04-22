@@ -583,6 +583,55 @@ fn submit_composer_sends_message_and_clears_input() {
 }
 
 #[test]
+fn discover_agents_command_adds_hint_without_starting_turn() {
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+
+    app.send_message("/discover-agents");
+
+    assert!(
+        app.timeline
+            .iter()
+            .any(|entry| entry.actor == Actor::User && entry.body == "/discover-agents")
+    );
+    let hint = app.timeline.last().expect("discover hint should exist");
+    assert!(matches!(hint.kind, EntryKind::Hint));
+    assert!(
+        hint.body.contains("Discovering ACP agents"),
+        "expected immediate discover-agents hint, got {:?}",
+        hint.body
+    );
+    assert!(
+        !app.is_streaming(),
+        "discover-agents should not start a chat turn"
+    );
+}
+
+#[test]
+fn picker_discover_agents_command_adds_hint() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+    app.handle_action(InputAction::Key(KeyEvent::new(
+        KeyCode::Char('/'),
+        KeyModifiers::NONE,
+    )));
+    for ch in "discover-agents".chars() {
+        app.handle_action(InputAction::Key(KeyEvent::new(
+            KeyCode::Char(ch),
+            KeyModifiers::NONE,
+        )));
+    }
+
+    app.handle_action(InputAction::Submit);
+
+    let hint = app.timeline.last().expect("discover hint should exist");
+    assert!(matches!(hint.kind, EntryKind::Hint));
+    assert!(hint.body.contains("Discovering ACP agents"));
+}
+
+#[test]
 fn picker_model_command_opens_model_subpicker_context() {
     use crate::chat::picker::PickerContext;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -843,6 +892,7 @@ fn tool_call_completed_sets_error_status_and_summary() {
     app.apply_agent_event_for_test(AgentEvent::ToolCallStarted {
         call_id: "call-err".into(),
         tool_name: "bash".into(),
+        kind: crate::agent::tools::ToolKind::Local,
         arguments: r#"{"command":"exit 1"}"#.into(),
     });
     app.apply_agent_event_for_test(AgentEvent::ToolCallCompleted {
@@ -861,6 +911,32 @@ fn tool_call_completed_sets_error_status_and_summary() {
     ));
     assert_eq!(entry.body, "first line");
     assert!(entry.details.contains("second line"));
+}
+
+#[test]
+fn agent_tool_calls_render_acp_badge() {
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+
+    app.apply_agent_event_for_test(AgentEvent::ToolCallStarted {
+        call_id: "call-acp".into(),
+        tool_name: "configured_reviewer".into(),
+        kind: crate::agent::tools::ToolKind::Agent { is_acp: true },
+        arguments: r#"{"prompt":"review the patch"}"#.into(),
+    });
+
+    let entry = app.timeline.last().expect("tool entry should exist");
+    assert!(matches!(
+        entry.kind,
+        EntryKind::ToolCall {
+            kind: crate::agent::tools::ToolKind::Agent { is_acp: true },
+            ..
+        }
+    ));
+
+    let rendered = render_to_lines_for_test(&mut app, 100, 35).join("\n");
+    assert!(rendered.contains("configured_reviewer"));
+    assert!(rendered.contains("(ACP)"));
 }
 
 #[test]

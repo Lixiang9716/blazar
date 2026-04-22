@@ -46,7 +46,9 @@ impl ChatApp {
             AgentEvent::ToolCallStarted {
                 call_id,
                 tool_name,
+                kind,
                 arguments,
+                ..
             } => {
                 debug!(
                     "tick: ToolCallStarted call_id={} tool={} arguments_len={}",
@@ -57,6 +59,7 @@ impl ChatApp {
                 self.timeline.push(TimelineEntry::tool_call(
                     call_id,
                     tool_name,
+                    kind,
                     summarize_tool_arguments(&arguments),
                     arguments,
                     ToolCallStatus::Running,
@@ -90,6 +93,18 @@ impl ChatApp {
                         };
                     }
                 }
+                self.scroll_offset = u16::MAX;
+            }
+            AgentEvent::AcpAgentsRefreshed => {
+                self.timeline
+                    .push(TimelineEntry::hint("ACP agent discovery complete."));
+                self.scroll_offset = u16::MAX;
+            }
+            AgentEvent::AcpAgentsRefreshFailed { error } => {
+                warn!("tick: AcpAgentsRefreshFailed error={error}");
+                self.timeline.push(TimelineEntry::warning(format!(
+                    "ACP agent discovery failed: {error}"
+                )));
                 self.scroll_offset = u16::MAX;
             }
             AgentEvent::TurnComplete => {

@@ -1,4 +1,4 @@
-use super::{Tool, ToolResult, ToolSpec};
+use super::{ContentPart, ResourceAccess, ResourceClaim, Tool, ToolResult, ToolSpec};
 use nix::errno::Errno;
 use nix::libc;
 use nix::sys::signal::{Signal, killpg};
@@ -136,6 +136,13 @@ where
         }
     }
 
+    fn resource_claims(&self, _args: &Value) -> Vec<ResourceClaim> {
+        vec![ResourceClaim {
+            resource: "process:bash".into(),
+            access: ResourceAccess::Exclusive,
+        }]
+    }
+
     fn execute(&self, args: Value) -> ToolResult {
         let Some(command) = args.get("command").and_then(Value::as_str) else {
             return ToolResult::failure("bash requires a string command");
@@ -231,7 +238,7 @@ fn wait_for_completion(
             }
             output.push_str(&format!("cannot read shell output: {error}"));
             return ToolResult {
-                output,
+                content: vec![ContentPart::text(output)],
                 exit_code: None,
                 is_error: true,
                 output_truncated,
@@ -247,7 +254,7 @@ fn wait_for_completion(
                 );
                 let (output, output_truncated) = snapshot_output(&output_state);
                 return ToolResult {
-                    output,
+                    content: vec![ContentPart::text(output)],
                     exit_code: status.code(),
                     is_error: !status.success(),
                     output_truncated,
@@ -268,7 +275,7 @@ fn wait_for_completion(
                 }
                 output.push_str(&format!("command timed out after {}s", timeout.as_secs()));
                 return ToolResult {
-                    output,
+                    content: vec![ContentPart::text(output)],
                     exit_code: None,
                     is_error: true,
                     output_truncated,
@@ -288,7 +295,7 @@ fn wait_for_completion(
                 }
                 output.push_str(&format!("wait error: {error}"));
                 return ToolResult {
-                    output,
+                    content: vec![ContentPart::text(output)],
                     exit_code: None,
                     is_error: true,
                     output_truncated,

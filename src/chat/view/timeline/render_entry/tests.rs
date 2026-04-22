@@ -1,5 +1,6 @@
 use super::common::extract_tool_subtitle;
 use super::*;
+use crate::agent::tools::ToolKind;
 
 fn lines_text(lines: &[Line<'_>]) -> Vec<String> {
     lines
@@ -53,6 +54,7 @@ fn render_entry_renders_tool_use_and_tool_call_statuses() {
     let running = TimelineEntry::tool_call(
         "c1",
         "read_file",
+        ToolKind::Local,
         "reading",
         r#"{"path":"Cargo.toml"}"#,
         ToolCallStatus::Running,
@@ -64,6 +66,7 @@ fn render_entry_renders_tool_use_and_tool_call_statuses() {
     let success = TimelineEntry::tool_call(
         "c2",
         "bash",
+        ToolKind::Local,
         "done",
         r#"{"command":"cargo test"}"#,
         ToolCallStatus::Success,
@@ -75,6 +78,7 @@ fn render_entry_renders_tool_use_and_tool_call_statuses() {
     let error = TimelineEntry::tool_call(
         "c3",
         "grep",
+        ToolKind::Local,
         "failed",
         r#"{"pattern":"TODO"}"#,
         ToolCallStatus::Error,
@@ -82,6 +86,18 @@ fn render_entry_renders_tool_use_and_tool_call_statuses() {
     let error_text = lines_text(&render_entry(&error, &theme, 70)).join("\n");
     assert!(error_text.contains("✗"));
     assert!(error_text.contains("TODO"));
+
+    let acp_agent = TimelineEntry::tool_call(
+        "c4",
+        "configured_reviewer",
+        ToolKind::Agent { is_acp: true },
+        "reviewing",
+        r#"{"prompt":"check this diff"}"#,
+        ToolCallStatus::Running,
+    );
+    let acp_agent_text = lines_text(&render_entry(&acp_agent, &theme, 70)).join("\n");
+    assert!(acp_agent_text.contains("configured_reviewer"));
+    assert!(acp_agent_text.contains("(ACP)"));
 }
 
 #[test]

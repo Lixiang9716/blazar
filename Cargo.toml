@@ -21,6 +21,7 @@ tui-overlay = "0.1"
 tui-widget-list = "0.15"
 async-openai = { version = "0.35", default-features = false, features = ["chat-completion", "model", "byot"] }
 openrouter-rs = "0.8"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 tokio = { version = "1", features = ["rt"] }
 futures = "0.3"
 ratskin = "0.3.1"
@@ -28,7 +29,9 @@ log = "0.4.29"
 flexi_logger = "0.31.8"
 termimad = "0.34.1"
 nix = { version = "0.29", features = ["process", "signal"] }
+toml = "0.8"
 
 [dev-dependencies]
 insta = "1"
+httpmock = "0.7"
 proptest = "1"

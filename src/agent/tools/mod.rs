@@ -1,7 +1,9 @@
+pub mod acp;
 pub mod agent;
 pub mod bash;
 pub mod list_dir;
 pub mod read_file;
+pub mod scheduler;
 pub mod write_file;
 
 use serde_json::Value;
@@ -16,10 +18,56 @@ pub struct ToolSpec {
     pub parameters: Value,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolKind {
+    Local,
+    Agent { is_acp: bool },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResourceAccess {
+    ReadOnly,
+    ReadWrite,
+    Exclusive,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResourceClaim {
+    pub resource: String,
+    pub access: ResourceAccess,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ContentPart {
+    Text {
+        text: String,
+    },
+    Resource {
+        uri: String,
+        mime_type: Option<String>,
+    },
+}
+
+impl ContentPart {
+    pub fn text(text: impl Into<String>) -> Self {
+        Self::Text { text: text.into() }
+    }
+
+    fn text_projection(&self) -> String {
+        match self {
+            Self::Text { text } => text.clone(),
+            Self::Resource { uri, mime_type } => match mime_type {
+                Some(mime_type) => format!("[resource] {uri} ({mime_type})"),
+                None => format!("[resource] {uri}"),
+            },
+        }
+    }
+}
+
 /// Canonical tool execution payload returned to the runtime.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolResult {
-    pub output: String,
+    pub content: Vec<ContentPart>,
     pub exit_code: Option<i32>,
     pub is_error: bool,
     pub output_truncated: bool,
@@ -29,7 +77,7 @@ impl ToolResult {
     /// Builds a successful tool result with plain-text output.
     pub fn success(output: impl Into<String>) -> Self {
         Self {
-            output: output.into(),
+            content: vec![ContentPart::text(output)],
             exit_code: None,
             is_error: false,
             output_truncated: false,
@@ -39,11 +87,35 @@ impl ToolResult {
     /// Builds an error tool result without attaching an OS exit code.
     pub fn failure(output: impl Into<String>) -> Self {
         Self {
-            output: output.into(),
+            content: vec![ContentPart::text(output)],
             exit_code: None,
             is_error: true,
             output_truncated: false,
         }
+    }
+
+    pub fn text_output(&self) -> String {
+        let mut output = String::new();
+        let mut previous_was_resource = false;
+        for part in &self.content {
+            match part {
+                ContentPart::Text { text } => {
+                    if previous_was_resource && !output.ends_with('\n') && !text.starts_with('\n') {
+                        output.push('\n');
+                    }
+                    output.push_str(text);
+                    previous_was_resource = false;
+                }
+                ContentPart::Resource { .. } => {
+                    if !output.is_empty() && !output.ends_with('\n') {
+                        output.push('\n');
+                    }
+                    output.push_str(&part.text_projection());
+                    previous_was_resource = true;
+                }
+            }
+        }
+        output
     }
 }
 
@@ -53,6 +125,12 @@ impl ToolResult {
 /// user-facing validation errors in [`ToolResult::failure`].
 pub trait Tool: Send + Sync {
     fn spec(&self) -> ToolSpec;
+    fn kind(&self) -> ToolKind {
+        ToolKind::Local
+    }
+    fn resource_claims(&self, _args: &Value) -> Vec<ResourceClaim> {
+        Vec::new()
+    }
     fn execute(&self, args: Value) -> ToolResult;
 }
 
@@ -87,6 +165,10 @@ impl ToolRegistry {
             .iter()
             .find(|tool| tool.spec().name == name)
             .map(|tool| tool.as_ref())
+    }
+
+    pub fn contains_name(&self, name: &str) -> bool {
+        self.get(name).is_some()
     }
 
     /// Returns the public specs for all registered tools.
@@ -133,6 +215,34 @@ pub fn canonical_workspace_root(workspace_root: &Path) -> Result<PathBuf, String
             workspace_root.display()
         )
     })
+}
+
+/// Builds a normalized scheduler resource id for a workspace-relative path.
+///
+/// Equivalent lexical paths such as `src/lib.rs` and `./src/lib.rs` collapse to
+/// the same resource key after validation. This is a lexical normalization only;
+/// it does not resolve symlink aliases within the workspace.
+pub fn normalize_workspace_resource_claim(
+    _workspace_root: &Path,
+    requested: &str,
+) -> Result<String, String> {
+    validate_workspace_relative_path(requested)?;
+
+    let normalized = Path::new(requested)
+        .components()
+        .filter_map(|component| match component {
+            Component::CurDir => None,
+            Component::Normal(part) => Some(part.to_string_lossy().into_owned()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("/");
+
+    if normalized.is_empty() {
+        return Err("path must include a file name".into());
+    }
+
+    Ok(format!("fs:{normalized}"))
 }
 
 fn ensure_path_is_within_workspace(path: &Path, workspace_root: &Path) -> Result<(), String> {
@@ -213,7 +323,9 @@ pub fn resolve_workspace_write_path(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::provider::echo::EchoProvider;
     use serde_json::json;
+    use std::sync::Arc;
 
     struct EchoTool;
 
@@ -244,12 +356,24 @@ mod tests {
     #[test]
     fn tool_result_helpers_build_expected_flags() {
         let ok = ToolResult::success("done");
-        assert_eq!(ok.output, "done");
+        assert_eq!(
+            ok.content,
+            vec![ContentPart::Text {
+                text: "done".into()
+            }]
+        );
+        assert_eq!(ok.text_output(), "done");
         assert!(!ok.is_error);
         assert_eq!(ok.exit_code, None);
 
         let err = ToolResult::failure("nope");
-        assert_eq!(err.output, "nope");
+        assert_eq!(
+            err.content,
+            vec![ContentPart::Text {
+                text: "nope".into()
+            }]
+        );
+        assert_eq!(err.text_output(), "nope");
         assert!(err.is_error);
         assert!(!err.output_truncated);
     }
@@ -268,11 +392,123 @@ mod tests {
         let result = registry
             .execute("echo", json!({"value":"x"}))
             .expect("tool should execute");
-        assert_eq!(result.output, r#"{"value":"x"}"#);
+        assert_eq!(result.text_output(), r#"{"value":"x"}"#);
         assert_eq!(
             registry.execute("missing", json!({})).expect_err("unknown"),
             "unknown tool: missing"
         );
+    }
+
+    #[test]
+    fn tool_defaults_report_local_kind_and_no_resource_claims() {
+        let tool = EchoTool;
+
+        assert_eq!(tool.kind(), ToolKind::Local);
+        assert!(tool.resource_claims(&json!({"value":"x"})).is_empty());
+    }
+
+    #[test]
+    fn tool_result_text_output_summarizes_resource_content_parts() {
+        let result = ToolResult {
+            content: vec![ContentPart::Resource {
+                uri: "file://workspace/out.txt".into(),
+                mime_type: Some("text/plain".into()),
+            }],
+            exit_code: None,
+            is_error: false,
+            output_truncated: false,
+        };
+
+        assert_eq!(
+            result.text_output(),
+            "[resource] file://workspace/out.txt (text/plain)"
+        );
+    }
+
+    #[test]
+    fn tool_result_text_output_separates_resource_and_following_text() {
+        let result = ToolResult {
+            content: vec![
+                ContentPart::text("summary"),
+                ContentPart::Resource {
+                    uri: "file://workspace/out.txt".into(),
+                    mime_type: Some("text/plain".into()),
+                },
+                ContentPart::text("details"),
+            ],
+            exit_code: None,
+            is_error: false,
+            output_truncated: false,
+        };
+
+        assert_eq!(
+            result.text_output(),
+            "summary\n[resource] file://workspace/out.txt (text/plain)\ndetails"
+        );
+    }
+
+    #[test]
+    fn specialized_tools_report_expected_kind_and_resource_claims() {
+        let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let read_tool = read_file::ReadFileTool::new(workspace_root.clone());
+        let write_tool = write_file::WriteFileTool::new(workspace_root.clone());
+        let bash_tool = bash::BashTool::new(workspace_root.clone());
+        let agent_tool = agent::AgentTool::new(
+            "delegate",
+            "delegate work",
+            Arc::new(EchoProvider::new(0)),
+            "echo",
+            workspace_root,
+        );
+
+        assert_eq!(
+            read_tool.resource_claims(&json!({"path":"src/main.rs"})),
+            vec![ResourceClaim {
+                resource: "fs:src/main.rs".into(),
+                access: ResourceAccess::ReadOnly,
+            }]
+        );
+        assert_eq!(
+            read_tool.resource_claims(&json!({"path":"./src/main.rs"})),
+            vec![ResourceClaim {
+                resource: "fs:src/main.rs".into(),
+                access: ResourceAccess::ReadOnly,
+            }]
+        );
+        assert_eq!(
+            write_tool.resource_claims(&json!({"path":"src/main.rs"})),
+            vec![ResourceClaim {
+                resource: "fs:src/main.rs".into(),
+                access: ResourceAccess::ReadWrite,
+            }]
+        );
+        assert_eq!(
+            write_tool.resource_claims(&json!({"path":"./src/main.rs"})),
+            vec![ResourceClaim {
+                resource: "fs:src/main.rs".into(),
+                access: ResourceAccess::ReadWrite,
+            }]
+        );
+        assert_eq!(
+            bash_tool.resource_claims(&json!({"command":"pwd"})),
+            vec![ResourceClaim {
+                resource: "process:bash".into(),
+                access: ResourceAccess::Exclusive,
+            }]
+        );
+        assert_eq!(agent_tool.kind(), ToolKind::Agent { is_acp: false });
+    }
+
+    #[test]
+    fn normalized_workspace_resource_claim_collapses_dot_prefix_aliases() {
+        let workspace = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+
+        assert_eq!(
+            normalize_workspace_resource_claim(&workspace, "src/main.rs").expect("normalized"),
+            normalize_workspace_resource_claim(&workspace, "./src/main.rs")
+                .expect("dot-prefixed path normalized")
+        );
+        assert!(normalize_workspace_resource_claim(&workspace, "../secret").is_err());
     }
 
     #[test]

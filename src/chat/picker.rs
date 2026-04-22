@@ -78,6 +78,7 @@ impl ModalPicker {
                 PickerItem::new("/config", "Open configuration settings"),
                 PickerItem::new("/tools", "List available tools"),
                 PickerItem::new("/agents", "List running background agents"),
+                PickerItem::new("/discover-agents", "Refresh discovered ACP agents"),
                 PickerItem::new("/context", "Show current context window usage"),
                 PickerItem::new("/diff", "Show pending file changes"),
                 PickerItem::new("/git", "Show git repository status"),
@@ -285,6 +286,21 @@ mod tests {
         assert!(
             commands.contains(&"/plan"),
             "command palette should expose /plan"
+        );
+    }
+
+    #[test]
+    fn command_palette_includes_discover_agents_command() {
+        let picker = ModalPicker::command_palette();
+        let commands: Vec<&str> = picker
+            .items
+            .iter()
+            .map(|item| item.label.as_str())
+            .collect();
+
+        assert!(
+            commands.contains(&"/discover-agents"),
+            "command palette should expose /discover-agents"
         );
     }
 }

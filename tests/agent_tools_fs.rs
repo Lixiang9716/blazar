@@ -30,7 +30,7 @@ fn read_file_reads_workspace_relative_path() {
     let tool = ReadFileTool::new(workspace.clone());
     let result = tool.execute(json!({ "path": "notes.txt" }));
 
-    assert_eq!(result.output, "hello tool system");
+    assert_eq!(result.text_output(), "hello tool system");
     assert!(!result.is_error);
 }
 
@@ -44,7 +44,7 @@ fn read_file_reads_utf8_up_to_100kb() {
     let result = tool.execute(json!({ "path": "limit.txt" }));
 
     assert!(!result.is_error);
-    assert_eq!(result.output.len(), 100 * 1024);
+    assert_eq!(result.text_output().len(), 100 * 1024);
 }
 
 #[test]
@@ -57,7 +57,7 @@ fn read_file_rejects_files_over_100kb() {
     let result = tool.execute(json!({ "path": "too-large.txt" }));
 
     assert!(result.is_error);
-    assert_eq!(result.output, "file exceeds 100KB limit");
+    assert_eq!(result.text_output(), "file exceeds 100KB limit");
 }
 
 #[test]
@@ -71,7 +71,7 @@ fn write_file_creates_missing_parent_directories() {
     }));
 
     assert!(!result.is_error);
-    assert_eq!(result.output, "wrote 15 bytes to nested/output.txt");
+    assert_eq!(result.text_output(), "wrote 15 bytes to nested/output.txt");
     assert_eq!(
         fs::read_to_string(workspace.join("nested/output.txt")).unwrap(),
         "written by tool"
@@ -88,13 +88,14 @@ fn list_dir_stops_after_two_levels() {
 
     let tool = ListDirTool::new(workspace.clone());
     let result = tool.execute(json!({ "path": "." }));
+    let output = result.text_output();
 
     assert!(!result.is_error);
-    assert!(result.output.contains("a/"));
-    assert!(result.output.contains("a/b/"));
-    assert!(result.output.contains("a/b/inner.txt"));
-    assert!(result.output.contains("a/b/c/"));
-    assert!(!result.output.contains("a/b/c/deep.txt"));
+    assert!(output.contains("a/"));
+    assert!(output.contains("a/b/"));
+    assert!(output.contains("a/b/inner.txt"));
+    assert!(output.contains("a/b/c/"));
+    assert!(!output.contains("a/b/c/deep.txt"));
 }
 
 #[test]
@@ -106,12 +107,13 @@ fn list_dir_stops_after_two_hundred_entries() {
 
     let tool = ListDirTool::new(workspace.clone());
     let result = tool.execute(json!({ "path": "." }));
+    let output = result.text_output();
 
     assert!(!result.is_error);
-    assert!(result.output.ends_with("[list truncated]"));
+    assert!(output.ends_with("[list truncated]"));
     assert!(result.output_truncated);
-    assert_eq!(result.output.lines().count(), 201);
-    assert!(!result.output.contains("file-200.txt"));
+    assert_eq!(output.lines().count(), 201);
+    assert!(!output.contains("file-200.txt"));
 }
 
 #[test]
@@ -123,11 +125,12 @@ fn list_dir_does_not_truncate_exactly_two_hundred_entries() {
 
     let tool = ListDirTool::new(workspace.clone());
     let result = tool.execute(json!({ "path": "." }));
+    let output = result.text_output();
 
     assert!(!result.is_error);
-    assert!(!result.output.ends_with("[list truncated]"));
+    assert!(!output.ends_with("[list truncated]"));
     assert!(!result.output_truncated);
-    assert_eq!(result.output.lines().count(), 200);
+    assert_eq!(output.lines().count(), 200);
 }
 
 #[test]
