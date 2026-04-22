@@ -1,8 +1,15 @@
 pub mod echo;
-pub mod siliconflow;
+pub mod openai_compat;
 
 use crate::agent::tools::ToolSpec;
 use std::sync::mpsc::Sender;
+
+/// A model entry returned by a provider's model-listing API.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelInfo {
+    pub id: String,
+    pub description: String,
+}
 
 /// Conversation history replayed into a provider pass.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -46,17 +53,48 @@ pub enum ProviderEvent {
 
 /// Trait for LLM providers.
 ///
-/// A provider receives a user prompt and streams `ProviderEvent`s through
-/// the supplied channel.  Implementations run on a background thread so
-/// blocking I/O (HTTP, sleep) is acceptable.
+/// A provider represents a **connection** to an inference backend
+/// (API key + base URL).  The specific model is selected per-call
+/// via the `model` parameter on `stream_turn`, so a single provider
+/// instance can serve any model it supports.
 ///
 /// `Send + Sync` is required so the provider can be shared across the
 /// runtime thread and its scoped sub-threads.
 pub trait LlmProvider: Send + Sync + 'static {
+    /// Stream a single turn using the given `model`.
     fn stream_turn(
         &self,
+        model: &str,
         messages: &[ProviderMessage],
         tools: &[ToolSpec],
         tx: Sender<ProviderEvent>,
     );
+
+    /// List models available from this provider.
+    ///
+    /// Implementations should query the remote API.  Returns an empty vec
+    /// for providers that don't support model listing (e.g. `EchoProvider`).
+    fn list_models(&self) -> Result<Vec<ModelInfo>, String> {
+        Ok(Vec::new())
+    }
+}
+
+// ── Provider factory ────────────────────────────────────────────────
+
+/// Load the configured provider and default model from `config/provider.json`,
+/// falling back to `EchoProvider` when the config is missing or invalid.
+pub fn load_provider(repo_root: &str) -> (Box<dyn LlmProvider>, String) {
+    match openai_compat::OpenAiConfig::load(repo_root) {
+        Ok(cfg) => {
+            let name = cfg.model.clone();
+            (Box::new(openai_compat::OpenAiProvider::new(cfg)), name)
+        }
+        Err(_) => (Box::new(echo::EchoProvider::default()), "echo".to_owned()),
+    }
+}
+
+/// Return models available from the configured provider.
+pub fn available_models(repo_root: &str) -> Vec<ModelInfo> {
+    let (provider, _) = load_provider(repo_root);
+    provider.list_models().unwrap_or_default()
 }

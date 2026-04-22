@@ -2,6 +2,8 @@
 pub enum AgentCommand {
     /// Submit a new turn with the given user prompt.
     SubmitTurn { prompt: String },
+    /// Switch the active model without rebuilding the runtime.
+    SetModel { model: String },
     /// Cancel the current turn (future use).
     Cancel,
     /// Shut down the runtime thread.

@@ -6,3 +6,4 @@ src/graphify-out/
 .graphify_*
 config/provider.json
 logs/
+__pycache__/

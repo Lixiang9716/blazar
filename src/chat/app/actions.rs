@@ -55,19 +55,20 @@ impl ChatApp {
 
                         // /model selected — open model sub-picker
                         if cmd == "/model" {
-                            use crate::provider::siliconflow::POPULAR_MODELS;
                             let current = &self.model_name;
-                            let model_items: Vec<PickerItem> = POPULAR_MODELS
-                                .iter()
-                                .map(|(name, desc)| {
-                                    let label = if *name == current {
-                                        format!("{name} ✓")
-                                    } else {
-                                        name.to_string()
-                                    };
-                                    PickerItem::new(label, *desc)
-                                })
-                                .collect();
+                            let repo_str = self.workspace_root.to_string_lossy();
+                            let model_items: Vec<PickerItem> =
+                                crate::provider::available_models(&repo_str)
+                                    .into_iter()
+                                    .map(|m| {
+                                        let label = if m.id == *current {
+                                            format!("{} ✓", m.id)
+                                        } else {
+                                            m.id
+                                        };
+                                        PickerItem::new(label, m.description)
+                                    })
+                                    .collect();
                             self.picker = ModalPicker::with_context(
                                 "Select Model",
                                 model_items,

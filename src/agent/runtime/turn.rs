@@ -53,6 +53,7 @@ pub(crate) fn is_transient_error(err: &str) -> bool {
 pub(super) fn run_turn(
     messages: &mut Vec<ProviderMessage>,
     provider: &dyn LlmProvider,
+    model: &str,
     tools: &ToolRegistry,
     event_tx: &Sender<AgentEvent>,
     cancel_flag: &Arc<AtomicBool>,
@@ -72,7 +73,14 @@ pub(super) fn run_turn(
             return TurnOutcome::Cancelled;
         }
 
-        let pass = stream_provider_pass(provider, messages, &tool_specs, event_tx, cancel_flag);
+        let pass = stream_provider_pass(
+            provider,
+            model,
+            messages,
+            &tool_specs,
+            event_tx,
+            cancel_flag,
+        );
 
         match pass.outcome {
             TurnOutcome::Complete => {
@@ -246,6 +254,7 @@ fn is_timeout_output(output: &str) -> bool {
 
 pub(super) fn stream_provider_pass(
     provider: &dyn LlmProvider,
+    model: &str,
     messages: &[ProviderMessage],
     tool_specs: &[crate::agent::tools::ToolSpec],
     event_tx: &Sender<AgentEvent>,
@@ -259,7 +268,7 @@ pub(super) fn stream_provider_pass(
     };
 
     std::thread::scope(|scope| {
-        scope.spawn(|| provider.stream_turn(messages, tool_specs, chunk_tx));
+        scope.spawn(|| provider.stream_turn(model, messages, tool_specs, chunk_tx));
 
         for event in &chunk_rx {
             if cancel_flag.load(Ordering::SeqCst) {

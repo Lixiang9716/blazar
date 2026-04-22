@@ -6,9 +6,6 @@ use crate::chat::input::InputAction;
 use crate::chat::model::{Actor, Author, ChatMessage, EntryKind, TimelineEntry, ToolCallStatus};
 use crate::chat::picker::ModalPicker;
 use crate::chat::theme::ChatTheme;
-use crate::provider::LlmProvider;
-use crate::provider::echo::EchoProvider;
-use crate::provider::siliconflow::SiliconFlowConfig;
 use log::{debug, info, trace, warn};
 use ratatui_textarea::TextArea;
 use std::cell::Cell;
@@ -86,18 +83,7 @@ impl ChatApp {
 
         let theme = crate::chat::theme::build_theme();
 
-        // Try SiliconFlow provider; fall back to EchoProvider.
-        let (provider, model_name): (Box<dyn LlmProvider>, String) =
-            match SiliconFlowConfig::load(repo_path) {
-                Ok(cfg) => {
-                    let name = cfg.model.clone();
-                    (
-                        Box::new(crate::provider::siliconflow::SiliconFlowProvider::new(cfg)),
-                        name,
-                    )
-                }
-                Err(_) => (Box::new(EchoProvider::default()), "echo".to_owned()),
-            };
+        let (provider, model_name) = crate::provider::load_provider(repo_path);
 
         let workspace_root = PathBuf::from(repo_path);
 
@@ -125,7 +111,7 @@ impl ChatApp {
             timeline_visible_height: Cell::new(0),
             theme_name: crate::chat::theme::DEFAULT_THEME.to_owned(),
             theme,
-            agent_runtime: AgentRuntime::new(provider, workspace_root.clone())?,
+            agent_runtime: AgentRuntime::new(provider, workspace_root.clone(), model_name.clone())?,
             agent_state: AgentRuntimeState::default(),
             pending_messages: VecDeque::new(),
             workspace_root,
@@ -146,8 +132,9 @@ impl ChatApp {
         app.model_name = "echo".to_owned();
         // Always use EchoProvider in tests — no network calls.
         app.agent_runtime = AgentRuntime::new(
-            Box::new(EchoProvider::new(0)),
+            Box::new(crate::provider::echo::EchoProvider::new(0)),
             std::path::PathBuf::from(_repo_path),
+            "echo".to_owned(),
         )?;
         Ok(app)
     }
@@ -251,29 +238,13 @@ impl ChatApp {
             self.agent_runtime.cancel();
         }
 
-        let repo_str = self.workspace_root.to_string_lossy();
-        match SiliconFlowConfig::load(&repo_str) {
-            Ok(mut cfg) => {
-                cfg.model = model.to_owned();
-                let provider: Box<dyn LlmProvider> =
-                    Box::new(crate::provider::siliconflow::SiliconFlowProvider::new(cfg));
-                match AgentRuntime::new(provider, self.workspace_root.clone()) {
-                    Ok(runtime) => {
-                        self.agent_runtime = runtime;
-                        self.agent_state = AgentRuntimeState::default();
-                        self.model_name = model.to_owned();
-                        self.timeline.push(TimelineEntry::hint(format!(
-                            "Model switched to **{model}**"
-                        )));
-                        self.scroll_offset = u16::MAX;
-                    }
-                    Err(e) => {
-                        self.timeline.push(TimelineEntry::warning(format!(
-                            "Failed to switch model: {e}"
-                        )));
-                        self.scroll_offset = u16::MAX;
-                    }
-                }
+        match self.agent_runtime.set_model(model) {
+            Ok(()) => {
+                self.model_name = model.to_owned();
+                self.timeline.push(TimelineEntry::hint(format!(
+                    "Model switched to **{model}**"
+                )));
+                self.scroll_offset = u16::MAX;
             }
             Err(e) => {
                 self.timeline.push(TimelineEntry::warning(format!(

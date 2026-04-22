@@ -1,6 +1,6 @@
 use super::*;
 use crate::chat::view::render_to_lines_for_test;
-use crate::provider::{ProviderEvent, ProviderMessage};
+use crate::provider::{LlmProvider, ProviderEvent, ProviderMessage};
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
@@ -11,6 +11,7 @@ struct UnicodeArgumentProvider;
 impl LlmProvider for UnicodeArgumentProvider {
     fn stream_turn(
         &self,
+        _model: &str,
         messages: &[ProviderMessage],
         _tools: &[crate::agent::tools::ToolSpec],
         tx: Sender<ProviderEvent>,
@@ -41,6 +42,7 @@ struct UnicodeOutputProvider;
 impl LlmProvider for UnicodeOutputProvider {
     fn stream_turn(
         &self,
+        _model: &str,
         messages: &[ProviderMessage],
         _tools: &[crate::agent::tools::ToolSpec],
         tx: Sender<ProviderEvent>,
@@ -73,6 +75,7 @@ struct CapturePromptProvider {
 impl LlmProvider for CapturePromptProvider {
     fn stream_turn(
         &self,
+        _model: &str,
         messages: &[ProviderMessage],
         _tools: &[crate::agent::tools::ToolSpec],
         tx: Sender<ProviderEvent>,
@@ -112,9 +115,12 @@ fn wait_until(timeout: Duration, mut condition: impl FnMut() -> bool) -> bool {
 fn tick_handles_multibyte_tool_arguments_without_panicking() {
     let repo_path = env!("CARGO_MANIFEST_DIR");
     let mut app = new_test_app();
-    app.agent_runtime =
-        AgentRuntime::new(Box::new(UnicodeArgumentProvider), PathBuf::from(repo_path))
-            .expect("runtime should initialize");
+    app.agent_runtime = AgentRuntime::new(
+        Box::new(UnicodeArgumentProvider),
+        PathBuf::from(repo_path),
+        "echo".to_owned(),
+    )
+    .expect("runtime should initialize");
 
     app.agent_runtime
         .submit_turn("read unicode path")
@@ -143,9 +149,12 @@ fn tick_handles_multibyte_tool_arguments_without_panicking() {
 fn tick_handles_multibyte_tool_output_without_panicking() {
     let repo_path = env!("CARGO_MANIFEST_DIR");
     let mut app = new_test_app();
-    app.agent_runtime =
-        AgentRuntime::new(Box::new(UnicodeOutputProvider), PathBuf::from(repo_path))
-            .expect("runtime should initialize");
+    app.agent_runtime = AgentRuntime::new(
+        Box::new(UnicodeOutputProvider),
+        PathBuf::from(repo_path),
+        "echo".to_owned(),
+    )
+    .expect("runtime should initialize");
 
     app.agent_runtime
         .submit_turn("render unicode output")
@@ -272,6 +281,7 @@ fn plan_command_rewrites_prompt_for_planning_mode() {
             prompt: captured_prompt.clone(),
         }),
         PathBuf::from(repo_path),
+        "echo".to_owned(),
     )
     .expect("runtime should initialize");
 
@@ -486,29 +496,14 @@ fn quit_and_scroll_actions_follow_runtime_state_rules() {
 }
 
 #[test]
-fn set_model_without_provider_config_reports_warning() {
-    let base = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target");
-    std::fs::create_dir_all(&base).expect("target dir should exist");
-    let unique = format!(
-        "chat-app-model-switch-{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("clock should be monotonic")
-            .as_nanos()
-    );
-    let repo_path = base.join(unique);
-    std::fs::create_dir_all(&repo_path).expect("scratch repo path should exist");
-
-    let repo_str = repo_path.to_string_lossy().to_string();
-    let mut app = ChatApp::new_for_test(&repo_str).expect("test app should initialize");
+fn set_model_sends_command_and_updates_timeline() {
+    let mut app = new_test_app();
     app.set_model("Qwen/Qwen3-8B");
 
-    let warning = app.timeline.last().expect("warning entry should exist");
-    assert!(matches!(warning.kind, EntryKind::Warning));
-    assert!(warning.body.contains("Failed to switch model"));
-    assert_eq!(app.model_name(), "echo");
-
-    std::fs::remove_dir_all(&repo_path).expect("cleanup scratch repo");
+    let hint = app.timeline.last().expect("hint entry should exist");
+    assert!(matches!(hint.kind, EntryKind::Hint));
+    assert!(hint.body.contains("Model switched to"));
+    assert_eq!(app.model_name(), "Qwen/Qwen3-8B");
 }
 
 #[test]

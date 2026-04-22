@@ -8,7 +8,7 @@ yanked = "warn"
 ignore = []
 
 [licenses]
-allow = ["MIT", "Apache-2.0", "Apache-2.0 WITH LLVM-exception", "BSD-2-Clause", "BSD-3-Clause", "Zlib", "NCSA", "Unicode-3.0", "ISC", "CDLA-Permissive-2.0"]
+allow = ["MIT", "Apache-2.0", "Apache-2.0 WITH LLVM-exception", "BSD-2-Clause", "BSD-3-Clause", "Zlib", "NCSA", "Unicode-3.0"]
 
 [bans]
 multiple-versions = "warn"
@@ -18,7 +18,7 @@ skip = [
     { crate = "hashbrown@0.14.5", reason = "rusqlite -> hashlink currently pins hashbrown 0.14.x" },
     { crate = "getrandom@0.2.17", reason = "ring/rustls stack still requires getrandom 0.2.x while other deps use 0.3.x" },
     { crate = "unicode-width@0.1.14", reason = "termimad/ratskin currently depend on unicode-width 0.1.x" },
-    { crate = "windows-sys@0.52.0", reason = "ring transitively pins windows-sys 0.52.x while newer crates require 0.61.x" },
+    { crate = "thiserror@1.0.69", reason = "reqwest-eventsource (async-openai dep) still uses thiserror 1.x" },
 ]
 
 [sources]

@@ -14,6 +14,7 @@ fn new_with_spawner_surfaces_thread_spawn_errors() {
     let result = AgentRuntime::new_with_spawner(
         Box::new(crate::provider::echo::EchoProvider::new(0)),
         PathBuf::from(env!("CARGO_MANIFEST_DIR")),
+        "echo".to_owned(),
         |_| Err(std::io::Error::other("spawn failed")),
     );
     let error = match result {
@@ -49,6 +50,7 @@ fn runtime_loop_handles_cancel_and_shutdown_commands() {
             cmd_rx,
             event_tx,
             Box::new(crate::provider::echo::EchoProvider::new(0)),
+            "echo".to_owned(),
             tools,
             cancel_for_thread,
         );
@@ -126,6 +128,7 @@ fn run_turn_completes_with_echo_provider() {
     let outcome = run_turn(
         &mut messages,
         &provider,
+        "echo",
         &empty_registry(),
         &event_tx,
         &cancel,
@@ -157,6 +160,7 @@ fn run_turn_stops_on_cancel_flag() {
     impl LlmProvider for SlowProvider {
         fn stream_turn(
             &self,
+            _model: &str,
             _messages: &[ProviderMessage],
             _tools: &[ToolSpec],
             tx: Sender<ProviderEvent>,
@@ -187,6 +191,7 @@ fn run_turn_stops_on_cancel_flag() {
             run_turn(
                 &mut messages,
                 &provider,
+                "echo",
                 &empty_registry(),
                 &event_tx,
                 &cancel2,
@@ -211,6 +216,7 @@ fn run_turn_returns_transient_on_timeout_error() {
     impl LlmProvider for TimeoutProvider {
         fn stream_turn(
             &self,
+            _model: &str,
             _messages: &[ProviderMessage],
             _tools: &[ToolSpec],
             tx: Sender<ProviderEvent>,
@@ -225,6 +231,7 @@ fn run_turn_returns_transient_on_timeout_error() {
     let outcome = run_turn(
         &mut messages,
         &TimeoutProvider,
+        "echo",
         &empty_registry(),
         &event_tx,
         &cancel,
@@ -239,6 +246,7 @@ fn run_turn_returns_fatal_on_auth_error() {
     impl LlmProvider for AuthErrorProvider {
         fn stream_turn(
             &self,
+            _model: &str,
             _messages: &[ProviderMessage],
             _tools: &[ToolSpec],
             tx: Sender<ProviderEvent>,
@@ -253,6 +261,7 @@ fn run_turn_returns_fatal_on_auth_error() {
     let outcome = run_turn(
         &mut messages,
         &AuthErrorProvider,
+        "echo",
         &empty_registry(),
         &event_tx,
         &cancel,
@@ -271,6 +280,7 @@ fn retry_recovers_from_transient_error() {
     impl LlmProvider for FailOnceProvider {
         fn stream_turn(
             &self,
+            _model: &str,
             _messages: &[ProviderMessage],
             _tools: &[ToolSpec],
             tx: Sender<ProviderEvent>,
@@ -296,6 +306,7 @@ fn retry_recovers_from_transient_error() {
         "hi",
         &[],
         &provider,
+        "echo",
         &empty_registry(),
         &event_tx,
         &cancel,
@@ -316,6 +327,7 @@ fn retry_gives_up_after_max_attempts() {
     impl LlmProvider for AlwaysTimeoutProvider {
         fn stream_turn(
             &self,
+            _model: &str,
             _messages: &[ProviderMessage],
             _tools: &[ToolSpec],
             tx: Sender<ProviderEvent>,
@@ -332,6 +344,7 @@ fn retry_gives_up_after_max_attempts() {
         "hi",
         &[],
         &AlwaysTimeoutProvider,
+        "echo",
         &empty_registry(),
         &event_tx,
         &cancel,
@@ -358,6 +371,7 @@ fn fatal_error_skips_retry() {
     impl LlmProvider for FatalProvider {
         fn stream_turn(
             &self,
+            _model: &str,
             _messages: &[ProviderMessage],
             _tools: &[ToolSpec],
             tx: Sender<ProviderEvent>,
@@ -378,6 +392,7 @@ fn fatal_error_skips_retry() {
         "hi",
         &[],
         &provider,
+        "echo",
         &empty_registry(),
         &event_tx,
         &cancel,
@@ -403,6 +418,7 @@ fn cancel_before_retry_attempt_stops_immediately() {
     impl LlmProvider for TimeoutProvider {
         fn stream_turn(
             &self,
+            _model: &str,
             _messages: &[ProviderMessage],
             _tools: &[ToolSpec],
             tx: Sender<ProviderEvent>,
@@ -419,6 +435,7 @@ fn cancel_before_retry_attempt_stops_immediately() {
         "hi",
         &[],
         &TimeoutProvider,
+        "echo",
         &empty_registry(),
         &event_tx,
         &cancel,
@@ -443,6 +460,7 @@ fn retry_does_not_rerun_tools_after_transient_error() {
     impl LlmProvider for ToolThenTransientProvider {
         fn stream_turn(
             &self,
+            _model: &str,
             messages: &[ProviderMessage],
             _tools: &[ToolSpec],
             tx: Sender<ProviderEvent>,
@@ -491,6 +509,7 @@ fn retry_does_not_rerun_tools_after_transient_error() {
         "count once",
         &[],
         &provider,
+        "echo",
         &registry,
         &event_tx,
         &cancel,
@@ -517,6 +536,7 @@ fn run_turn_enforces_tool_iteration_limit() {
     impl LlmProvider for InfiniteToolProvider {
         fn stream_turn(
             &self,
+            _model: &str,
             _messages: &[ProviderMessage],
             _tools: &[ToolSpec],
             tx: Sender<ProviderEvent>,
@@ -543,6 +563,7 @@ fn run_turn_enforces_tool_iteration_limit() {
     let outcome = run_turn(
         &mut messages,
         &InfiniteToolProvider,
+        "echo",
         &registry,
         &event_tx,
         &cancel,
@@ -566,6 +587,7 @@ fn run_turn_blocks_repeated_identical_successful_tool_calls() {
     impl LlmProvider for DuplicateSuccessProvider {
         fn stream_turn(
             &self,
+            _model: &str,
             messages: &[ProviderMessage],
             _tools: &[ToolSpec],
             tx: Sender<ProviderEvent>,
@@ -615,6 +637,7 @@ fn run_turn_blocks_repeated_identical_successful_tool_calls() {
     let outcome = run_turn(
         &mut messages,
         &DuplicateSuccessProvider,
+        "echo",
         &registry,
         &event_tx,
         &cancel,
@@ -635,6 +658,7 @@ fn run_turn_sends_parse_error_to_model_for_malformed_json() {
     impl LlmProvider for MalformedArgsProvider {
         fn stream_turn(
             &self,
+            _model: &str,
             messages: &[ProviderMessage],
             _tools: &[ToolSpec],
             tx: Sender<ProviderEvent>,
@@ -670,6 +694,7 @@ fn run_turn_sends_parse_error_to_model_for_malformed_json() {
     let outcome = run_turn(
         &mut messages,
         &MalformedArgsProvider,
+        "echo",
         &registry,
         &event_tx,
         &cancel,
@@ -691,6 +716,7 @@ fn run_turn_repairs_control_chars_and_executes_tool() {
     impl LlmProvider for ControlCharArgsProvider {
         fn stream_turn(
             &self,
+            _model: &str,
             messages: &[ProviderMessage],
             _tools: &[ToolSpec],
             tx: Sender<ProviderEvent>,
@@ -727,6 +753,7 @@ fn run_turn_repairs_control_chars_and_executes_tool() {
     let outcome = run_turn(
         &mut messages,
         &ControlCharArgsProvider,
+        "echo",
         &registry,
         &event_tx,
         &cancel,
@@ -776,6 +803,7 @@ fn run_turn_adds_timeout_guidance_on_first_timeout_error() {
     impl LlmProvider for SingleTimeoutProvider {
         fn stream_turn(
             &self,
+            _model: &str,
             messages: &[ProviderMessage],
             _tools: &[ToolSpec],
             tx: Sender<ProviderEvent>,
@@ -811,6 +839,7 @@ fn run_turn_adds_timeout_guidance_on_first_timeout_error() {
     let outcome = run_turn(
         &mut messages,
         &SingleTimeoutProvider,
+        "echo",
         &registry,
         &event_tx,
         &cancel,
@@ -831,6 +860,7 @@ fn run_turn_escalates_guidance_after_repeated_timeout_errors() {
     impl LlmProvider for RepeatedTimeoutProvider {
         fn stream_turn(
             &self,
+            _model: &str,
             messages: &[ProviderMessage],
             _tools: &[ToolSpec],
             tx: Sender<ProviderEvent>,
@@ -872,6 +902,7 @@ fn run_turn_escalates_guidance_after_repeated_timeout_errors() {
     let outcome = run_turn(
         &mut messages,
         &RepeatedTimeoutProvider,
+        "echo",
         &registry,
         &event_tx,
         &cancel,
@@ -916,6 +947,7 @@ fn run_turn_blocks_repeated_success_for_batched_tool_calls() {
     impl LlmProvider for BatchedDuplicateProvider {
         fn stream_turn(
             &self,
+            _model: &str,
             messages: &[ProviderMessage],
             _tools: &[ToolSpec],
             tx: Sender<ProviderEvent>,
@@ -964,6 +996,7 @@ fn run_turn_blocks_repeated_success_for_batched_tool_calls() {
     let outcome = run_turn(
         &mut messages,
         &BatchedDuplicateProvider,
+        "echo",
         &registry,
         &event_tx,
         &cancel,
@@ -985,6 +1018,7 @@ fn provider_that_sends_no_terminal_event_gets_auto_complete() {
     impl LlmProvider for NoTerminalProvider {
         fn stream_turn(
             &self,
+            _model: &str,
             _messages: &[ProviderMessage],
             _tools: &[ToolSpec],
             tx: Sender<ProviderEvent>,
@@ -998,6 +1032,7 @@ fn provider_that_sends_no_terminal_event_gets_auto_complete() {
 
     let pass = stream_provider_pass(
         &NoTerminalProvider,
+        "echo",
         &user_messages("hi"),
         &[],
         &event_tx,
@@ -1156,6 +1191,7 @@ fn new_surfaces_spawn_errors_instead_of_panicking() {
     let runtime = AgentRuntime::new_with_spawner(
         Box::new(provider),
         PathBuf::from(env!("CARGO_MANIFEST_DIR")),
+        "echo".to_owned(),
         |_worker| Err(std::io::Error::other("spawn failed")),
     );
 

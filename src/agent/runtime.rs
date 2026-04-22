@@ -91,17 +91,19 @@ impl std::error::Error for AgentRuntimeError {
 }
 
 impl AgentRuntime {
-    /// Create a new runtime with the given provider.
+    /// Create a new runtime with the given provider and default model.
     pub fn new(
         provider: Box<dyn LlmProvider>,
         workspace_root: PathBuf,
+        model: String,
     ) -> Result<Self, AgentRuntimeError> {
-        Self::new_with_spawner(provider, workspace_root, spawn_worker_thread)
+        Self::new_with_spawner(provider, workspace_root, model, spawn_worker_thread)
     }
 
     fn new_with_spawner<F>(
         provider: Box<dyn LlmProvider>,
         workspace_root: PathBuf,
+        model: String,
         spawn_thread: F,
     ) -> Result<Self, AgentRuntimeError>
     where
@@ -117,7 +119,7 @@ impl AgentRuntime {
             tools.register(Box::new(WriteFileTool::new(workspace_root.clone())));
             tools.register(Box::new(ListDirTool::new(workspace_root.clone())));
             tools.register(Box::new(BashTool::new(workspace_root)));
-            runtime_loop(cmd_rx, event_tx, provider, tools, flag_clone)
+            runtime_loop(cmd_rx, event_tx, provider, model, tools, flag_clone)
         });
 
         let handle = spawn_thread(worker).map_err(AgentRuntimeError::ThreadSpawn)?;
@@ -138,6 +140,16 @@ impl AgentRuntime {
         self.cmd_tx
             .send(AgentCommand::SubmitTurn {
                 prompt: prompt.to_string(),
+            })
+            .map_err(|_| "agent runtime channel closed".to_string())
+    }
+
+    /// Switch the active model without rebuilding the runtime.
+    /// Conversation history is preserved.
+    pub fn set_model(&self, model: &str) -> Result<(), String> {
+        self.cmd_tx
+            .send(AgentCommand::SetModel {
+                model: model.to_string(),
             })
             .map_err(|_| "agent runtime channel closed".to_string())
     }
@@ -176,6 +188,7 @@ fn runtime_loop(
     cmd_rx: Receiver<AgentCommand>,
     event_tx: Sender<AgentEvent>,
     provider: Box<dyn LlmProvider>,
+    mut model: String,
     tools: ToolRegistry,
     cancel_flag: Arc<AtomicBool>,
 ) {
@@ -188,7 +201,7 @@ fn runtime_loop(
                 turn_counter += 1;
                 let turn_id = format!("turn-{turn_counter}");
                 info!(
-                    "runtime: SubmitTurn id={turn_id} prompt_len={}",
+                    "runtime: SubmitTurn id={turn_id} model={model} prompt_len={}",
                     prompt.len()
                 );
 
@@ -208,12 +221,17 @@ fn runtime_loop(
                     &prompt,
                     &conversation_history,
                     &*provider,
+                    &model,
                     &tools,
                     &event_tx,
                     &cancel_flag,
                 ) {
                     conversation_history = updated_history;
                 }
+            }
+            AgentCommand::SetModel { model: new_model } => {
+                info!("runtime: SetModel old={model} new={new_model}");
+                model = new_model;
             }
             AgentCommand::Cancel => {
                 debug!("runtime: Cancel received");
@@ -228,11 +246,13 @@ fn runtime_loop(
 }
 
 /// Execute a turn with up to `MAX_TRANSIENT_RETRIES` retries on transient errors.
+#[allow(clippy::too_many_arguments)]
 fn run_turn_with_retry(
     turn_id: &str,
     prompt: &str,
     history: &[ProviderMessage],
     provider: &dyn LlmProvider,
+    model: &str,
     tools: &ToolRegistry,
     event_tx: &Sender<AgentEvent>,
     cancel_flag: &Arc<AtomicBool>,
@@ -250,7 +270,7 @@ fn run_turn_with_retry(
         messages.push(ProviderMessage::User {
             content: prompt.to_string(),
         });
-        let result = run_turn(&mut messages, provider, tools, event_tx, cancel_flag);
+        let result = run_turn(&mut messages, provider, model, tools, event_tx, cancel_flag);
 
         match result {
             TurnOutcome::Complete => {

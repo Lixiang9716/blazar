@@ -49,6 +49,7 @@ struct ToolLoopProvider {
 impl LlmProvider for ToolLoopProvider {
     fn stream_turn(
         &self,
+        _model: &str,
         messages: &[ProviderMessage],
         _tools: &[ToolSpec],
         tx: Sender<ProviderEvent>,
@@ -87,6 +88,7 @@ fn runtime_executes_tool_call_and_resumes_generation() {
             calls: Arc::new(AtomicU32::new(0)),
         }),
         workspace,
+        "echo".to_owned(),
     )
     .expect("runtime should initialize");
 
@@ -117,6 +119,7 @@ struct BatchedToolLoopProvider {
 impl LlmProvider for BatchedToolLoopProvider {
     fn stream_turn(
         &self,
+        _model: &str,
         messages: &[ProviderMessage],
         _tools: &[ToolSpec],
         tx: Sender<ProviderEvent>,
@@ -179,6 +182,7 @@ fn runtime_batches_tool_calls_before_replaying_tool_results() {
             calls: Arc::new(AtomicU32::new(0)),
         }),
         workspace,
+        "echo".to_owned(),
     )
     .expect("runtime should initialize");
 

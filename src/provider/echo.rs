@@ -26,6 +26,7 @@ impl Default for EchoProvider {
 impl LlmProvider for EchoProvider {
     fn stream_turn(
         &self,
+        _model: &str,
         messages: &[ProviderMessage],
         _tools: &[ToolSpec],
         tx: Sender<ProviderEvent>,
