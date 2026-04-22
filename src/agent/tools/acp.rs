@@ -2,7 +2,7 @@ use serde_json::Value;
 
 use super::{Tool, ToolKind, ToolResult, ToolSpec};
 use crate::agent::acp_discovery::{
-    AcpAgentMetadata, AcpTransport, ReqwestAcpTransport, poll_run_to_completion,
+    AcpAgentMetadata, AcpClientError, AcpTransport, ReqwestAcpTransport, poll_run_to_completion,
 };
 
 const MAX_RUN_POLLS: usize = 40;
@@ -23,13 +23,13 @@ impl AcpAgentTool<ReqwestAcpTransport> {
         tool_name: impl Into<String>,
         endpoint: impl Into<String>,
         metadata: AcpAgentMetadata,
-    ) -> Self {
-        Self::with_transport(
+    ) -> Result<Self, AcpClientError> {
+        Ok(Self::with_transport(
             tool_name,
             endpoint,
             metadata,
-            ReqwestAcpTransport::default(),
-        )
+            ReqwestAcpTransport::new()?,
+        ))
     }
 }
 

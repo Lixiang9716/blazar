@@ -49,7 +49,8 @@ fn acp_tool_executes_run_to_completion() {
         }));
     });
 
-    let tool = AcpAgentTool::new("configured_reviewer", server.base_url(), sample_metadata());
+    let tool = AcpAgentTool::new("configured_reviewer", server.base_url(), sample_metadata())
+        .expect("tool transport should initialize");
     let result = tool.execute(json!({
         "prompt": "review the patch"
     }));
@@ -84,7 +85,8 @@ fn acp_tool_surfaces_failed_run_output() {
         }));
     });
 
-    let tool = AcpAgentTool::new("configured_reviewer", server.base_url(), sample_metadata());
+    let tool = AcpAgentTool::new("configured_reviewer", server.base_url(), sample_metadata())
+        .expect("tool transport should initialize");
     let result = tool.execute(json!({
         "prompt": "review the patch"
     }));

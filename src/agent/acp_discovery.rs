@@ -61,12 +61,6 @@ impl ReqwestAcpTransport {
     }
 }
 
-impl Default for ReqwestAcpTransport {
-    fn default() -> Self {
-        Self::new().expect("default ACP transport should build")
-    }
-}
-
 impl AcpTransport for ReqwestAcpTransport {
     fn get_agent(
         &self,
