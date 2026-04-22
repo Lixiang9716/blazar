@@ -1,12 +1,13 @@
 use blazar::agent::protocol::AgentEvent;
-use blazar::agent::state::{AgentRuntimeState, TurnState};
+use blazar::agent::state::{ActiveToolStatus, AgentRuntimeState, TurnState};
+use blazar::agent::tools::ToolKind;
 
 #[test]
 fn idle_by_default() {
     let state = AgentRuntimeState::default();
     assert_eq!(state.turn_state, TurnState::Idle);
     assert_eq!(state.turn_count, 0);
-    assert_eq!(state.active_tool_name, None);
+    assert!(state.active_tools.is_empty());
     assert_eq!(state.tool_call_count, 0);
     assert!(!state.is_busy());
 }
@@ -113,7 +114,7 @@ fn thinking_delta_does_not_change_state() {
 }
 
 #[test]
-fn tool_call_events_track_active_tool_name() {
+fn tool_call_events_track_multiple_active_tools_by_call_id() {
     let mut state = AgentRuntimeState::default();
     state.apply_event(&AgentEvent::TurnStarted {
         turn_id: "turn-1".into(),
@@ -122,11 +123,28 @@ fn tool_call_events_track_active_tool_name() {
     let changed = state.apply_event(&AgentEvent::ToolCallStarted {
         call_id: "call-1".into(),
         tool_name: "read_file".into(),
+        kind: ToolKind::Local,
         arguments: "{\"path\":\"Cargo.toml\"}".into(),
     });
     assert!(!changed, "ToolCallStarted should not change turn_state");
-    assert_eq!(state.active_tool_name.as_deref(), Some("read_file"));
-    assert_eq!(state.tool_call_count, 1);
+
+    state.apply_event(&AgentEvent::ToolCallStarted {
+        call_id: "call-2".into(),
+        tool_name: "delegate".into(),
+        kind: ToolKind::Agent,
+        arguments: "{\"prompt\":\"review\"}".into(),
+    });
+
+    assert_eq!(state.tool_call_count, 2);
+    assert_eq!(state.active_tools.len(), 2);
+    assert_eq!(state.active_tools[0].call_id, "call-1");
+    assert_eq!(state.active_tools[0].tool_name, "read_file");
+    assert_eq!(state.active_tools[0].kind, ToolKind::Local);
+    assert_eq!(state.active_tools[0].status, ActiveToolStatus::Running);
+    assert_eq!(state.active_tools[1].call_id, "call-2");
+    assert_eq!(state.active_tools[1].tool_name, "delegate");
+    assert_eq!(state.active_tools[1].kind, ToolKind::Agent);
+    assert_eq!(state.active_tools[1].status, ActiveToolStatus::Running);
 
     let changed = state.apply_event(&AgentEvent::ToolCallCompleted {
         call_id: "call-1".into(),
@@ -134,7 +152,11 @@ fn tool_call_events_track_active_tool_name() {
         is_error: false,
     });
     assert!(!changed, "ToolCallCompleted should not change turn_state");
-    assert_eq!(state.active_tool_name, None);
+    assert_eq!(state.active_tools.len(), 2);
+    assert_eq!(state.active_tools[0].call_id, "call-1");
+    assert_eq!(state.active_tools[0].status, ActiveToolStatus::Success);
+    assert_eq!(state.active_tools[1].call_id, "call-2");
+    assert_eq!(state.active_tools[1].status, ActiveToolStatus::Running);
     assert!(state.is_busy());
 }
 

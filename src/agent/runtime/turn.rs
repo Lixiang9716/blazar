@@ -8,7 +8,7 @@ use serde_json::Value;
 
 use crate::agent::protocol::AgentEvent;
 use crate::agent::tools::scheduler::{ScheduledCall, schedule_batches};
-use crate::agent::tools::{ContentPart, ToolRegistry, ToolResult};
+use crate::agent::tools::{ContentPart, ToolKind, ToolRegistry, ToolResult};
 use crate::provider::{LlmProvider, ProviderEvent, ProviderMessage};
 
 use super::json_repair::{
@@ -32,7 +32,7 @@ use super::{
 pub(crate) trait TurnObserver {
     fn on_text_delta(&self, text: &str);
     fn on_thinking_delta(&self, text: &str);
-    fn on_tool_call_started(&self, call_id: &str, tool_name: &str, arguments: &str);
+    fn on_tool_call_started(&self, call_id: &str, tool_name: &str, kind: ToolKind, arguments: &str);
     fn on_tool_call_completed(&self, call_id: &str, output: &str, is_error: bool);
     fn on_turn_failed(&self, error: &str);
 }
@@ -53,10 +53,17 @@ impl TurnObserver for ChannelObserver<'_> {
             text: text.to_owned(),
         });
     }
-    fn on_tool_call_started(&self, call_id: &str, tool_name: &str, arguments: &str) {
+    fn on_tool_call_started(
+        &self,
+        call_id: &str,
+        tool_name: &str,
+        kind: ToolKind,
+        arguments: &str,
+    ) {
         let _ = self.tx.send(AgentEvent::ToolCallStarted {
             call_id: call_id.to_owned(),
             tool_name: tool_name.to_owned(),
+            kind,
             arguments: arguments.to_owned(),
         });
     }
@@ -82,7 +89,14 @@ pub(crate) struct SilentObserver;
 impl TurnObserver for SilentObserver {
     fn on_text_delta(&self, _text: &str) {}
     fn on_thinking_delta(&self, _text: &str) {}
-    fn on_tool_call_started(&self, _call_id: &str, _tool_name: &str, _arguments: &str) {}
+    fn on_tool_call_started(
+        &self,
+        _call_id: &str,
+        _tool_name: &str,
+        _kind: ToolKind,
+        _arguments: &str,
+    ) {
+    }
     fn on_tool_call_completed(&self, _call_id: &str, _output: &str, _is_error: bool) {}
     fn on_turn_failed(&self, _error: &str) {}
 }
@@ -397,6 +411,7 @@ fn execute_batch(
             observer.on_tool_call_started(
                 &scheduled.item.pending.call_id,
                 &scheduled.item.pending.name,
+                tool_kind_for_name(tools, &scheduled.item.pending.name),
                 &scheduled.item.pending.arguments,
             );
 
@@ -455,6 +470,16 @@ fn execute_batch(
     BatchExecution {
         executed_calls,
         cancelled_before_launch_completed: spawned_count < batch_len,
+    }
+}
+
+fn tool_kind_for_name(tools: &ToolRegistry, tool_name: &str) -> ToolKind {
+    match tools.get(tool_name) {
+        Some(tool) => tool.kind(),
+        None => {
+            warn!("runtime: missing tool metadata for {tool_name}; defaulting ToolKind::Local");
+            ToolKind::Local
+        }
     }
 }
 

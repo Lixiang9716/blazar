@@ -1,3 +1,5 @@
+use crate::agent::tools::ToolKind;
+
 /// Commands sent from the UI thread to the agent runtime.
 pub enum AgentCommand {
     /// Submit a new turn with the given user prompt.
@@ -23,6 +25,7 @@ pub enum AgentEvent {
     ToolCallStarted {
         call_id: String,
         tool_name: String,
+        kind: ToolKind,
         arguments: String,
     },
     /// A tool call finished executing.

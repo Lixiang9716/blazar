@@ -1,5 +1,5 @@
 use super::*;
-use crate::agent::tools::{ResourceAccess, ResourceClaim, Tool, ToolSpec};
+use crate::agent::tools::{ResourceAccess, ResourceClaim, Tool, ToolKind, ToolSpec};
 use serde_json::json;
 use std::error::Error;
 use std::sync::Arc;
@@ -92,6 +92,94 @@ impl Tool for CountingTool {
         self.calls.fetch_add(1, Ordering::SeqCst);
         crate::agent::tools::ToolResult::success("counted")
     }
+}
+
+#[test]
+fn tool_call_started_event_includes_registry_tool_kind() {
+    struct ToolKindProvider;
+
+    impl LlmProvider for ToolKindProvider {
+        fn stream_turn(
+            &self,
+            _model: &str,
+            messages: &[ProviderMessage],
+            _tools: &[ToolSpec],
+            tx: Sender<ProviderEvent>,
+        ) {
+            let saw_tool_result = messages
+                .iter()
+                .any(|message| matches!(message, ProviderMessage::ToolResult { .. }));
+            if saw_tool_result {
+                let _ = tx.send(ProviderEvent::TurnComplete);
+                return;
+            }
+
+            let _ = tx.send(ProviderEvent::ToolCall {
+                call_id: "call-agent".into(),
+                name: "delegate".into(),
+                arguments: "{}".into(),
+            });
+            let _ = tx.send(ProviderEvent::TurnComplete);
+        }
+    }
+
+    struct AgentKindTool;
+
+    impl Tool for AgentKindTool {
+        fn spec(&self) -> ToolSpec {
+            ToolSpec {
+                name: "delegate".into(),
+                description: "delegate to an agent".into(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": false
+                }),
+            }
+        }
+
+        fn kind(&self) -> ToolKind {
+            ToolKind::Agent
+        }
+
+        fn execute(&self, _args: serde_json::Value) -> crate::agent::tools::ToolResult {
+            crate::agent::tools::ToolResult::success("delegated")
+        }
+    }
+
+    let mut registry = empty_registry();
+    registry.register(Box::new(AgentKindTool));
+
+    let (event_tx, event_rx) = mpsc::channel();
+    let cancel = Arc::new(AtomicBool::new(false));
+    let mut messages = user_messages("delegate work");
+
+    let outcome = execute_turn(
+        &mut messages,
+        &ToolKindProvider,
+        "echo",
+        &registry,
+        &ChannelObserver { tx: &event_tx },
+        &cancel,
+    );
+
+    assert!(matches!(outcome, TurnOutcome::Complete));
+
+    let started_event = event_rx
+        .try_iter()
+        .find_map(|event| match event {
+            AgentEvent::ToolCallStarted {
+                call_id,
+                tool_name,
+                kind,
+                ..
+            } => Some((call_id, tool_name, kind)),
+            _ => None,
+        })
+        .expect("tool start event should be emitted");
+    assert_eq!(started_event.0, "call-agent");
+    assert_eq!(started_event.1, "delegate");
+    assert_eq!(started_event.2, ToolKind::Agent);
 }
 
 #[test]
@@ -1247,7 +1335,13 @@ impl crate::agent::runtime::turn::TurnObserver for CancellingObserver {
 
     fn on_thinking_delta(&self, _text: &str) {}
 
-    fn on_tool_call_started(&self, call_id: &str, _tool_name: &str, _arguments: &str) {
+    fn on_tool_call_started(
+        &self,
+        call_id: &str,
+        _tool_name: &str,
+        _kind: ToolKind,
+        _arguments: &str,
+    ) {
         let mut started = self.started.lock().expect("started lock");
         started.push(call_id.to_string());
         if started.len() == 1 {

@@ -1,4 +1,5 @@
 use blazar::agent::protocol::AgentEvent;
+use blazar::agent::tools::ToolKind;
 use blazar::chat::app::ChatApp;
 use blazar::chat::input::InputAction;
 use blazar::chat::view::render_to_lines_for_test;
@@ -12,6 +13,7 @@ fn completed_tool_call_renders_summary_in_timeline() {
     app.apply_agent_event_for_test(AgentEvent::ToolCallStarted {
         call_id: "call-1".into(),
         tool_name: "read_file".into(),
+        kind: ToolKind::Local,
         arguments: "{\"path\":\"Cargo.toml\"}".into(),
     });
     app.apply_agent_event_for_test(AgentEvent::ToolCallCompleted {
@@ -33,6 +35,7 @@ fn toggle_details_reveals_full_tool_output() {
     app.apply_agent_event_for_test(AgentEvent::ToolCallStarted {
         call_id: "call-1".into(),
         tool_name: "read_file".into(),
+        kind: ToolKind::Local,
         arguments: "{\"path\":\"Cargo.toml\"}".into(),
     });
     app.apply_agent_event_for_test(AgentEvent::ToolCallCompleted {

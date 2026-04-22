@@ -47,6 +47,7 @@ impl ChatApp {
                 call_id,
                 tool_name,
                 arguments,
+                ..
             } => {
                 debug!(
                     "tick: ToolCallStarted call_id={} tool={} arguments_len={}",

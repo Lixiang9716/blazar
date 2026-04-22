@@ -843,6 +843,7 @@ fn tool_call_completed_sets_error_status_and_summary() {
     app.apply_agent_event_for_test(AgentEvent::ToolCallStarted {
         call_id: "call-err".into(),
         tool_name: "bash".into(),
+        kind: crate::agent::tools::ToolKind::Local,
         arguments: r#"{"command":"exit 1"}"#.into(),
     });
     app.apply_agent_event_for_test(AgentEvent::ToolCallCompleted {
