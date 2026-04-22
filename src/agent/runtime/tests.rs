@@ -5,10 +5,21 @@ use std::error::Error;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::AtomicU32;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 fn empty_registry() -> ToolRegistry {
     ToolRegistry::new(PathBuf::from(env!("CARGO_MANIFEST_DIR")))
+}
+
+fn wait_until(timeout: Duration, mut condition: impl FnMut() -> bool) -> bool {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        if condition() {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    condition()
 }
 
 #[test]
@@ -53,6 +64,7 @@ fn runtime_loop_handles_cancel_and_shutdown_commands() {
             event_tx,
             Arc::new(crate::provider::echo::EchoProvider::new(0)),
             "echo".to_owned(),
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")),
             tools,
             cancel_for_thread,
         );
@@ -63,6 +75,51 @@ fn runtime_loop_handles_cancel_and_shutdown_commands() {
     handle.join().expect("runtime loop should stop");
 
     assert!(cancel_flag.load(Ordering::SeqCst));
+}
+
+#[test]
+fn refresh_acp_agents_reports_invalid_config_errors() {
+    let base = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target");
+    std::fs::create_dir_all(&base).expect("target dir should exist");
+    let unique = format!(
+        "runtime-refresh-acp-invalid-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock should be monotonic")
+            .as_nanos()
+    );
+    let workspace_root = base.join(unique);
+    std::fs::create_dir_all(workspace_root.join("config")).expect("create config dir");
+    std::fs::write(workspace_root.join("config/agents.toml"), "")
+        .expect("write empty agents config");
+
+    let runtime = AgentRuntime::new(
+        Box::new(crate::provider::echo::EchoProvider::new(0)),
+        workspace_root.clone(),
+        "echo".to_owned(),
+    )
+    .expect("runtime should initialize");
+
+    std::fs::write(
+        workspace_root.join("config/agents.toml"),
+        "[discovery]\nendpoints = [\"\"]\n",
+    )
+    .expect("overwrite invalid agents config");
+
+    runtime
+        .refresh_acp_agents()
+        .expect("refresh request should reach runtime");
+
+    let refreshed = wait_until(Duration::from_secs(2), || {
+        matches!(
+            runtime.try_recv(),
+            Some(AgentEvent::AcpAgentsRefreshFailed { .. })
+        )
+    });
+
+    assert!(refreshed, "refresh failure event was not observed");
+
+    std::fs::remove_dir_all(&workspace_root).expect("cleanup scratch workspace");
 }
 
 fn user_messages(prompt: &str) -> Vec<ProviderMessage> {

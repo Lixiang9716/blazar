@@ -126,8 +126,17 @@ impl AgentRuntime {
         let provider: Arc<dyn LlmProvider> = Arc::from(provider);
         let tools = build_tool_registry(Arc::clone(&provider), &workspace_root, &model)
             .map_err(AgentRuntimeError::ToolInitialization)?;
-        let worker: RuntimeWorker =
-            Box::new(move || runtime_loop(cmd_rx, event_tx, provider, model, tools, flag_clone));
+        let worker: RuntimeWorker = Box::new(move || {
+            runtime_loop(
+                cmd_rx,
+                event_tx,
+                provider,
+                model,
+                workspace_root,
+                tools,
+                flag_clone,
+            )
+        });
 
         let handle = spawn_thread(worker).map_err(AgentRuntimeError::ThreadSpawn)?;
 
@@ -158,6 +167,13 @@ impl AgentRuntime {
             .send(AgentCommand::SetModel {
                 model: model.to_string(),
             })
+            .map_err(|_| "agent runtime channel closed".to_string())
+    }
+
+    /// Refresh ACP-discovered agents and rebuild the runtime tool registry.
+    pub fn refresh_acp_agents(&self) -> Result<(), String> {
+        self.cmd_tx
+            .send(AgentCommand::RefreshAcpAgents)
             .map_err(|_| "agent runtime channel closed".to_string())
     }
 
@@ -196,7 +212,8 @@ fn runtime_loop(
     event_tx: Sender<AgentEvent>,
     provider: Arc<dyn LlmProvider>,
     mut model: String,
-    tools: ToolRegistry,
+    workspace_root: PathBuf,
+    mut tools: ToolRegistry,
     cancel_flag: Arc<AtomicBool>,
 ) {
     let mut turn_counter = 0u64;
@@ -239,6 +256,22 @@ fn runtime_loop(
             AgentCommand::SetModel { model: new_model } => {
                 info!("runtime: SetModel old={model} new={new_model}");
                 model = new_model;
+            }
+            AgentCommand::RefreshAcpAgents => {
+                info!(
+                    "runtime: RefreshAcpAgents workspace={}",
+                    workspace_root.display()
+                );
+                match build_tool_registry(Arc::clone(&provider), &workspace_root, &model) {
+                    Ok(updated_tools) => {
+                        tools = updated_tools;
+                        let _ = event_tx.send(AgentEvent::AcpAgentsRefreshed);
+                    }
+                    Err(error) => {
+                        warn!("runtime: ACP refresh failed: {error}");
+                        let _ = event_tx.send(AgentEvent::AcpAgentsRefreshFailed { error });
+                    }
+                }
             }
             AgentCommand::Cancel => {
                 debug!("runtime: Cancel received");

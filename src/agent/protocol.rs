@@ -6,6 +6,8 @@ pub enum AgentCommand {
     SubmitTurn { prompt: String },
     /// Switch the active model without rebuilding the runtime.
     SetModel { model: String },
+    /// Refresh ACP-discovered agents and rebuild runtime tool registry.
+    RefreshAcpAgents,
     /// Cancel the current turn (future use).
     Cancel,
     /// Shut down the runtime thread.
@@ -34,6 +36,10 @@ pub enum AgentEvent {
         output: String,
         is_error: bool,
     },
+    /// ACP agent discovery finished and tools were refreshed.
+    AcpAgentsRefreshed,
+    /// ACP agent discovery failed.
+    AcpAgentsRefreshFailed { error: String },
     /// The current turn completed successfully.
     TurnComplete,
     /// The current turn failed.

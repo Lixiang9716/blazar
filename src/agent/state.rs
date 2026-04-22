@@ -120,6 +120,7 @@ impl AgentRuntimeState {
                 }
                 false
             }
+            AgentEvent::AcpAgentsRefreshed | AgentEvent::AcpAgentsRefreshFailed { .. } => false,
             AgentEvent::TurnComplete => {
                 self.turn_state = TurnState::Done;
                 self.active_tools.clear();

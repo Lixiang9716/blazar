@@ -95,6 +95,18 @@ impl ChatApp {
                 }
                 self.scroll_offset = u16::MAX;
             }
+            AgentEvent::AcpAgentsRefreshed => {
+                self.timeline
+                    .push(TimelineEntry::hint("ACP agent discovery complete."));
+                self.scroll_offset = u16::MAX;
+            }
+            AgentEvent::AcpAgentsRefreshFailed { error } => {
+                warn!("tick: AcpAgentsRefreshFailed error={error}");
+                self.timeline.push(TimelineEntry::warning(format!(
+                    "ACP agent discovery failed: {error}"
+                )));
+                self.scroll_offset = u16::MAX;
+            }
             AgentEvent::TurnComplete => {
                 debug!("tick: TurnComplete");
                 if self.active_turn_kind == Some(TurnKind::Plan) {

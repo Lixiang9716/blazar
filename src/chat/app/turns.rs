@@ -35,6 +35,12 @@ impl ChatApp {
         self.timeline
             .push(TimelineEntry::user_message(turn.user_text.clone()));
 
+        // Handle local commands without dispatching a model turn.
+        if trimmed == "/discover-agents" {
+            self.refresh_acp_agents();
+            return;
+        }
+
         // Admission control: queue if agent is busy instead of dropping
         if self.agent_state.is_busy() {
             info!(
@@ -58,6 +64,20 @@ impl ChatApp {
 
         // Auto-scroll to bottom
         self.scroll_offset = u16::MAX;
+    }
+
+    pub(super) fn refresh_acp_agents(&mut self) {
+        self.timeline
+            .push(TimelineEntry::hint("Discovering ACP agents..."));
+        self.scroll_offset = u16::MAX;
+
+        if let Err(error) = self.agent_runtime.refresh_acp_agents() {
+            warn!("refresh_acp_agents: failed to enqueue refresh: {error}");
+            self.timeline.push(TimelineEntry::warning(format!(
+                "Failed to refresh ACP agents: {error}"
+            )));
+            self.scroll_offset = u16::MAX;
+        }
     }
 
     /// Dispatches the next queued message to the agent runtime (FIFO).
