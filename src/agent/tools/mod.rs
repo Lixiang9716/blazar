@@ -19,9 +19,15 @@ pub struct ToolSpec {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentProtocol {
+    Native,
+    Acp,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToolKind {
     Local,
-    Agent,
+    Agent { protocol: AgentProtocol },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -401,7 +407,12 @@ mod tests {
                 access: ResourceAccess::Exclusive,
             }]
         );
-        assert_eq!(agent_tool.kind(), ToolKind::Agent);
+        assert_eq!(
+            agent_tool.kind(),
+            ToolKind::Agent {
+                protocol: AgentProtocol::Native,
+            }
+        );
     }
 
     #[test]

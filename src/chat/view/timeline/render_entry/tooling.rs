@@ -1,4 +1,4 @@
-use super::common::extract_tool_subtitle;
+use super::common::{extract_tool_subtitle, tool_badge};
 use super::*;
 
 pub(super) fn render_tool_use_entry<'a>(
@@ -51,7 +51,10 @@ pub(super) fn render_tool_call_entry<'a>(
     let mut lines = Vec::new();
 
     if let EntryKind::ToolCall {
-        tool_name, status, ..
+        tool_name,
+        kind,
+        status,
+        ..
     } = &entry.kind
     {
         let (status_marker, status_style) = match status {
@@ -60,13 +63,17 @@ pub(super) fn render_tool_call_entry<'a>(
             ToolCallStatus::Error => ("✗", theme.marker_warning),
         };
 
-        lines.push(Line::from(vec![
+        let mut header = vec![
             Span::raw(MARGIN),
             Span::styled("● ", marker_style),
             Span::styled(tool_name.clone(), theme.tool_label),
-            Span::raw(" "),
-            Span::styled(status_marker, status_style),
-        ]));
+        ];
+        if let Some(badge) = tool_badge(*kind) {
+            header.push(Span::raw(" "));
+            header.push(Span::styled(badge, theme.dim_text));
+        }
+        header.extend([Span::raw(" "), Span::styled(status_marker, status_style)]);
+        lines.push(Line::from(header));
 
         // Show key argument (file path / command) as a subtitle
         let subtitle = extract_tool_subtitle(tool_name, &entry.details);

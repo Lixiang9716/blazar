@@ -1,6 +1,6 @@
 use serde_json::Value;
 
-use super::{Tool, ToolKind, ToolResult, ToolSpec};
+use super::{AgentProtocol, Tool, ToolKind, ToolResult, ToolSpec};
 use crate::agent::acp_discovery::{
     AcpAgentMetadata, AcpClientError, AcpTransport, ReqwestAcpTransport, poll_run_to_completion,
 };
@@ -62,7 +62,9 @@ where
     }
 
     fn kind(&self) -> ToolKind {
-        ToolKind::Agent
+        ToolKind::Agent {
+            protocol: AgentProtocol::Acp,
+        }
     }
 
     fn execute(&self, args: Value) -> ToolResult {

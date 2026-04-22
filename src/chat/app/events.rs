@@ -46,6 +46,7 @@ impl ChatApp {
             AgentEvent::ToolCallStarted {
                 call_id,
                 tool_name,
+                kind,
                 arguments,
                 ..
             } => {
@@ -58,6 +59,7 @@ impl ChatApp {
                 self.timeline.push(TimelineEntry::tool_call(
                     call_id,
                     tool_name,
+                    kind,
                     summarize_tool_arguments(&arguments),
                     arguments,
                     ToolCallStatus::Running,

@@ -865,6 +865,36 @@ fn tool_call_completed_sets_error_status_and_summary() {
 }
 
 #[test]
+fn agent_tool_calls_render_acp_badge() {
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+
+    app.apply_agent_event_for_test(AgentEvent::ToolCallStarted {
+        call_id: "call-acp".into(),
+        tool_name: "configured_reviewer".into(),
+        kind: crate::agent::tools::ToolKind::Agent {
+            protocol: crate::agent::tools::AgentProtocol::Acp,
+        },
+        arguments: r#"{"prompt":"review the patch"}"#.into(),
+    });
+
+    let entry = app.timeline.last().expect("tool entry should exist");
+    assert!(matches!(
+        entry.kind,
+        EntryKind::ToolCall {
+            kind: crate::agent::tools::ToolKind::Agent {
+                protocol: crate::agent::tools::AgentProtocol::Acp,
+            },
+            ..
+        }
+    ));
+
+    let rendered = render_to_lines_for_test(&mut app, 100, 35).join("\n");
+    assert!(rendered.contains("configured_reviewer"));
+    assert!(rendered.contains("(ACP)"));
+}
+
+#[test]
 fn turn_complete_plan_with_non_extractable_body_leaves_entry_untitled() {
     let repo_path = env!("CARGO_MANIFEST_DIR");
     let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");

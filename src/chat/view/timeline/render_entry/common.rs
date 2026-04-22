@@ -1,4 +1,5 @@
 use super::*;
+use crate::agent::tools::{AgentProtocol, ToolKind};
 
 pub(super) fn marker_style_for(entry: &TimelineEntry, theme: &ChatTheme) -> Style {
     match (&entry.actor, &entry.kind) {
@@ -50,5 +51,14 @@ fn truncate_subtitle(s: &str) -> String {
         format!("{}…", &s[..77])
     } else {
         s.to_owned()
+    }
+}
+
+pub(super) fn tool_badge(kind: ToolKind) -> Option<&'static str> {
+    match kind {
+        ToolKind::Agent {
+            protocol: AgentProtocol::Acp,
+        } => Some("(ACP)"),
+        _ => None,
     }
 }

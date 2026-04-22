@@ -1,6 +1,6 @@
 use blazar::agent::protocol::AgentEvent;
 use blazar::agent::state::{ActiveToolStatus, AgentRuntimeState, TurnState};
-use blazar::agent::tools::ToolKind;
+use blazar::agent::tools::{AgentProtocol, ToolKind};
 
 #[test]
 fn idle_by_default() {
@@ -131,7 +131,9 @@ fn tool_call_events_track_multiple_active_tools_by_call_id() {
     state.apply_event(&AgentEvent::ToolCallStarted {
         call_id: "call-2".into(),
         tool_name: "delegate".into(),
-        kind: ToolKind::Agent,
+        kind: ToolKind::Agent {
+            protocol: AgentProtocol::Native,
+        },
         arguments: "{\"prompt\":\"review\"}".into(),
     });
 
@@ -143,7 +145,12 @@ fn tool_call_events_track_multiple_active_tools_by_call_id() {
     assert_eq!(state.active_tools[0].status, ActiveToolStatus::Running);
     assert_eq!(state.active_tools[1].call_id, "call-2");
     assert_eq!(state.active_tools[1].tool_name, "delegate");
-    assert_eq!(state.active_tools[1].kind, ToolKind::Agent);
+    assert_eq!(
+        state.active_tools[1].kind,
+        ToolKind::Agent {
+            protocol: AgentProtocol::Native,
+        }
+    );
     assert_eq!(state.active_tools[1].status, ActiveToolStatus::Running);
 
     let changed = state.apply_event(&AgentEvent::ToolCallCompleted {
@@ -176,7 +183,9 @@ fn duplicate_tool_call_started_is_ignored_without_overwriting_active_tool() {
     state.apply_event(&AgentEvent::ToolCallStarted {
         call_id: "call-1".into(),
         tool_name: "delegate".into(),
-        kind: ToolKind::Agent,
+        kind: ToolKind::Agent {
+            protocol: AgentProtocol::Native,
+        },
         arguments: "{\"prompt\":\"review\"}".into(),
     });
 

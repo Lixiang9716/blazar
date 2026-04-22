@@ -1,3 +1,4 @@
+use blazar::agent::tools::ToolKind;
 use blazar::chat::model::{Actor, EntryKind, TimelineEntry, ToolCallStatus};
 
 #[test]
@@ -27,6 +28,7 @@ fn timeline_entry_constructors_assign_expected_fields() {
     let tool_call = TimelineEntry::tool_call(
         "call-1",
         "read_file",
+        ToolKind::Local,
         "body",
         r#"{"path":"Cargo.toml"}"#,
         ToolCallStatus::Running,
