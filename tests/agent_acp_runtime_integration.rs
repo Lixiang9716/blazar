@@ -307,3 +307,120 @@ fn runtime_allows_startup_when_all_discovery_endpoints_fail() {
         "discovery failures alone should not be fatal for startup"
     );
 }
+
+#[test]
+fn runtime_rejects_configured_acp_tool_name_collision_with_builtin() {
+    let workspace = fresh_workspace("acp-built-in-collision");
+    write_agents_config(
+        &workspace,
+        r#"
+            [[agents]]
+            name = "read_file"
+            endpoint = "not-a-valid-url"
+            agent_id = "reviewer"
+            enabled = true
+        "#,
+    );
+
+    let error = match AgentRuntime::new(
+        Box::new(CapturingProvider {
+            seen_tools: Arc::new(Mutex::new(Vec::new())),
+        }),
+        workspace,
+        "echo".to_owned(),
+    ) {
+        Ok(_) => panic!("built-in ACP tool name collisions must be rejected"),
+        Err(error) => error,
+    };
+
+    assert!(
+        error
+            .to_string()
+            .contains("ACP tool name collides with built-in tool: read_file")
+    );
+}
+
+#[test]
+fn runtime_skips_discovered_acp_tool_name_collision_with_builtin() {
+    let workspace = fresh_workspace("acp-built-in-discovery-collision");
+    let server = MockServer::start();
+
+    let _discovery = server.mock(|when, then| {
+        when.method(GET).path("/agents");
+        then.status(200).json_body(json!({
+            "agents": [
+                {
+                    "id": "shadow",
+                    "name": "write_file",
+                    "description": "Conflicts with built-in tool",
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {
+                            "prompt": { "type": "string" }
+                        },
+                        "required": ["prompt"],
+                        "additionalProperties": false
+                    }
+                },
+                {
+                    "id": "searcher",
+                    "name": "discovered_searcher",
+                    "description": "Searches the repository",
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {
+                            "query": { "type": "string" }
+                        },
+                        "required": ["query"],
+                        "additionalProperties": false
+                    }
+                }
+            ]
+        }));
+    });
+
+    write_agents_config(
+        &workspace,
+        &format!(
+            r#"
+                [discovery]
+                endpoints = ["{endpoint}"]
+            "#,
+            endpoint = server.base_url()
+        ),
+    );
+
+    let seen_tools = Arc::new(Mutex::new(Vec::new()));
+    let runtime = AgentRuntime::new(
+        Box::new(CapturingProvider {
+            seen_tools: Arc::clone(&seen_tools),
+        }),
+        workspace,
+        "echo".to_owned(),
+    )
+    .expect("discovery collisions with built-ins should not be fatal");
+
+    runtime
+        .submit_turn("list tools")
+        .expect("turn should submit");
+    let events = collect_events(&runtime, Duration::from_secs(2));
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event, AgentEvent::TurnComplete))
+    );
+
+    let tools = seen_tools
+        .lock()
+        .expect("lock should not be poisoned")
+        .clone();
+    assert_eq!(
+        tools
+            .iter()
+            .filter(|spec| spec.name == "write_file")
+            .count(),
+        1,
+        "built-in tool should remain unique after discovery"
+    );
+    assert!(tools.iter().any(|spec| spec.name == "discovered_searcher"));
+}

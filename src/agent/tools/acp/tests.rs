@@ -94,3 +94,76 @@ fn acp_tool_surfaces_failed_run_output() {
     assert!(result.is_error);
     assert_eq!(result.text_output(), "validation failed");
 }
+
+#[test]
+fn acp_tool_marks_failed_run_without_error_flag_as_error() {
+    let server = MockServer::start();
+
+    server.mock(|when, then| {
+        when.method(POST).path("/runs");
+        then.status(200).json_body(json!({
+            "id": "run-3"
+        }));
+    });
+    server.mock(|when, then| {
+        when.method(GET).path("/runs/run-3");
+        then.status(200).json_body(json!({
+            "id": "run-3",
+            "status": "failed",
+            "output": {
+                "content": [
+                    { "type": "text", "text": "validation failed" }
+                ]
+            }
+        }));
+    });
+
+    let tool = AcpAgentTool::new("configured_reviewer", server.base_url(), sample_metadata())
+        .expect("tool transport should initialize");
+    let result = tool.execute(json!({
+        "prompt": "review the patch"
+    }));
+
+    assert!(result.is_error);
+    assert_eq!(result.text_output(), "validation failed");
+}
+
+#[test]
+fn acp_tool_summarizes_resource_only_output() {
+    let server = MockServer::start();
+
+    server.mock(|when, then| {
+        when.method(POST).path("/runs");
+        then.status(200).json_body(json!({
+            "id": "run-4"
+        }));
+    });
+    server.mock(|when, then| {
+        when.method(GET).path("/runs/run-4");
+        then.status(200).json_body(json!({
+            "id": "run-4",
+            "status": "completed",
+            "output": {
+                "content": [
+                    {
+                        "type": "resource",
+                        "uri": "file://workspace/report.json",
+                        "mime_type": "application/json"
+                    }
+                ]
+            }
+        }));
+    });
+
+    let tool = AcpAgentTool::new("configured_reviewer", server.base_url(), sample_metadata())
+        .expect("tool transport should initialize");
+    let result = tool.execute(json!({
+        "prompt": "review the patch"
+    }));
+
+    assert!(!result.is_error);
+    assert_eq!(
+        result.text_output(),
+        "[resource] file://workspace/report.json (application/json)"
+    );
+}

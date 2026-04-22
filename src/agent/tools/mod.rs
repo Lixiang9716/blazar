@@ -52,6 +52,16 @@ impl ContentPart {
     pub fn text(text: impl Into<String>) -> Self {
         Self::Text { text: text.into() }
     }
+
+    fn text_projection(&self) -> String {
+        match self {
+            Self::Text { text } => text.clone(),
+            Self::Resource { uri, mime_type } => match mime_type {
+                Some(mime_type) => format!("[resource] {uri} ({mime_type})"),
+                None => format!("[resource] {uri}"),
+            },
+        }
+    }
 }
 
 /// Canonical tool execution payload returned to the runtime.
@@ -85,13 +95,27 @@ impl ToolResult {
     }
 
     pub fn text_output(&self) -> String {
-        self.content
-            .iter()
-            .filter_map(|part| match part {
-                ContentPart::Text { text } => Some(text.as_str()),
-                ContentPart::Resource { .. } => None,
-            })
-            .collect::<String>()
+        let mut output = String::new();
+        let mut previous_was_resource = false;
+        for part in &self.content {
+            match part {
+                ContentPart::Text { text } => {
+                    if previous_was_resource && !output.ends_with('\n') && !text.starts_with('\n') {
+                        output.push('\n');
+                    }
+                    output.push_str(text);
+                    previous_was_resource = false;
+                }
+                ContentPart::Resource { .. } => {
+                    if !output.is_empty() && !output.ends_with('\n') {
+                        output.push('\n');
+                    }
+                    output.push_str(&part.text_projection());
+                    previous_was_resource = true;
+                }
+            }
+        }
+        output
     }
 }
 
@@ -143,6 +167,10 @@ impl ToolRegistry {
             .map(|tool| tool.as_ref())
     }
 
+    pub fn contains_name(&self, name: &str) -> bool {
+        self.get(name).is_some()
+    }
+
     /// Returns the public specs for all registered tools.
     pub fn specs(&self) -> Vec<ToolSpec> {
         self.tools.iter().map(|tool| tool.spec()).collect()
@@ -187,6 +215,34 @@ pub fn canonical_workspace_root(workspace_root: &Path) -> Result<PathBuf, String
             workspace_root.display()
         )
     })
+}
+
+/// Builds a normalized scheduler resource id for a workspace-relative path.
+///
+/// Equivalent lexical paths such as `src/lib.rs` and `./src/lib.rs` collapse to
+/// the same resource key after validation. This is a lexical normalization only;
+/// it does not resolve symlink aliases within the workspace.
+pub fn normalize_workspace_resource_claim(
+    _workspace_root: &Path,
+    requested: &str,
+) -> Result<String, String> {
+    validate_workspace_relative_path(requested)?;
+
+    let normalized = Path::new(requested)
+        .components()
+        .filter_map(|component| match component {
+            Component::CurDir => None,
+            Component::Normal(part) => Some(part.to_string_lossy().into_owned()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("/");
+
+    if normalized.is_empty() {
+        return Err("path must include a file name".into());
+    }
+
+    Ok(format!("fs:{normalized}"))
 }
 
 fn ensure_path_is_within_workspace(path: &Path, workspace_root: &Path) -> Result<(), String> {
@@ -352,7 +408,7 @@ mod tests {
     }
 
     #[test]
-    fn tool_result_text_output_ignores_non_text_content_parts() {
+    fn tool_result_text_output_summarizes_resource_content_parts() {
         let result = ToolResult {
             content: vec![ContentPart::Resource {
                 uri: "file://workspace/out.txt".into(),
@@ -363,7 +419,32 @@ mod tests {
             output_truncated: false,
         };
 
-        assert_eq!(result.text_output(), "");
+        assert_eq!(
+            result.text_output(),
+            "[resource] file://workspace/out.txt (text/plain)"
+        );
+    }
+
+    #[test]
+    fn tool_result_text_output_separates_resource_and_following_text() {
+        let result = ToolResult {
+            content: vec![
+                ContentPart::text("summary"),
+                ContentPart::Resource {
+                    uri: "file://workspace/out.txt".into(),
+                    mime_type: Some("text/plain".into()),
+                },
+                ContentPart::text("details"),
+            ],
+            exit_code: None,
+            is_error: false,
+            output_truncated: false,
+        };
+
+        assert_eq!(
+            result.text_output(),
+            "summary\n[resource] file://workspace/out.txt (text/plain)\ndetails"
+        );
     }
 
     #[test]
@@ -388,7 +469,21 @@ mod tests {
             }]
         );
         assert_eq!(
+            read_tool.resource_claims(&json!({"path":"./src/main.rs"})),
+            vec![ResourceClaim {
+                resource: "fs:src/main.rs".into(),
+                access: ResourceAccess::ReadOnly,
+            }]
+        );
+        assert_eq!(
             write_tool.resource_claims(&json!({"path":"src/main.rs"})),
+            vec![ResourceClaim {
+                resource: "fs:src/main.rs".into(),
+                access: ResourceAccess::ReadWrite,
+            }]
+        );
+        assert_eq!(
+            write_tool.resource_claims(&json!({"path":"./src/main.rs"})),
             vec![ResourceClaim {
                 resource: "fs:src/main.rs".into(),
                 access: ResourceAccess::ReadWrite,
@@ -402,6 +497,18 @@ mod tests {
             }]
         );
         assert_eq!(agent_tool.kind(), ToolKind::Agent { is_acp: false });
+    }
+
+    #[test]
+    fn normalized_workspace_resource_claim_collapses_dot_prefix_aliases() {
+        let workspace = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+
+        assert_eq!(
+            normalize_workspace_resource_claim(&workspace, "src/main.rs").expect("normalized"),
+            normalize_workspace_resource_claim(&workspace, "./src/main.rs")
+                .expect("dot-prefixed path normalized")
+        );
+        assert!(normalize_workspace_resource_claim(&workspace, "../secret").is_err());
     }
 
     #[test]

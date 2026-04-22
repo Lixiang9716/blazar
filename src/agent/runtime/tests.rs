@@ -151,6 +151,34 @@ impl Tool for CountingTool {
     }
 }
 
+struct ResourceOnlyTool;
+
+impl Tool for ResourceOnlyTool {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "resource_tool".into(),
+            description: "returns a resource".into(),
+            parameters: json!({
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+            }),
+        }
+    }
+
+    fn execute(&self, _args: serde_json::Value) -> crate::agent::tools::ToolResult {
+        crate::agent::tools::ToolResult {
+            content: vec![crate::agent::tools::ContentPart::Resource {
+                uri: "file://workspace/report.json".into(),
+                mime_type: Some("application/json".into()),
+            }],
+            exit_code: None,
+            is_error: false,
+            output_truncated: false,
+        }
+    }
+}
+
 #[test]
 fn tool_call_started_event_includes_registry_tool_kind() {
     struct ToolKindProvider;
@@ -237,6 +265,64 @@ fn tool_call_started_event_includes_registry_tool_kind() {
     assert_eq!(started_event.0, "call-agent");
     assert_eq!(started_event.1, "delegate");
     assert_eq!(started_event.2, ToolKind::Agent { is_acp: false });
+}
+
+#[test]
+fn run_turn_preserves_resource_only_tool_results_in_provider_messages() {
+    struct ResourceResultProvider;
+
+    impl LlmProvider for ResourceResultProvider {
+        fn stream_turn(
+            &self,
+            _model: &str,
+            messages: &[ProviderMessage],
+            _tools: &[ToolSpec],
+            tx: Sender<ProviderEvent>,
+        ) {
+            let saw_resource_summary = messages.iter().any(|message| {
+                matches!(message, ProviderMessage::ToolResult { output, is_error, .. }
+                        if !*is_error
+                            && output.contains("[resource] file://workspace/report.json")
+                            && output.contains("application/json"))
+            });
+
+            if saw_resource_summary {
+                let _ = tx.send(ProviderEvent::TextDelta("done".into()));
+                let _ = tx.send(ProviderEvent::TurnComplete);
+                return;
+            }
+
+            let _ = tx.send(ProviderEvent::ToolCall {
+                call_id: "call-resource".into(),
+                name: "resource_tool".into(),
+                arguments: "{}".into(),
+            });
+            let _ = tx.send(ProviderEvent::TurnComplete);
+        }
+    }
+
+    let mut registry = empty_registry();
+    registry.register(Box::new(ResourceOnlyTool));
+
+    let (event_tx, _event_rx) = mpsc::channel();
+    let cancel = Arc::new(AtomicBool::new(false));
+    let mut messages = user_messages("return resource");
+
+    let outcome = execute_turn(
+        &mut messages,
+        &ResourceResultProvider,
+        "echo",
+        &registry,
+        &ChannelObserver { tx: &event_tx },
+        &cancel,
+    );
+
+    assert!(matches!(outcome, TurnOutcome::Complete));
+    assert!(messages.iter().any(|message| {
+        matches!(message, ProviderMessage::ToolResult { output, is_error, .. }
+                if !*is_error
+                    && output == "[resource] file://workspace/report.json (application/json)")
+    }));
 }
 
 #[test]

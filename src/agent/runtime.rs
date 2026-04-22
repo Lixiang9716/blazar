@@ -382,9 +382,20 @@ fn register_acp_tools(tools: &mut ToolRegistry, workspace_root: &Path) -> Result
         .map_err(|error| format!("{}: {error}", config_path.display()))?;
     let transport = ReqwestAcpTransport::new().map_err(|error| error.to_string())?;
     let mut seen_agent_keys = HashSet::new();
-    let mut seen_tool_names = HashSet::new();
+    let reserved_tool_names = tools
+        .specs()
+        .into_iter()
+        .map(|spec| spec.name)
+        .collect::<HashSet<_>>();
+    let mut seen_tool_names = reserved_tool_names.clone();
 
     for configured in config.agents.into_iter().filter(|agent| agent.enabled) {
+        if reserved_tool_names.contains(&configured.name) {
+            return Err(format!(
+                "ACP tool name collides with built-in tool: {}",
+                configured.name
+            ));
+        }
         let metadata = transport
             .get_agent(&configured.endpoint, &configured.agent_id)
             .map_err(|error| error.to_string())?;
@@ -420,6 +431,12 @@ fn register_acp_tools(tools: &mut ToolRegistry, workspace_root: &Path) -> Result
     }
     for discovered in report.agents {
         let tool_name = discovered.metadata.name.clone();
+        if reserved_tool_names.contains(&tool_name) {
+            warn!(
+                "runtime: skipped discovered ACP agent with built-in tool name collision {tool_name}"
+            );
+            continue;
+        }
         if !seen_tool_names.insert(tool_name.clone()) {
             warn!("runtime: skipped discovered ACP agent with duplicate tool name {tool_name}");
             continue;

@@ -424,11 +424,11 @@ fn parse_run_status(value: &Value) -> Result<AcpRunStatus, String> {
                 .get("output")
                 .or_else(|| value.get("result"))
                 .ok_or_else(|| format!("run with status '{status}' must contain output"))?;
-            parse_tool_result(output_value).map(AcpRunStatus::Complete)
+            parse_tool_result(output_value, false).map(AcpRunStatus::Complete)
         }
         "failed" | "cancelled" | "canceled" => {
             if let Some(output_value) = value.get("output").or_else(|| value.get("result")) {
-                parse_tool_result(output_value).map(AcpRunStatus::Complete)
+                parse_tool_result(output_value, true).map(AcpRunStatus::Complete)
             } else {
                 Ok(AcpRunStatus::Complete(ToolResult::failure(format!(
                     "ACP run ended with status '{status}'"
@@ -439,12 +439,13 @@ fn parse_run_status(value: &Value) -> Result<AcpRunStatus, String> {
     }
 }
 
-fn parse_tool_result(value: &Value) -> Result<ToolResult, String> {
+fn parse_tool_result(value: &Value, default_is_error: bool) -> Result<ToolResult, String> {
     let is_error = value
         .get("is_error")
         .or_else(|| value.get("isError"))
         .and_then(Value::as_bool)
-        .unwrap_or(false);
+        .unwrap_or(default_is_error)
+        || default_is_error;
     let output_truncated = value
         .get("output_truncated")
         .or_else(|| value.get("outputTruncated"))
@@ -559,5 +560,40 @@ mod tests {
         .expect_err("unknown statuses should be rejected explicitly");
 
         assert!(error.contains("mystery-state"));
+    }
+
+    #[test]
+    fn parse_run_status_marks_failed_output_as_error_when_field_missing() {
+        let status = parse_run_status(&json!({
+            "status": "failed",
+            "output": {
+                "content": [{ "type": "text", "text": "validation failed" }]
+            }
+        }))
+        .expect("failed payload should parse");
+
+        let AcpRunStatus::Complete(result) = status else {
+            panic!("failed runs should be terminal");
+        };
+        assert!(result.is_error);
+        assert_eq!(result.text_output(), "validation failed");
+    }
+
+    #[test]
+    fn parse_run_status_keeps_cancelled_output_marked_as_error_when_false() {
+        let status = parse_run_status(&json!({
+            "status": "cancelled",
+            "output": {
+                "content": [{ "type": "text", "text": "cancelled by user" }],
+                "is_error": false
+            }
+        }))
+        .expect("cancelled payload should parse");
+
+        let AcpRunStatus::Complete(result) = status else {
+            panic!("cancelled runs should be terminal");
+        };
+        assert!(result.is_error);
+        assert_eq!(result.text_output(), "cancelled by user");
     }
 }
