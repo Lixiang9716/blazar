@@ -280,3 +280,9 @@ Principles (per coding standards):
 - Integration test: register config agents + discovery agents, verify unified ToolRegistry.
 - State tests: `AgentRuntimeState` transitions with parallel active_tools.
 - Timeline rendering tests: verify ACP agent entries render distinctly from local tools.
+
+## Implemented differences
+
+- `ToolKind` shipped as `Local` or `Agent { is_acp: bool }` instead of storing endpoint and agent id inline. The ACP connection details stay on the concrete tool implementation; runtime/UI state only keeps the lightweight discriminator it needs.
+- `ContentPart` shipped as text plus URI-backed resources (`Resource { uri, mime_type }`) rather than embedding image/binary payload bytes directly. This keeps ACP tool results cheaper to store and pass through the current blocking runtime.
+- The initial ACP integration uses polling through `execute()` and runtime-triggered discovery refresh (`RefreshAcpAgents`) instead of a separate streaming tool trait. This matches the current synchronous tool runtime while still supporting startup registration plus explicit refresh.
