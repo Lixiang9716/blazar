@@ -1,5 +1,5 @@
 use super::*;
-use crate::agent::tools::{AgentProtocol, ResourceAccess, ResourceClaim, Tool, ToolKind, ToolSpec};
+use crate::agent::tools::{ResourceAccess, ResourceClaim, Tool, ToolKind, ToolSpec};
 use serde_json::json;
 use std::error::Error;
 use std::sync::Arc;
@@ -139,9 +139,7 @@ fn tool_call_started_event_includes_registry_tool_kind() {
         }
 
         fn kind(&self) -> ToolKind {
-            ToolKind::Agent {
-                protocol: AgentProtocol::Native,
-            }
+            ToolKind::Agent { is_acp: false }
         }
 
         fn execute(&self, _args: serde_json::Value) -> crate::agent::tools::ToolResult {
@@ -181,12 +179,7 @@ fn tool_call_started_event_includes_registry_tool_kind() {
         .expect("tool start event should be emitted");
     assert_eq!(started_event.0, "call-agent");
     assert_eq!(started_event.1, "delegate");
-    assert_eq!(
-        started_event.2,
-        ToolKind::Agent {
-            protocol: AgentProtocol::Native,
-        }
-    );
+    assert_eq!(started_event.2, ToolKind::Agent { is_acp: false });
 }
 
 #[test]

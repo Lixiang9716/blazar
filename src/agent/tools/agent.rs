@@ -8,7 +8,7 @@ use super::bash::BashTool;
 use super::list_dir::ListDirTool;
 use super::read_file::ReadFileTool;
 use super::write_file::WriteFileTool;
-use super::{AgentProtocol, Tool, ToolKind, ToolRegistry, ToolResult, ToolSpec};
+use super::{Tool, ToolKind, ToolRegistry, ToolResult, ToolSpec};
 use crate::agent::runtime::turn::{SilentObserver, TurnOutcome, execute_turn};
 use crate::provider::{LlmProvider, ProviderMessage};
 
@@ -64,9 +64,7 @@ impl Tool for AgentTool {
     }
 
     fn kind(&self) -> ToolKind {
-        ToolKind::Agent {
-            protocol: AgentProtocol::Native,
-        }
+        ToolKind::Agent { is_acp: false }
     }
 
     fn execute(&self, args: Value) -> ToolResult {

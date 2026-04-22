@@ -872,9 +872,7 @@ fn agent_tool_calls_render_acp_badge() {
     app.apply_agent_event_for_test(AgentEvent::ToolCallStarted {
         call_id: "call-acp".into(),
         tool_name: "configured_reviewer".into(),
-        kind: crate::agent::tools::ToolKind::Agent {
-            protocol: crate::agent::tools::AgentProtocol::Acp,
-        },
+        kind: crate::agent::tools::ToolKind::Agent { is_acp: true },
         arguments: r#"{"prompt":"review the patch"}"#.into(),
     });
 
@@ -882,9 +880,7 @@ fn agent_tool_calls_render_acp_badge() {
     assert!(matches!(
         entry.kind,
         EntryKind::ToolCall {
-            kind: crate::agent::tools::ToolKind::Agent {
-                protocol: crate::agent::tools::AgentProtocol::Acp,
-            },
+            kind: crate::agent::tools::ToolKind::Agent { is_acp: true },
             ..
         }
     ));

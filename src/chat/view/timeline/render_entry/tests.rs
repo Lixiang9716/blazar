@@ -1,6 +1,6 @@
 use super::common::extract_tool_subtitle;
 use super::*;
-use crate::agent::tools::{AgentProtocol, ToolKind};
+use crate::agent::tools::ToolKind;
 
 fn lines_text(lines: &[Line<'_>]) -> Vec<String> {
     lines
@@ -90,9 +90,7 @@ fn render_entry_renders_tool_use_and_tool_call_statuses() {
     let acp_agent = TimelineEntry::tool_call(
         "c4",
         "configured_reviewer",
-        ToolKind::Agent {
-            protocol: AgentProtocol::Acp,
-        },
+        ToolKind::Agent { is_acp: true },
         "reviewing",
         r#"{"prompt":"check this diff"}"#,
         ToolCallStatus::Running,
