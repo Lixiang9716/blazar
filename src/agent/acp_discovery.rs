@@ -423,15 +423,26 @@ fn parse_run_status(value: &Value) -> Result<AcpRunStatus, String> {
         .and_then(Value::as_str)
         .ok_or_else(|| "run status must be a string".to_string())?;
 
-    if matches!(status, "queued" | "running" | "pending" | "in_progress") {
-        return Ok(AcpRunStatus::Pending);
+    match status {
+        "queued" | "running" | "pending" | "in_progress" => Ok(AcpRunStatus::Pending),
+        "completed" | "succeeded" => {
+            let output_value = value
+                .get("output")
+                .or_else(|| value.get("result"))
+                .ok_or_else(|| format!("run with status '{status}' must contain output"))?;
+            parse_tool_result(output_value).map(AcpRunStatus::Complete)
+        }
+        "failed" | "cancelled" | "canceled" => {
+            if let Some(output_value) = value.get("output").or_else(|| value.get("result")) {
+                parse_tool_result(output_value).map(AcpRunStatus::Complete)
+            } else {
+                Ok(AcpRunStatus::Complete(ToolResult::failure(format!(
+                    "ACP run ended with status '{status}'"
+                ))))
+            }
+        }
+        other => Err(format!("unknown ACP run status '{other}'")),
     }
-
-    let output_value = value
-        .get("output")
-        .or_else(|| value.get("result"))
-        .ok_or_else(|| "completed run must contain output".to_string())?;
-    parse_tool_result(output_value).map(AcpRunStatus::Complete)
 }
 
 fn parse_tool_result(value: &Value) -> Result<ToolResult, String> {
@@ -544,5 +555,15 @@ mod tests {
         .expect_err("overflowing exit code should fail");
 
         assert!(error.contains("exit code must fit within i32"));
+    }
+
+    #[test]
+    fn parse_run_status_rejects_unknown_status_values() {
+        let error = parse_run_status(&json!({
+            "status": "mystery-state"
+        }))
+        .expect_err("unknown statuses should be rejected explicitly");
+
+        assert!(error.contains("mystery-state"));
     }
 }

@@ -218,8 +218,74 @@ fn runtime_registers_configured_acp_tools_before_discovered_agents() {
 }
 
 #[test]
-fn runtime_surfaces_discovery_endpoint_errors_during_initialization() {
-    let workspace = fresh_workspace("acp-discovery-error");
+fn runtime_keeps_successful_discoveries_when_other_endpoints_fail() {
+    let workspace = fresh_workspace("acp-discovery-partial-failure");
+    let server = MockServer::start();
+    let _discovery = server.mock(|when, then| {
+        when.method(GET).path("/agents");
+        then.status(200).json_body(json!({
+            "agents": [
+                {
+                    "id": "searcher",
+                    "name": "discovered_searcher",
+                    "description": "Searches the repository",
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {
+                            "query": { "type": "string" }
+                        },
+                        "required": ["query"],
+                        "additionalProperties": false
+                    }
+                }
+            ]
+        }));
+    });
+
+    write_agents_config(
+        &workspace,
+        &format!(
+            r#"
+            [discovery]
+            endpoints = ["not-a-valid-url", "{endpoint}"]
+        "#,
+            endpoint = server.base_url()
+        ),
+    );
+
+    let seen_tools = Arc::new(Mutex::new(Vec::new()));
+    let runtime = AgentRuntime::new(
+        Box::new(CapturingProvider {
+            seen_tools: Arc::clone(&seen_tools),
+        }),
+        workspace,
+        "echo".to_owned(),
+    )
+    .expect("runtime should initialize despite one failing discovery endpoint");
+
+    runtime
+        .submit_turn("list tools")
+        .expect("turn should submit");
+    let events = collect_events(&runtime, Duration::from_secs(2));
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event, AgentEvent::TurnComplete))
+    );
+
+    let tools = seen_tools
+        .lock()
+        .expect("lock should not be poisoned")
+        .clone();
+    assert!(
+        tools.iter().any(|spec| spec.name == "discovered_searcher"),
+        "successful discoveries should still register even when another endpoint fails"
+    );
+}
+
+#[test]
+fn runtime_allows_startup_when_all_discovery_endpoints_fail() {
+    let workspace = fresh_workspace("acp-discovery-all-fail");
     write_agents_config(
         &workspace,
         r#"
@@ -228,20 +294,16 @@ fn runtime_surfaces_discovery_endpoint_errors_during_initialization() {
         "#,
     );
 
-    let error = AgentRuntime::new(
+    let runtime = AgentRuntime::new(
         Box::new(CapturingProvider {
             seen_tools: Arc::new(Mutex::new(Vec::new())),
         }),
         workspace,
         "echo".to_owned(),
-    )
-    .err()
-    .expect("invalid discovery endpoint should fail runtime initialization");
+    );
 
     assert!(
-        error
-            .to_string()
-            .contains("failed to initialize agent tools"),
-        "unexpected error: {error}"
+        runtime.is_ok(),
+        "discovery failures alone should not be fatal for startup"
     );
 }

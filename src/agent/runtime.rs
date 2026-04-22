@@ -372,14 +372,18 @@ fn register_acp_tools(tools: &mut ToolRegistry, workspace_root: &Path) -> Result
 
     let discovery = AcpDiscovery::new(config.discovery.endpoints, transport.clone());
     let report = discovery.discover(&seen_agent_keys);
-    if !report.errors.is_empty() {
-        let message = report
-            .errors
-            .into_iter()
-            .map(|error| error.to_string())
-            .collect::<Vec<_>>()
-            .join("; ");
-        return Err(format!("ACP discovery failed: {message}"));
+    if report.errors.is_empty() {
+        debug!("runtime: ACP discovery completed without endpoint errors");
+    } else {
+        let successful_count = report.agents.len();
+        for error in &report.errors {
+            warn!("runtime: ACP discovery endpoint failed: {error}");
+        }
+        warn!(
+            "runtime: ACP discovery completed with {} successful agents and {} endpoint errors",
+            successful_count,
+            report.errors.len()
+        );
     }
     for discovered in report.agents {
         let tool_name = discovered.metadata.name.clone();
