@@ -1,0 +1,110 @@
+use serde_json::Value;
+use std::path::PathBuf;
+use std::process::{Command, Output};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+fn unique_log_file(prefix: &str) -> PathBuf {
+    let base = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target")
+        .join("observability-script-tests");
+    std::fs::create_dir_all(&base).expect("should create test log directory");
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock should be monotonic")
+        .as_nanos();
+    base.join(format!("{prefix}-{nanos}.log"))
+}
+
+fn run_script(script_name: &str, args: &[&str]) -> Output {
+    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let script_path = repo_root
+        .join("scripts")
+        .join("observability")
+        .join(script_name);
+
+    Command::new("bash")
+        .arg(script_path)
+        .args(args)
+        .current_dir(repo_root)
+        .output()
+        .expect("script process should execute")
+}
+
+#[test]
+fn logs_errors_filters_warn_and_error_levels() {
+    let log_file = unique_log_file("logs-errors");
+    std::fs::write(
+        &log_file,
+        concat!(
+            "{\"level\":\"INFO\",\"message\":\"startup\"}\n",
+            "{\"level\":\"WARN\",\"message\":\"slow request\"}\n",
+            "{\"level\":\"ERROR\",\"message\":\"tool failed\"}\n",
+        ),
+    )
+    .expect("should write test log file");
+
+    let output = run_script(
+        "logs-errors.sh",
+        &[log_file.to_str().expect("utf-8 log file path")],
+    );
+
+    assert!(
+        output.status.success(),
+        "script should succeed, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let lines: Vec<&str> = stdout.lines().collect();
+    assert_eq!(lines.len(), 2, "expected only WARN+ERROR records");
+
+    for line in lines {
+        let record: Value = serde_json::from_str(line).expect("line should be valid json");
+        let level = record
+            .get("level")
+            .and_then(Value::as_str)
+            .expect("record should include string level");
+        assert!(
+            matches!(level, "WARN" | "ERROR"),
+            "unexpected level in output: {level}"
+        );
+    }
+}
+
+#[test]
+fn logs_turn_filters_by_turn_id() {
+    let log_file = unique_log_file("logs-turn");
+    std::fs::write(
+        &log_file,
+        concat!(
+            "{\"level\":\"INFO\",\"turn_id\":\"turn-1\",\"message\":\"a\"}\n",
+            "{\"level\":\"ERROR\",\"turn_id\":\"turn-2\",\"message\":\"b\"}\n",
+            "{\"level\":\"WARN\",\"turn_id\":\"turn-1\",\"message\":\"c\"}\n",
+        ),
+    )
+    .expect("should write test log file");
+
+    let output = run_script(
+        "logs-turn.sh",
+        &["turn-1", log_file.to_str().expect("utf-8 log file path")],
+    );
+
+    assert!(
+        output.status.success(),
+        "script should succeed, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let lines: Vec<&str> = stdout.lines().collect();
+    assert_eq!(lines.len(), 2, "expected only turn-1 records");
+
+    for line in lines {
+        let record: Value = serde_json::from_str(line).expect("line should be valid json");
+        let turn_id = record
+            .get("turn_id")
+            .and_then(Value::as_str)
+            .expect("record should include string turn_id");
+        assert_eq!(turn_id, "turn-1");
+    }
+}
