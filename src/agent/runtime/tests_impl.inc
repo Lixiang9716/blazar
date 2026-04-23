@@ -563,7 +563,7 @@ fn run_turn_stops_on_cancel_flag() {
     let events: Vec<_> = event_rx.try_iter().collect();
     let has_cancelled = events
         .iter()
-        .any(|event| matches!(event, AgentEvent::TurnFailed { error } if error == "cancelled"));
+        .any(|event| matches!(event, AgentEvent::TurnFailed { error, .. } if error == "cancelled"));
     assert!(has_cancelled, "should emit TurnFailed with 'cancelled'");
 }
 
@@ -770,6 +770,49 @@ fn fatal_error_skips_retry() {
 }
 
 #[test]
+fn turn_failed_event_carries_structured_error_kind() {
+    struct FatalProvider;
+
+    impl LlmProvider for FatalProvider {
+        fn stream_turn(
+            &self,
+            _model: &str,
+            _messages: &[ProviderMessage],
+            _tools: &[ToolSpec],
+            tx: Sender<ProviderEvent>,
+        ) {
+            let _ = tx.send(ProviderEvent::Error("invalid API key".into()));
+        }
+    }
+
+    let runtime = AgentRuntime::new(
+        Box::new(FatalProvider),
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")),
+        "echo".to_owned(),
+    )
+    .expect("runtime should initialize");
+
+    runtime
+        .submit_turn("trigger structured error")
+        .expect("submit");
+
+    let saw_structured = wait_until(Duration::from_secs(2), || {
+        matches!(
+            runtime.try_recv(),
+            Some(AgentEvent::TurnFailed {
+                kind: RuntimeErrorKind::ProviderFatal,
+                ..
+            })
+        )
+    });
+
+    assert!(
+        saw_structured,
+        "TurnFailed should include RuntimeErrorKind"
+    );
+}
+
+#[test]
 fn cancel_before_retry_attempt_stops_immediately() {
     struct TimeoutProvider;
 
@@ -802,7 +845,7 @@ fn cancel_before_retry_attempt_stops_immediately() {
     let events: Vec<_> = event_rx.try_iter().collect();
     let has_cancelled = events
         .iter()
-        .any(|event| matches!(event, AgentEvent::TurnFailed { error } if error == "cancelled"));
+        .any(|event| matches!(event, AgentEvent::TurnFailed { error, .. } if error == "cancelled"));
     assert!(
         has_cancelled,
         "pre-cancelled flag should abort before first attempt"
@@ -1624,7 +1667,7 @@ impl crate::agent::runtime::turn::TurnObserver for CancellingObserver {
             .push(call_id.to_string());
     }
 
-    fn on_turn_failed(&self, _error: &str) {}
+    fn on_turn_failed(&self, _kind: RuntimeErrorKind, _error: &str) {}
 }
 
 #[test]

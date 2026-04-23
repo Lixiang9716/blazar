@@ -116,7 +116,7 @@ impl ChatApp {
                 self.active_turn_title = None;
                 self.dispatch_next_queued();
             }
-            AgentEvent::TurnFailed { error } => {
+            AgentEvent::TurnFailed { error, .. } => {
                 if error == "cancelled" {
                     debug!("tick: TurnCancelled");
                     self.timeline.push(TimelineEntry::hint("Turn cancelled."));

@@ -1,4 +1,5 @@
 use crate::agent::tools::ToolKind;
+use crate::agent::runtime::RuntimeErrorKind;
 
 /// Commands sent from the UI thread to the agent runtime.
 pub enum AgentCommand {
@@ -43,5 +44,5 @@ pub enum AgentEvent {
     /// The current turn completed successfully.
     TurnComplete,
     /// The current turn failed.
-    TurnFailed { error: String },
+    TurnFailed { kind: RuntimeErrorKind, error: String },
 }

@@ -245,6 +245,7 @@ fn dispatch_next_queued_drains_on_turn_failed() {
 
     // TurnFailed should also drain the queue
     app.apply_agent_event_for_test(AgentEvent::TurnFailed {
+        kind: crate::agent::runtime::RuntimeErrorKind::ProviderFatal,
         error: "test error".into(),
     });
     assert!(app.pending_messages.is_empty());
@@ -463,6 +464,7 @@ fn turn_failed_events_render_hint_for_cancel_and_warning_for_errors() {
     let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
 
     app.apply_agent_event_for_test(AgentEvent::TurnFailed {
+        kind: crate::agent::runtime::RuntimeErrorKind::Cancelled,
         error: "cancelled".into(),
     });
     assert!(matches!(
@@ -471,6 +473,7 @@ fn turn_failed_events_render_hint_for_cancel_and_warning_for_errors() {
     ));
 
     app.apply_agent_event_for_test(AgentEvent::TurnFailed {
+        kind: crate::agent::runtime::RuntimeErrorKind::ProviderFatal,
         error: "boom".into(),
     });
     let last = app.timeline.last().expect("warning entry should exist");
@@ -558,6 +561,7 @@ fn status_label_transitions_across_streaming_failure_and_recovery() {
     assert_eq!(app.status_label(), "thinking");
 
     app.apply_agent_event_for_test(AgentEvent::TurnFailed {
+        kind: crate::agent::runtime::RuntimeErrorKind::ProviderTransient,
         error: "network".into(),
     });
     assert!(app.status_label().contains("error: network"));

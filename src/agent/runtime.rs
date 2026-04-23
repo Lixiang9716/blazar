@@ -23,6 +23,7 @@ use crate::config::{AGENTS_CONFIG_PATH, load_agents_config_from_path};
 use crate::provider::{LlmProvider, ProviderMessage};
 
 mod events;
+mod errors;
 mod executor;
 mod json_repair;
 mod scheduler;
@@ -32,6 +33,7 @@ pub(crate) mod turn;
 mod tests;
 
 use turn::{ChannelObserver, TurnOutcome, execute_turn};
+pub use errors::RuntimeErrorKind;
 
 #[cfg(test)]
 use crate::provider::ProviderEvent;
@@ -305,6 +307,7 @@ fn run_turn_with_retry(
         if cancel_flag.load(Ordering::SeqCst) {
             info!("runtime: turn {turn_id} cancelled before attempt {attempt}");
             let _ = event_tx.send(AgentEvent::TurnFailed {
+                kind: RuntimeErrorKind::Cancelled,
                 error: "cancelled".to_string(),
             });
             return None;
@@ -338,13 +341,19 @@ fn run_turn_with_retry(
                     std::thread::sleep(std::time::Duration::from_millis(500));
                 } else {
                     warn!("runtime: turn {turn_id} failed after {attempt} retries: {err}");
-                    let _ = event_tx.send(AgentEvent::TurnFailed { error: err });
+                    let _ = event_tx.send(AgentEvent::TurnFailed {
+                        kind: RuntimeErrorKind::ProviderTransient,
+                        error: err,
+                    });
                     return None;
                 }
             }
             TurnOutcome::FatalError(err) => {
                 warn!("runtime: turn {turn_id} fatal error: {err}");
-                let _ = event_tx.send(AgentEvent::TurnFailed { error: err });
+                let _ = event_tx.send(AgentEvent::TurnFailed {
+                    kind: RuntimeErrorKind::ProviderFatal,
+                    error: err,
+                });
                 return None;
             }
         }

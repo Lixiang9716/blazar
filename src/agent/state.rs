@@ -126,7 +126,7 @@ impl AgentRuntimeState {
                 self.active_tools.clear();
                 true
             }
-            AgentEvent::TurnFailed { error } => {
+            AgentEvent::TurnFailed { error, .. } => {
                 self.turn_state = TurnState::Failed {
                     error: error.clone(),
                 };

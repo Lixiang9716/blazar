@@ -12,7 +12,7 @@ use crate::provider::{LlmProvider, ProviderEvent, ProviderMessage};
 pub(crate) use super::events::{ChannelObserver, SilentObserver, TurnObserver};
 use super::executor::execute_batch;
 use super::scheduler::{PendingToolCall, plan_tool_call, schedule_batches};
-use super::{MAX_TOOL_ITERATIONS, REPEATED_TIMEOUT_GUIDANCE, TIMEOUT_NOTE};
+use super::{MAX_TOOL_ITERATIONS, REPEATED_TIMEOUT_GUIDANCE, RuntimeErrorKind, TIMEOUT_NOTE};
 
 pub(crate) enum TurnOutcome {
     Complete,
@@ -60,7 +60,7 @@ pub(crate) fn execute_turn(
 
     loop {
         if cancel_flag.load(Ordering::SeqCst) {
-            observer.on_turn_failed("cancelled");
+            observer.on_turn_failed(RuntimeErrorKind::Cancelled, "cancelled");
             return TurnOutcome::Cancelled;
         }
 
@@ -114,7 +114,7 @@ pub(crate) fn execute_turn(
 
                 for batch in schedule_batches(planned_calls) {
                     if cancel_flag.load(Ordering::SeqCst) {
-                        observer.on_turn_failed("cancelled");
+                        observer.on_turn_failed(RuntimeErrorKind::Cancelled, "cancelled");
                         return TurnOutcome::Cancelled;
                     }
 
@@ -160,7 +160,7 @@ pub(crate) fn execute_turn(
                     }
 
                     if batch_execution.cancelled_before_launch_completed {
-                        observer.on_turn_failed("cancelled");
+                        observer.on_turn_failed(RuntimeErrorKind::Cancelled, "cancelled");
                         return TurnOutcome::Cancelled;
                     }
 
@@ -239,7 +239,7 @@ pub(super) fn stream_provider_pass(
         for event in &chunk_rx {
             if cancel_flag.load(Ordering::SeqCst) {
                 info!("stream_provider_pass: cancel flag observed, stopping relay");
-                observer.on_turn_failed("cancelled");
+                observer.on_turn_failed(RuntimeErrorKind::Cancelled, "cancelled");
                 pass.outcome = TurnOutcome::Cancelled;
                 return;
             }

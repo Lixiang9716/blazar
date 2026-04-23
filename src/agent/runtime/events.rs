@@ -1,6 +1,7 @@
 use std::sync::mpsc::Sender;
 
 use crate::agent::protocol::AgentEvent;
+use super::RuntimeErrorKind;
 use crate::agent::tools::ToolKind;
 
 /// Observer that receives lifecycle events during a turn.
@@ -9,7 +10,7 @@ pub(crate) trait TurnObserver {
     fn on_thinking_delta(&self, text: &str);
     fn on_tool_call_started(&self, call_id: &str, tool_name: &str, kind: ToolKind, arguments: &str);
     fn on_tool_call_completed(&self, call_id: &str, output: &str, is_error: bool);
-    fn on_turn_failed(&self, error: &str);
+    fn on_turn_failed(&self, kind: RuntimeErrorKind, error: &str);
 }
 
 /// Observer that forwards events to a `Sender<AgentEvent>` (UI channel).
@@ -53,8 +54,9 @@ impl TurnObserver for ChannelObserver<'_> {
         });
     }
 
-    fn on_turn_failed(&self, error: &str) {
+    fn on_turn_failed(&self, kind: RuntimeErrorKind, error: &str) {
         let _ = self.tx.send(AgentEvent::TurnFailed {
+            kind,
             error: error.to_owned(),
         });
     }
@@ -79,5 +81,5 @@ impl TurnObserver for SilentObserver {
     }
 
     fn on_tool_call_completed(&self, _call_id: &str, _output: &str, _is_error: bool) {}
-    fn on_turn_failed(&self, _error: &str) {}
+    fn on_turn_failed(&self, _kind: RuntimeErrorKind, _error: &str) {}
 }

@@ -1,4 +1,5 @@
 use blazar::agent::protocol::AgentEvent;
+use blazar::agent::runtime::RuntimeErrorKind;
 use blazar::agent::state::{ActiveToolStatus, AgentRuntimeState, TurnState};
 use blazar::agent::tools::ToolKind;
 
@@ -66,6 +67,7 @@ fn turn_failed_captures_error() {
         turn_id: "turn-1".into(),
     });
     let changed = state.apply_event(&AgentEvent::TurnFailed {
+        kind: RuntimeErrorKind::ProviderTransient,
         error: "timeout".into(),
     });
     assert!(changed);
@@ -244,6 +246,7 @@ fn full_lifecycle_idle_streaming_done_idle() {
     assert_eq!(state.turn_count, 2);
 
     state.apply_event(&AgentEvent::TurnFailed {
+        kind: RuntimeErrorKind::ProviderTransient,
         error: "timeout".into(),
     });
     assert!(!state.is_busy());
