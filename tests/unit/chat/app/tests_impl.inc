@@ -287,6 +287,71 @@ fn discover_agents_queued_while_busy_and_runs_after_turn() {
 }
 
 #[test]
+fn discover_agents_refresh_failure_continues_queue() {
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+
+    app.send_message("first message");
+    app.apply_agent_event_for_test(AgentEvent::TurnStarted {
+        turn_id: "t1".into(),
+    });
+    assert!(app.agent_state.is_busy());
+
+    app.send_message("/discover-agents");
+    app.send_message("after");
+    assert_eq!(app.pending_messages.len(), 2);
+    assert_eq!(app.messages().len(), 2);
+    assert_eq!(app.messages()[1].body, "first message");
+
+    app.apply_agent_event_for_test(AgentEvent::TurnComplete);
+    assert_eq!(app.pending_messages.len(), 1);
+    assert_eq!(app.pending_messages[0].user_text, "after");
+    assert!(app.messages().iter().any(|msg| msg.body == "/discover-agents"));
+    assert!(!app.messages().iter().any(|msg| msg.body == "after"));
+
+    app.apply_agent_event_for_test(AgentEvent::AcpAgentsRefreshFailed {
+        error: "x".into(),
+    });
+    assert!(app.pending_messages.is_empty());
+    assert!(app.messages().iter().any(|msg| msg.body == "after"));
+    assert!(
+        app.timeline
+            .iter()
+            .any(|entry| entry.actor == Actor::User && entry.body == "after")
+    );
+}
+
+#[test]
+fn streaming_text_not_split_by_queued_user_input() {
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+
+    app.send_message("streaming request");
+    app.apply_agent_event_for_test(AgentEvent::TurnStarted {
+        turn_id: "stream-1".into(),
+    });
+    app.apply_agent_event_for_test(AgentEvent::TextDelta { text: "A".into() });
+
+    app.send_message("queued while busy");
+    assert_eq!(app.pending_messages.len(), 1);
+    assert!(!app.messages().iter().any(|msg| msg.body == "queued while busy"));
+
+    app.apply_agent_event_for_test(AgentEvent::TextDelta { text: "B".into() });
+
+    let streamed_responses: Vec<&TimelineEntry> = app
+        .timeline
+        .iter()
+        .filter(|entry| {
+            entry.actor == Actor::Assistant
+                && entry.kind == EntryKind::Message
+                && entry.body.contains('A')
+        })
+        .collect();
+    assert_eq!(streamed_responses.len(), 1);
+    assert_eq!(streamed_responses[0].body, "AB");
+}
+
+#[test]
 fn dispatch_next_queued_drains_on_turn_failed() {
     let repo_path = env!("CARGO_MANIFEST_DIR");
     let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
