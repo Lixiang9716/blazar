@@ -9,7 +9,8 @@ usage() {
 Usage: install-tools.sh [--check|--install]
 
 Environment:
-  CHECK_ONLY=1   Report missing tools without installing
+  CHECK_ONLY=1        Force check-only mode
+  ALLOW_INSTALL_IN_CI=1  Permit --install when CI=true
 USAGE
 }
 
@@ -45,14 +46,14 @@ check_tools() {
   done
 }
 
-check_only=false
+mode="check"
 case "${1:-}" in
   --check)
-    check_only=true
+    mode="check"
     shift
     ;;
   --install)
-    check_only=false
+    mode="install"
     shift
     ;;
   "")
@@ -69,7 +70,13 @@ if [ "$#" -gt 0 ]; then
 fi
 
 if is_truthy "${CHECK_ONLY:-0}"; then
-  check_only=true
+  mode="check"
+fi
+
+if [ "$mode" = "install" ] && is_truthy "${CI:-0}" && ! is_truthy "${ALLOW_INSTALL_IN_CI:-0}"; then
+  echo "CI protection: refusing automatic installation."
+  echo "Action: set ALLOW_INSTALL_IN_CI=1 to permit --install in CI."
+  exit 2
 fi
 
 package_manager="$(detect_package_manager)"
@@ -88,7 +95,7 @@ fi
 
 echo "Missing tools: ${missing[*]}"
 
-if $check_only; then
+if [ "$mode" = "check" ]; then
   echo "Check-only mode: no installation attempted."
   echo "Action: rerun with '--install' to attempt auto-install when supported."
   case "$package_manager" in
@@ -96,7 +103,7 @@ if $check_only; then
     brew) echo "Action: run 'brew install ${missing[*]}'" ;;
     *) echo "Action: install manually for your platform: ${missing[*]}" ;;
   esac
-  exit 1
+  exit 0
 fi
 
 echo "Install mode: attempting automatic installation."

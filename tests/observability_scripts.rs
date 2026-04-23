@@ -359,8 +359,8 @@ fn install_tools_script_reports_missing_tools_in_check_mode() {
 
     assert_eq!(
         output.status.code(),
-        Some(1),
-        "check-only mode should return non-zero when tools are missing"
+        Some(0),
+        "check-only mode should return success while reporting missing tools"
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
@@ -378,5 +378,68 @@ fn install_tools_script_reports_missing_tools_in_check_mode() {
     assert!(
         stdout.contains("Action: rerun with '--install' to attempt auto-install when supported."),
         "stdout should provide explicit next-step for install mode, got: {stdout}"
+    );
+}
+
+#[test]
+fn install_tools_script_defaults_to_check_mode() {
+    let fake_path = unique_log_file("install-tools-default-check-path");
+    std::fs::create_dir_all(&fake_path).expect("should create fake PATH directory");
+    let fake_path_text = fake_path.to_str().expect("utf-8 fake PATH");
+
+    let output = run_script_with_env("install-tools.sh", &[], &[("PATH", fake_path_text)]);
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "default mode should be safe check-only"
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Check-only mode: no installation attempted."),
+        "default mode should not attempt installation, got: {stdout}"
+    );
+}
+
+#[test]
+fn install_tools_script_rejects_invalid_arguments() {
+    let output = run_script("install-tools.sh", &["--invalid"]);
+
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "invalid arguments should return usage error"
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("Usage: install-tools.sh"),
+        "stderr should show usage for invalid arguments"
+    );
+}
+
+#[test]
+fn install_tools_script_blocks_install_attempts_in_ci_without_opt_in() {
+    let fake_path = unique_log_file("install-tools-ci-path");
+    std::fs::create_dir_all(&fake_path).expect("should create fake PATH directory");
+    let fake_path_text = fake_path.to_str().expect("utf-8 fake PATH");
+
+    let output = run_script_with_env(
+        "install-tools.sh",
+        &["--install"],
+        &[("CI", "true"), ("PATH", fake_path_text)],
+    );
+
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "CI protection should block install mode unless explicitly allowed"
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("CI protection: refusing automatic installation."),
+        "stdout should explain CI safety guard, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("Action: set ALLOW_INSTALL_IN_CI=1 to permit --install in CI."),
+        "stdout should explain explicit CI opt-in, got: {stdout}"
     );
 }
