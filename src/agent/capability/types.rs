@@ -179,6 +179,8 @@ impl CapabilityResult {
     }
 
     pub fn text_output(&self) -> String {
+        // Keep this projection behavior in lockstep with ToolResult::text_output and
+        // conversion bridges so mixed text/resource rendering stays behavior-stable.
         let mut output = String::new();
         let mut previous_was_resource = false;
         for part in &self.content {
@@ -198,6 +200,9 @@ impl CapabilityResult {
                     previous_was_resource = true;
                 }
             }
+        }
+        if output.is_empty() && let Some(error) = &self.error {
+            output.push_str(&error.message);
         }
         output
     }
@@ -303,5 +308,18 @@ mod tests {
 
         let coded = CapabilityError::with_code("ACP_TIMEOUT", "timed out");
         assert_eq!(coded.to_string(), "ACP_TIMEOUT: timed out");
+    }
+
+    #[test]
+    fn capability_text_output_falls_back_to_error_message_for_metadata_only_failures() {
+        let result = CapabilityResult {
+            content: Vec::new(),
+            exit_code: None,
+            is_error: false,
+            output_truncated: false,
+            error: Some(CapabilityError::with_code("ACP_TIMEOUT", "timed out")),
+        };
+
+        assert_eq!(result.text_output(), "timed out");
     }
 }

@@ -186,6 +186,7 @@ impl ToolResult {
     }
 
     pub fn text_output(&self) -> String {
+        // Keep this projection behavior in lockstep with CapabilityResult::text_output.
         let mut output = String::new();
         let mut previous_was_resource = false;
         for part in &self.content {
@@ -585,6 +586,49 @@ mod tests {
             }
         );
         assert_eq!(ResourceClaim::from(capability_claim), claim);
+    }
+
+    #[test]
+    fn mixed_content_projection_stays_in_lockstep_across_tool_and_capability_results() {
+        let tool_result = ToolResult {
+            content: vec![
+                ContentPart::text("summary"),
+                ContentPart::Resource {
+                    uri: "file://workspace/out.txt".into(),
+                    mime_type: Some("text/plain".into()),
+                },
+                ContentPart::text("\ndetails"),
+            ],
+            exit_code: None,
+            is_error: false,
+            output_truncated: false,
+        };
+
+        let capability_result = tool_result.clone().into_capability_result();
+        assert_eq!(tool_result.text_output(), capability_result.text_output());
+
+        let round_tripped = ToolResult::from_capability_result(capability_result);
+        assert_eq!(tool_result.text_output(), round_tripped.text_output());
+    }
+
+    #[test]
+    fn error_metadata_projection_stays_in_lockstep_across_capability_and_tool_results() {
+        let capability_result = CapabilityResult {
+            content: Vec::new(),
+            exit_code: None,
+            is_error: false,
+            output_truncated: false,
+            error: Some(CapabilityError::with_code("ACP_TIMEOUT", "timed out")),
+        };
+
+        let tool_result = ToolResult::from_capability_result(capability_result.clone());
+        assert_eq!(capability_result.text_output(), tool_result.text_output());
+
+        let back_to_capability = tool_result.into_capability_result();
+        assert_eq!(
+            capability_result.text_output(),
+            back_to_capability.text_output()
+        );
     }
 
     #[test]
