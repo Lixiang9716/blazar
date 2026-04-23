@@ -979,10 +979,10 @@ fn runtime_failure_logs_include_turn_and_error_kind_fields() {
         &cancel,
     );
 
-    let saw_structured_failure = crate::observability::logging::take_captured_structured_events_for_test()
+    let structured_failure = crate::observability::logging::take_captured_structured_events_for_test()
         .into_iter()
         .filter_map(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
-        .any(|event| {
+        .find(|event| {
             event
                 .get("event")
                 .and_then(serde_json::Value::as_str)
@@ -995,10 +995,28 @@ fn runtime_failure_logs_include_turn_and_error_kind_fields() {
                     .get("error_kind")
                     .and_then(serde_json::Value::as_str)
                     == Some("ProviderFatal")
-        });
+        })
+        .expect("expected a structured turn_failed event with turn_id+error_kind");
 
     assert!(
-        saw_structured_failure,
+        structured_failure
+            .get("message")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|message| message.contains("invalid API key")),
+        "runtime failure log message should include provider error detail for auditability"
+    );
+    assert!(
+        structured_failure
+            .get("turn_id")
+            .and_then(serde_json::Value::as_str)
+            == Some("turn-observe-failure"),
+        "runtime failure logs should include turn_id"
+    );
+    assert!(
+        structured_failure
+            .get("error_kind")
+            .and_then(serde_json::Value::as_str)
+            == Some("ProviderFatal"),
         "runtime failure logs should include turn_id and error_kind fields"
     );
 }

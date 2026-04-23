@@ -895,10 +895,10 @@ fn tool_events_log_include_turn_and_tool_name() {
         normalized_claims: Vec::new(),
     });
 
-    let saw_tool_fields = crate::observability::logging::take_captured_structured_events_for_test()
+    let tool_started = crate::observability::logging::take_captured_structured_events_for_test()
         .into_iter()
         .filter_map(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
-        .any(|event| {
+        .find(|event| {
             event
                 .get("event")
                 .and_then(serde_json::Value::as_str)
@@ -911,10 +911,28 @@ fn tool_events_log_include_turn_and_tool_name() {
                     .get("tool_name")
                     .and_then(serde_json::Value::as_str)
                     == Some("bash")
-        });
+        })
+        .expect("expected structured tool_call_started event with turn_id+tool_name");
 
     assert!(
-        saw_tool_fields,
+        tool_started
+            .get("message")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|message| message.contains("tool=bash")),
+        "tool event log message should include tool identifier for auditability"
+    );
+    assert!(
+        tool_started
+            .get("turn_id")
+            .and_then(serde_json::Value::as_str)
+            == Some("turn-tool-observe"),
+        "tool event logs should include turn_id"
+    );
+    assert!(
+        tool_started
+            .get("tool_name")
+            .and_then(serde_json::Value::as_str)
+            == Some("bash"),
         "tool event logs should include turn_id and tool_name fields"
     );
 }
