@@ -10,6 +10,11 @@ use serde_json::Value;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
+use crate::agent::capability::{
+    CapabilityAccess, CapabilityClaim, CapabilityContentPart, CapabilityError, CapabilityKind,
+    CapabilityResult,
+};
+
 /// Declarative metadata advertised to the model for each callable tool.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ToolSpec {
@@ -24,6 +29,30 @@ pub enum ToolKind {
     Agent { is_acp: bool },
 }
 
+impl ToolKind {
+    pub fn into_capability_kind(self) -> CapabilityKind {
+        self.into()
+    }
+}
+
+impl From<ToolKind> for CapabilityKind {
+    fn from(value: ToolKind) -> Self {
+        match value {
+            ToolKind::Local => Self::Local,
+            ToolKind::Agent { is_acp } => Self::Agent { is_acp },
+        }
+    }
+}
+
+impl From<CapabilityKind> for ToolKind {
+    fn from(value: CapabilityKind) -> Self {
+        match value {
+            CapabilityKind::Local => Self::Local,
+            CapabilityKind::Agent { is_acp } => Self::Agent { is_acp },
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResourceAccess {
     ReadOnly,
@@ -31,10 +60,54 @@ pub enum ResourceAccess {
     Exclusive,
 }
 
+impl From<ResourceAccess> for CapabilityAccess {
+    fn from(value: ResourceAccess) -> Self {
+        match value {
+            ResourceAccess::ReadOnly => Self::ReadOnly,
+            ResourceAccess::ReadWrite => Self::ReadWrite,
+            ResourceAccess::Exclusive => Self::Exclusive,
+        }
+    }
+}
+
+impl From<CapabilityAccess> for ResourceAccess {
+    fn from(value: CapabilityAccess) -> Self {
+        match value {
+            CapabilityAccess::ReadOnly => Self::ReadOnly,
+            CapabilityAccess::ReadWrite => Self::ReadWrite,
+            CapabilityAccess::Exclusive => Self::Exclusive,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResourceClaim {
     pub resource: String,
     pub access: ResourceAccess,
+}
+
+impl ResourceClaim {
+    pub fn into_capability_claim(self) -> CapabilityClaim {
+        self.into()
+    }
+}
+
+impl From<ResourceClaim> for CapabilityClaim {
+    fn from(value: ResourceClaim) -> Self {
+        Self {
+            resource: value.resource,
+            access: value.access.into(),
+        }
+    }
+}
+
+impl From<CapabilityClaim> for ResourceClaim {
+    fn from(value: CapabilityClaim) -> Self {
+        Self {
+            resource: value.resource,
+            access: value.access.into(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -60,6 +133,24 @@ impl ContentPart {
                 Some(mime_type) => format!("[resource] {uri} ({mime_type})"),
                 None => format!("[resource] {uri}"),
             },
+        }
+    }
+}
+
+impl From<ContentPart> for CapabilityContentPart {
+    fn from(value: ContentPart) -> Self {
+        match value {
+            ContentPart::Text { text } => Self::Text { text },
+            ContentPart::Resource { uri, mime_type } => Self::Resource { uri, mime_type },
+        }
+    }
+}
+
+impl From<CapabilityContentPart> for ContentPart {
+    fn from(value: CapabilityContentPart) -> Self {
+        match value {
+            CapabilityContentPart::Text { text } => Self::Text { text },
+            CapabilityContentPart::Resource { uri, mime_type } => Self::Resource { uri, mime_type },
         }
     }
 }
@@ -116,6 +207,58 @@ impl ToolResult {
             }
         }
         output
+    }
+
+    pub fn into_capability_result(self) -> CapabilityResult {
+        self.into()
+    }
+
+    pub fn from_capability_result(result: CapabilityResult) -> Self {
+        result.into()
+    }
+}
+
+impl From<ToolResult> for CapabilityResult {
+    fn from(value: ToolResult) -> Self {
+        let error = if value.is_error {
+            Some(CapabilityError::new(value.text_output()))
+        } else {
+            None
+        };
+
+        Self {
+            content: value.content.into_iter().map(Into::into).collect(),
+            exit_code: value.exit_code,
+            is_error: value.is_error,
+            output_truncated: value.output_truncated,
+            error,
+        }
+    }
+}
+
+impl From<CapabilityResult> for ToolResult {
+    fn from(value: CapabilityResult) -> Self {
+        let CapabilityResult {
+            content,
+            exit_code,
+            is_error,
+            output_truncated,
+            error,
+        } = value;
+
+        let mut projected_content = content.into_iter().map(Into::into).collect::<Vec<_>>();
+        if projected_content.is_empty()
+            && let Some(error) = &error
+        {
+            projected_content.push(ContentPart::text(error.message.clone()));
+        }
+
+        Self {
+            content: projected_content,
+            exit_code,
+            is_error: is_error || error.is_some(),
+            output_truncated,
+        }
     }
 }
 
@@ -323,6 +466,9 @@ pub fn resolve_workspace_write_path(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agent::capability::{
+        CapabilityAccess, CapabilityClaim, CapabilityError, CapabilityKind, CapabilityResult,
+    };
     use crate::provider::echo::EchoProvider;
     use serde_json::json;
     use std::sync::Arc;
@@ -376,6 +522,69 @@ mod tests {
         assert_eq!(err.text_output(), "nope");
         assert!(err.is_error);
         assert!(!err.output_truncated);
+    }
+
+    #[test]
+    fn tool_result_round_trips_through_capability_result() {
+        let original = ToolResult {
+            content: vec![
+                ContentPart::text("summary"),
+                ContentPart::Resource {
+                    uri: "file://workspace/out.txt".into(),
+                    mime_type: Some("text/plain".into()),
+                },
+                ContentPart::text("details"),
+            ],
+            exit_code: Some(0),
+            is_error: false,
+            output_truncated: true,
+        };
+
+        let converted = original.clone().into_capability_result();
+        let round_tripped = ToolResult::from_capability_result(converted);
+        assert_eq!(round_tripped, original);
+        assert_eq!(round_tripped.text_output(), original.text_output());
+    }
+
+    #[test]
+    fn capability_result_error_metadata_stays_behavior_compatible() {
+        let capability_result = CapabilityResult {
+            content: Vec::new(),
+            exit_code: None,
+            is_error: false,
+            output_truncated: false,
+            error: Some(CapabilityError::with_code("ACP_TIMEOUT", "timed out")),
+        };
+
+        let tool_result: ToolResult = capability_result.into();
+        assert!(tool_result.is_error);
+        assert_eq!(tool_result.text_output(), "timed out");
+    }
+
+    #[test]
+    fn tool_kind_and_claims_convert_to_capability_contracts() {
+        assert_eq!(
+            CapabilityKind::from(ToolKind::Agent { is_acp: true }),
+            CapabilityKind::Agent { is_acp: true }
+        );
+        assert_eq!(
+            ToolKind::from(CapabilityKind::Agent { is_acp: false }),
+            ToolKind::Agent { is_acp: false }
+        );
+
+        let claim = ResourceClaim {
+            resource: "fs:src/main.rs".into(),
+            access: ResourceAccess::ReadWrite,
+        };
+        let capability_claim: CapabilityClaim = claim.clone().into_capability_claim();
+        assert_eq!(
+            capability_claim,
+            CapabilityClaim {
+                resource: "fs:src/main.rs".into(),
+                access: CapabilityAccess::ReadWrite,
+            }
+        );
+        assert_eq!(ResourceClaim::from(capability_claim), claim);
     }
 
     #[test]
