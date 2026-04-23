@@ -1,7 +1,7 @@
 use blazar::chat::commands::{CommandRegistry, builtins::register_builtin_commands};
 
 #[test]
-fn builtin_registry_contains_plan_and_discover_agents() {
+fn chat_command_registry_builtin_registry_contains_plan_and_discover_agents() {
     let mut registry = CommandRegistry::new();
     register_builtin_commands(&mut registry).expect("register built-ins");
 
@@ -11,7 +11,7 @@ fn builtin_registry_contains_plan_and_discover_agents() {
 }
 
 #[test]
-fn registry_rejects_duplicate_command_names() {
+fn chat_command_registry_rejects_duplicate_command_names() {
     let mut registry = CommandRegistry::new();
     register_builtin_commands(&mut registry).expect("first registration");
 
