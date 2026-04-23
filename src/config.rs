@@ -346,3 +346,7 @@ fn validate_configured_agent(
 const fn default_enabled() -> bool {
     true
 }
+
+#[cfg(test)]
+#[path = "config_tests.rs"]
+mod tests;

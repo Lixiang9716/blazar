@@ -63,99 +63,10 @@ impl LlmProvider for OpenRouterProvider {
             messages.len(),
             tools.len()
         );
-
-        let truncated = truncate_provider_messages(messages);
-
-        // Build openrouter-rs messages
-        let mut or_messages: Vec<OrMessage> = Vec::new();
-
-        // Inject system prompt
-        if let Some(ref sys) = self.config.system_prompt {
-            or_messages.push(OrMessage::new(OrRole::System, render_system_prompt(sys)));
-        }
-
-        // Convert ProviderMessage → OrMessage
-        let mut idx = 0usize;
-        while idx < truncated.len() {
-            match &truncated[idx] {
-                ProviderMessage::User { content } => {
-                    or_messages.push(OrMessage::new(OrRole::User, content.as_str()));
-                    idx += 1;
-                }
-                ProviderMessage::Assistant { content } => {
-                    // Collect any immediately following ToolCall messages
-                    let (tool_calls, next_idx) = collect_tool_calls(&truncated, idx + 1);
-                    if tool_calls.is_empty() {
-                        or_messages.push(OrMessage::new(OrRole::Assistant, content.as_str()));
-                    } else {
-                        or_messages.push(OrMessage::assistant_with_tool_calls(
-                            content.as_str(),
-                            tool_calls,
-                        ));
-                    }
-                    idx = next_idx;
-                }
-                ProviderMessage::ToolCall { .. } => {
-                    // Orphan ToolCall (no preceding Assistant) — wrap it
-                    let (tool_calls, next_idx) = collect_tool_calls(&truncated, idx);
-                    or_messages.push(OrMessage::assistant_with_tool_calls("", tool_calls));
-                    idx = next_idx;
-                }
-                ProviderMessage::ToolResult {
-                    tool_call_id,
-                    output,
-                    ..
-                } => {
-                    or_messages.push(OrMessage::tool_response(tool_call_id, output.as_str()));
-                    idx += 1;
-                }
-            }
-        }
-
-        // Convert ToolSpec → OrTool
-        let or_tools: Vec<OrTool> = tools
-            .iter()
-            .map(|t| OrTool::new(&t.name, &t.description, t.parameters.clone()))
-            .collect();
-
-        // Build request
-        let mut builder = ChatCompletionRequest::builder();
-        builder
-            .model(model)
-            .messages(or_messages)
-            .max_tokens(self.config.max_tokens)
-            .temperature(f64::from(self.config.temperature));
-
-        if let Some(top_p) = self.config.top_p {
-            builder.top_p(f64::from(top_p));
-        }
-        if let Some(fp) = self.config.frequency_penalty {
-            builder.frequency_penalty(f64::from(fp));
-        }
-
-        // Tools & tool choice
-        if !or_tools.is_empty() {
-            builder.tools(or_tools);
-            match determine_tool_choice(&truncated, true) {
-                Some(ToolChoice::Auto) => {
-                    builder.tool_choice_auto();
-                }
-                Some(ToolChoice::None) => {
-                    builder.tool_choice_none();
-                }
-                None => {}
-            }
-        }
-
-        // Reasoning / thinking mode
-        if self.config.enable_thinking == Some(true) {
-            builder.enable_reasoning();
-        }
-
-        let request = match builder.build() {
-            Ok(req) => req,
-            Err(e) => {
-                let _ = tx.send(ProviderEvent::Error(format!("request build error: {e}")));
+        let request = match build_chat_request(&self.config, model, messages, tools) {
+            Ok(request) => request,
+            Err(error) => {
+                let _ = tx.send(ProviderEvent::Error(error));
                 return;
             }
         };
@@ -271,4 +182,247 @@ fn collect_tool_calls(
     }
 
     (collected, index)
+}
+
+fn build_chat_request(
+    config: &OpenAiConfig,
+    model: &str,
+    messages: &[ProviderMessage],
+    tools: &[ToolSpec],
+) -> Result<ChatCompletionRequest, String> {
+    let truncated = truncate_provider_messages(messages);
+    let or_messages = build_or_messages(config, &truncated);
+    let or_tools: Vec<OrTool> = tools
+        .iter()
+        .map(|tool| OrTool::new(&tool.name, &tool.description, tool.parameters.clone()))
+        .collect();
+
+    let mut builder = ChatCompletionRequest::builder();
+    builder
+        .model(model)
+        .messages(or_messages)
+        .max_tokens(config.max_tokens)
+        .temperature(f64::from(config.temperature));
+
+    if let Some(top_p) = config.top_p {
+        builder.top_p(f64::from(top_p));
+    }
+    if let Some(fp) = config.frequency_penalty {
+        builder.frequency_penalty(f64::from(fp));
+    }
+
+    if !or_tools.is_empty() {
+        builder.tools(or_tools);
+        match determine_tool_choice(&truncated, true) {
+            Some(ToolChoice::Auto) => {
+                builder.tool_choice_auto();
+            }
+            Some(ToolChoice::None) => {
+                builder.tool_choice_none();
+            }
+            None => {}
+        }
+    }
+
+    if config.enable_thinking == Some(true) {
+        builder.enable_reasoning();
+    }
+
+    builder
+        .build()
+        .map_err(|error| format!("request build error: {error}"))
+}
+
+fn build_or_messages(config: &OpenAiConfig, messages: &[ProviderMessage]) -> Vec<OrMessage> {
+    let mut or_messages: Vec<OrMessage> = Vec::new();
+
+    if let Some(ref prompt) = config.system_prompt {
+        or_messages.push(OrMessage::new(OrRole::System, render_system_prompt(prompt)));
+    }
+
+    let mut idx = 0usize;
+    while idx < messages.len() {
+        match &messages[idx] {
+            ProviderMessage::User { content } => {
+                or_messages.push(OrMessage::new(OrRole::User, content.as_str()));
+                idx += 1;
+            }
+            ProviderMessage::Assistant { content } => {
+                let (tool_calls, next_idx) = collect_tool_calls(messages, idx + 1);
+                if tool_calls.is_empty() {
+                    or_messages.push(OrMessage::new(OrRole::Assistant, content.as_str()));
+                } else {
+                    or_messages.push(OrMessage::assistant_with_tool_calls(
+                        content.as_str(),
+                        tool_calls,
+                    ));
+                }
+                idx = next_idx;
+            }
+            ProviderMessage::ToolCall { .. } => {
+                let (tool_calls, next_idx) = collect_tool_calls(messages, idx);
+                or_messages.push(OrMessage::assistant_with_tool_calls("", tool_calls));
+                idx = next_idx;
+            }
+            ProviderMessage::ToolResult {
+                tool_call_id,
+                output,
+                ..
+            } => {
+                or_messages.push(OrMessage::tool_response(tool_call_id, output.as_str()));
+                idx += 1;
+            }
+        }
+    }
+
+    or_messages
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{build_chat_request, build_or_messages, collect_tool_calls};
+    use crate::agent::tools::ToolSpec;
+    use crate::provider::ProviderMessage;
+    use crate::provider::openai_compat::OpenAiConfig;
+    use serde_json::json;
+
+    fn test_config() -> OpenAiConfig {
+        OpenAiConfig {
+            provider_type: Some("openrouter".to_owned()),
+            api_key: "test-key".to_owned(),
+            base_url: "https://openrouter.ai/api/v1".to_owned(),
+            model: "openrouter/auto".to_owned(),
+            max_tokens: 512,
+            temperature: 0.1,
+            top_p: Some(0.8),
+            top_k: None,
+            frequency_penalty: Some(0.2),
+            enable_thinking: Some(true),
+            thinking_budget: None,
+            system_prompt: Some("Follow instructions".to_owned()),
+            system_prompt_file: None,
+        }
+    }
+
+    #[test]
+    fn collect_tool_calls_collects_consecutive_tool_calls() {
+        let messages = vec![
+            ProviderMessage::Assistant {
+                content: "planning".into(),
+            },
+            ProviderMessage::ToolCall {
+                id: "call-1".into(),
+                name: "read_file".into(),
+                arguments: "{\"path\":\"a.txt\"}".into(),
+            },
+            ProviderMessage::ToolCall {
+                id: "call-2".into(),
+                name: "list_dir".into(),
+                arguments: "{\"path\":\".\"}".into(),
+            },
+            ProviderMessage::User {
+                content: "continue".into(),
+            },
+        ];
+
+        let (calls, next) = collect_tool_calls(&messages, 1);
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].id, "call-1");
+        assert_eq!(calls[0].function.name, "read_file");
+        assert_eq!(calls[1].id, "call-2");
+        assert_eq!(calls[1].function.name, "list_dir");
+        assert_eq!(next, 3);
+    }
+
+    #[test]
+    fn collect_tool_calls_stops_when_non_tool_message_appears() {
+        let messages = vec![
+            ProviderMessage::ToolCall {
+                id: "call-1".into(),
+                name: "read_file".into(),
+                arguments: "{}".into(),
+            },
+            ProviderMessage::Assistant {
+                content: "done".into(),
+            },
+        ];
+
+        let (calls, next) = collect_tool_calls(&messages, 0);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].id, "call-1");
+        assert_eq!(next, 1);
+    }
+
+    #[test]
+    fn build_or_messages_covers_orphan_tool_calls_and_tool_results() {
+        let cfg = test_config();
+        let messages = vec![
+            ProviderMessage::ToolCall {
+                id: "call-orphan".into(),
+                name: "read_file".into(),
+                arguments: "{\"path\":\"Cargo.toml\"}".into(),
+            },
+            ProviderMessage::ToolResult {
+                tool_call_id: "call-orphan".into(),
+                output: "content".into(),
+                is_error: false,
+            },
+        ];
+
+        let converted = build_or_messages(&cfg, &messages);
+        assert_eq!(converted.len(), 3);
+    }
+
+    #[test]
+    fn build_chat_request_accepts_messages_with_tools_and_reasoning() {
+        let cfg = test_config();
+        let messages = vec![
+            ProviderMessage::User {
+                content: "inspect files".into(),
+            },
+            ProviderMessage::Assistant {
+                content: "I will call tools.".into(),
+            },
+            ProviderMessage::ToolCall {
+                id: "call-1".into(),
+                name: "read_file".into(),
+                arguments: "{\"path\":\"Cargo.toml\"}".into(),
+            },
+            ProviderMessage::ToolResult {
+                tool_call_id: "call-1".into(),
+                output: "ok".into(),
+                is_error: false,
+            },
+        ];
+        let tools = vec![ToolSpec {
+            name: "read_file".into(),
+            description: "Read a file".into(),
+            parameters: json!({
+                "type": "object",
+                "properties": { "path": { "type": "string" } },
+                "required": ["path"]
+            }),
+        }];
+
+        let request = build_chat_request(&cfg, "openrouter/auto", &messages, &tools);
+        assert!(request.is_ok(), "request should build for valid tool flow");
+    }
+
+    #[test]
+    fn build_chat_request_accepts_messages_without_tools() {
+        let mut cfg = test_config();
+        cfg.enable_thinking = Some(false);
+        cfg.top_p = None;
+        cfg.frequency_penalty = None;
+
+        let messages = vec![ProviderMessage::User {
+            content: "hello".into(),
+        }];
+
+        let request = build_chat_request(&cfg, "openrouter/auto", &messages, &[]);
+        assert!(
+            request.is_ok(),
+            "request should build without tool metadata"
+        );
+    }
 }

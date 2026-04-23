@@ -1,0 +1,14 @@
+[default]
+engine = "Llvm"
+out = ["Xml"]
+
+# These adapters are exercised primarily through integration flows and external
+# process/network interactions; excluding them keeps the unit-coverage signal
+# focused on deterministic core logic.
+exclude-files = [
+  "src/agent/adapters/acp_client/client.rs",
+  "src/agent/tools/bash.rs",
+  "src/chat/event_loop.rs",
+  "src/provider/openai_compat.rs",
+  "src/provider/openrouter.rs",
+]
