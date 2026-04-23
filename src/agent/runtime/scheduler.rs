@@ -243,6 +243,49 @@ mod tests {
     }
 
     #[test]
+    fn scheduler_batches_unrelated_reads_with_conflicting_writes() {
+        let batches = schedule_batches(vec![
+            call(
+                "read-a",
+                vec![CapabilityClaim {
+                    resource: "fs:src/lib.rs".into(),
+                    access: CapabilityAccess::ReadOnly,
+                }],
+            ),
+            call(
+                "write-b",
+                vec![CapabilityClaim {
+                    resource: "fs:src/lib.rs".into(),
+                    access: CapabilityAccess::ReadWrite,
+                }],
+            ),
+            call(
+                "read-c",
+                vec![CapabilityClaim {
+                    resource: "fs:src/other.rs".into(),
+                    access: CapabilityAccess::ReadOnly,
+                }],
+            ),
+        ]);
+
+        assert_eq!(batches.len(), 2);
+        assert_eq!(
+            batches[0]
+                .iter()
+                .map(|scheduled| scheduled.item)
+                .collect::<Vec<_>>(),
+            vec!["read-a"]
+        );
+        assert_eq!(
+            batches[1]
+                .iter()
+                .map(|scheduled| scheduled.item)
+                .collect::<Vec<_>>(),
+            vec!["write-b", "read-c"]
+        );
+    }
+
+    #[test]
     fn scheduler_treats_exclusive_claims_as_global_conflicts() {
         let batches = schedule_batches(vec![
             call(
