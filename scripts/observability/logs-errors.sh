@@ -24,10 +24,11 @@ with open(path, "r", encoding="utf-8") as handle:
         except json.JSONDecodeError as error:
             print(f"invalid json in {path}:{line_no}: {error}", file=sys.stderr)
             sys.exit(1)
-        if record.get("level") in ("WARN", "ERROR"):
+        level = record.get("level")
+        if isinstance(level, str) and level.upper() in ("WARN", "ERROR"):
             print(json.dumps(record, separators=(",", ":")))
 PY
   exit 0
 }
 
-jq -c 'select(.level == "WARN" or .level == "ERROR")' "$LOG_FILE"
+jq -c 'select((.level // "" | ascii_upcase) == "WARN" or (.level // "" | ascii_upcase) == "ERROR")' "$LOG_FILE"

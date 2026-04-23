@@ -2,6 +2,7 @@
 set -euo pipefail
 
 TURN_ID="${1:-}"
+TURN_ID="$(printf '%s' "$TURN_ID" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
 LOG_FILE="${2:-logs/blazar.log}"
 
 test -n "$TURN_ID" || {

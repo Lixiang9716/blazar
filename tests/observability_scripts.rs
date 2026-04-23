@@ -58,7 +58,11 @@ fn logs_errors_filters_warn_and_error_levels() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let lines: Vec<&str> = stdout.lines().collect();
-    assert_eq!(lines.len(), 4, "expected warn/error records regardless of case");
+    assert_eq!(
+        lines.len(),
+        4,
+        "expected warn/error records regardless of case"
+    );
 
     let mut messages = Vec::new();
     for line in lines {
@@ -104,7 +108,10 @@ fn logs_turn_filters_by_turn_id() {
 
     let output = run_script(
         "logs-turn.sh",
-        &["  turn-1  ", log_file.to_str().expect("utf-8 log file path")],
+        &[
+            "  turn-1  ",
+            log_file.to_str().expect("utf-8 log file path"),
+        ],
     );
 
     assert!(
