@@ -101,6 +101,25 @@ fn render_entry_renders_tool_use_and_tool_call_statuses() {
 }
 
 #[test]
+fn tool_descriptor_maps_status_and_semantic_summary() {
+    let running = TimelineEntry::tool_call(
+        "call-1",
+        "read_file",
+        ToolKind::Local,
+        "reading",
+        r#"{"path":"src/main.rs"}"#,
+        ToolCallStatus::Running,
+    );
+    let descriptor = super::tooling::tool_descriptor(&running);
+
+    assert_eq!(
+        descriptor.status_visual,
+        super::tooling::descriptor::StatusVisual::RunningDot
+    );
+    assert_eq!(descriptor.subtitle.as_deref(), Some("src/main.rs"));
+}
+
+#[test]
 fn render_entry_renders_bash_warning_hint_thinking_and_code_block() {
     let theme = crate::chat::theme::build_theme();
 

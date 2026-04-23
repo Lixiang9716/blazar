@@ -1,6 +1,35 @@
 use super::common::{extract_tool_subtitle, tool_badge};
 use super::*;
 
+pub(super) mod descriptor;
+
+#[allow(dead_code)]
+pub(super) fn tool_descriptor(entry: &TimelineEntry) -> descriptor::EntryDescriptor {
+    let EntryKind::ToolCall {
+        call_id, tool_name, status, ..
+    } = &entry.kind
+    else {
+        unreachable!("tool_descriptor only handles tool call entries");
+    };
+
+    let status_visual = match status {
+        ToolCallStatus::Running => descriptor::StatusVisual::RunningDot,
+        ToolCallStatus::Success => descriptor::StatusVisual::EndedDot,
+        ToolCallStatus::Error => descriptor::StatusVisual::ErrorX,
+    };
+
+    let subtitle = extract_tool_subtitle(tool_name, &entry.details);
+
+    descriptor::EntryDescriptor {
+        status_visual,
+        title: tool_name.clone(),
+        subtitle: (!subtitle.is_empty()).then_some(subtitle),
+        preview_lines: Vec::new(),
+        result_mode: descriptor::ResultMode::Plain,
+        call_identity: Some(call_id.clone()),
+    }
+}
+
 pub(super) fn render_tool_use_entry<'a>(
     entry: &TimelineEntry,
     theme: &ChatTheme,
