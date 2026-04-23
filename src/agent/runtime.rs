@@ -344,7 +344,20 @@ fn run_turn_with_retry(
                 let _ = event_tx.send(AgentEvent::TurnComplete);
                 return Some(messages);
             }
-            TurnOutcome::Cancelled => return None,
+            TurnOutcome::Cancelled => {
+                emit_structured_event(
+                    log::Level::Info,
+                    module_path!(),
+                    "turn_failed",
+                    "runtime turn cancelled during execution",
+                    None,
+                    Some(turn_id),
+                    None,
+                    None,
+                    Some("Cancelled"),
+                );
+                return None;
+            }
             TurnOutcome::TransientError(err) => {
                 if attempt < MAX_TRANSIENT_RETRIES {
                     warn!(
