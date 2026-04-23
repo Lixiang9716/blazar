@@ -20,6 +20,8 @@ async fn execute_plan_command_sets_composer_prefill() {
 #[tokio::test]
 async fn unknown_command_returns_unavailable_error() {
     let mut app = ChatApp::new_for_test(REPO_ROOT).expect("app");
+    let baseline_timeline_len = app.timeline().len();
+    let baseline_composer = app.composer_text().to_string();
 
     let err = execute_palette_command_for_test(&mut app, "/does-not-exist", json!({}))
         .await
@@ -29,6 +31,8 @@ async fn unknown_command_returns_unavailable_error() {
         err,
         CommandError::Unavailable(message) if message.contains("/does-not-exist")
     ));
+    assert_eq!(app.timeline().len(), baseline_timeline_len);
+    assert_eq!(app.composer_text(), baseline_composer);
 }
 
 #[tokio::test]

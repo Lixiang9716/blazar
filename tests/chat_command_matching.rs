@@ -62,6 +62,29 @@ mod chat_command_matching {
         let ranked = ranked_match_names("/PLAN", &specs);
         assert_eq!(ranked.first().copied(), Some("/plan"));
     }
+
+    #[test]
+    fn slash_only_returns_all_commands() {
+        let specs = vec![
+            command_spec("/plan", "Generate a plan"),
+            command_spec("/model", "Switch model"),
+            command_spec("/theme", "Switch theme"),
+        ];
+
+        let ranked = ranked_match_names("/", &specs);
+        assert_eq!(ranked, vec!["/plan", "/model", "/theme"]);
+    }
+
+    #[test]
+    fn non_slash_query_returns_no_commands() {
+        let specs = vec![
+            command_spec("/plan", "Generate a plan"),
+            command_spec("/model", "Switch model"),
+        ];
+
+        let ranked = ranked_match_names("pla", &specs);
+        assert!(ranked.is_empty());
+    }
 }
 
 mod chat_command_matching_picker {

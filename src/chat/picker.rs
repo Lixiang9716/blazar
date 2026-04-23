@@ -270,18 +270,13 @@ mod tests {
 
     #[test]
     fn filter_updates_reset_selection() {
-        let mut picker = ModalPicker::new(
-            "Commands",
-            vec![
-                PickerItem::new("/help", "help"),
-                PickerItem::new("/clear", "clear"),
-            ],
-        );
+        let mut picker = command_palette_for_test();
         picker.open();
         picker.move_down();
         assert_eq!(picker.selected_index(), Some(1));
 
-        picker.push_filter('h');
+        picker.push_filter('p');
+        assert_eq!(picker.filter, "/p");
         assert_eq!(picker.selected_index(), Some(0));
     }
 
