@@ -332,10 +332,7 @@ fn prepare_tool_call(
                     claims: Vec::new(),
                 }
             } else {
-                let claims = tools
-                    .get(&pending.name)
-                    .map(|tool| tool.resource_claims(&parsed.value))
-                    .unwrap_or_default();
+                let claims = tools.resource_claims(&pending.name, &parsed.value);
                 ScheduledCall {
                     item: PreparedToolCall {
                         pending,

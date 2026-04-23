@@ -10,9 +10,10 @@ use serde_json::Value;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
+use crate::agent::capability::local::LocalToolCapability;
 use crate::agent::capability::{
-    CapabilityAccess, CapabilityClaim, CapabilityContentPart, CapabilityError, CapabilityKind,
-    CapabilityResult,
+    CapabilityAccess, CapabilityClaim, CapabilityContentPart, CapabilityError, CapabilityInput,
+    CapabilityKind, CapabilityResult,
 };
 
 /// Declarative metadata advertised to the model for each callable tool.
@@ -320,13 +321,38 @@ impl ToolRegistry {
         self.tools.iter().map(|tool| tool.spec()).collect()
     }
 
+    pub fn resource_claims(&self, name: &str, args: &Value) -> Vec<ResourceClaim> {
+        let Some(tool) = self.get(name) else {
+            return Vec::new();
+        };
+
+        if should_use_local_capability_wrapper(tool.kind()) {
+            let capability = LocalToolCapability::from_tool(tool);
+            capability.resource_claims(&CapabilityInput::new(args.clone()))
+        } else {
+            tool.resource_claims(args)
+        }
+    }
+
     /// Executes a named tool and returns an error when the tool is unknown.
     pub fn execute(&self, name: &str, args: Value) -> Result<ToolResult, String> {
         match self.get(name) {
-            Some(tool) => Ok(tool.execute(args)),
+            Some(tool) => {
+                if should_use_local_capability_wrapper(tool.kind()) {
+                    let capability = LocalToolCapability::from_tool(tool);
+                    let result = capability.execute(CapabilityInput::new(args));
+                    Ok(ToolResult::from_capability_result(result))
+                } else {
+                    Ok(tool.execute(args))
+                }
+            }
             None => Err(format!("unknown tool: {name}")),
         }
     }
+}
+
+fn should_use_local_capability_wrapper(kind: ToolKind) -> bool {
+    matches!(kind, ToolKind::Local | ToolKind::Agent { is_acp: false })
 }
 
 /// Validates a user-provided path is workspace-relative and traversal-safe.
@@ -467,8 +493,10 @@ pub fn resolve_workspace_write_path(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agent::capability::local::LocalToolCapability;
     use crate::agent::capability::{
-        CapabilityAccess, CapabilityClaim, CapabilityError, CapabilityKind, CapabilityResult,
+        CapabilityAccess, CapabilityClaim, CapabilityError, CapabilityInput, CapabilityKind,
+        CapabilityResult, ConflictPolicy,
     };
     use crate::provider::echo::EchoProvider;
     use serde_json::json;
@@ -831,5 +859,53 @@ mod tests {
         let missing = unique_workspace("missing");
         let err = canonical_workspace_root(&missing).expect_err("missing dir should fail");
         assert!(err.contains("cannot resolve workspace root"));
+    }
+
+    #[test]
+    fn local_capability_wrapper_preserves_normalized_claims_and_conflict_semantics() {
+        let workspace = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let read_tool = read_file::ReadFileTool::new(workspace.clone());
+        let write_tool = write_file::WriteFileTool::new(workspace);
+
+        let read_capability = LocalToolCapability::from_tool(&read_tool);
+        let write_capability = LocalToolCapability::from_tool(&write_tool);
+
+        let normalized_read = read_capability.claims(&CapabilityInput::new(json!({
+            "path": "src/main.rs"
+        })));
+        let dot_prefixed_read = read_capability.claims(&CapabilityInput::new(json!({
+            "path": "./src/main.rs"
+        })));
+        let normalized_write = write_capability.claims(&CapabilityInput::new(json!({
+            "path": "src/main.rs"
+        })));
+
+        assert_eq!(normalized_read, dot_prefixed_read);
+        assert_eq!(
+            ConflictPolicy::from_claims(&normalized_read, &normalized_write),
+            ConflictPolicy::Conflicting
+        );
+    }
+
+    #[test]
+    fn local_capability_wrapper_preserves_local_tool_validation_behavior() {
+        let workspace = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let read_tool = read_file::ReadFileTool::new(workspace.clone());
+        let write_tool = write_file::WriteFileTool::new(workspace);
+
+        let read_capability = LocalToolCapability::from_tool(&read_tool);
+        let write_capability = LocalToolCapability::from_tool(&write_tool);
+
+        let read_args = json!({ "path": "../secret" });
+        let direct_read = read_tool.execute(read_args.clone());
+        let wrapped_read = read_capability.execute(CapabilityInput::new(read_args));
+        assert_eq!(wrapped_read.text_output(), direct_read.text_output());
+        assert_eq!(wrapped_read.is_error, direct_read.is_error);
+
+        let write_args = json!({ "path": "../secret", "content": "nope" });
+        let direct_write = write_tool.execute(write_args.clone());
+        let wrapped_write = write_capability.execute(CapabilityInput::new(write_args));
+        assert_eq!(wrapped_write.text_output(), direct_write.text_output());
+        assert_eq!(wrapped_write.is_error, direct_write.is_error);
     }
 }
