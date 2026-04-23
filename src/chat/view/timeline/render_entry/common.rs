@@ -1,5 +1,6 @@
 use super::*;
 use crate::agent::tools::ToolKind;
+use crate::chat::app::turns::tool_call_details_payload;
 
 pub(super) fn marker_style_for(entry: &TimelineEntry, theme: &ChatTheme) -> Style {
     match (&entry.actor, &entry.kind) {
@@ -17,12 +18,12 @@ pub(super) fn marker_style_for(entry: &TimelineEntry, theme: &ChatTheme) -> Styl
 
 /// Extract a short subtitle from tool-call arguments (stored in `details`).
 /// Shows the most useful field — file path for read/write, command for bash.
-pub(super) fn extract_tool_subtitle(tool_name: &str, details: &str) -> String {
-    if details.trim().is_empty() {
+pub(super) fn extract_tool_subtitle(tool_name: &str, arguments: &str) -> String {
+    if arguments.trim().is_empty() {
         return String::new();
     }
 
-    let val: serde_json::Value = match serde_json::from_str(details) {
+    let val: serde_json::Value = match serde_json::from_str(arguments) {
         Ok(v) => v,
         Err(_) => return "invalid args".to_owned(),
     };
@@ -63,4 +64,13 @@ pub(super) fn tool_badge(kind: ToolKind) -> Option<&'static str> {
         ToolKind::Agent { is_acp: true } => Some("(ACP)"),
         _ => None,
     }
+}
+
+pub(super) fn extract_tool_subtitle_from_details(tool_name: &str, details: &str) -> String {
+    let arguments = tool_call_details_payload(details).trim();
+    if !matches!(arguments.chars().next(), Some('{') | Some('[')) {
+        return String::new();
+    }
+
+    extract_tool_subtitle(tool_name, arguments)
 }

@@ -15,7 +15,7 @@ use std::time::Instant;
 
 mod actions;
 mod events;
-mod turns;
+pub(crate) mod turns;
 
 #[cfg(test)]
 #[path = "../../tests/unit/chat/app/tests.rs"]

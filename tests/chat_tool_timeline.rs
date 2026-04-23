@@ -115,3 +115,45 @@ fn completed_tool_call_preview_uses_two_lines_from_full_output() {
             .any(|line| line.contains("version = \"0.1.0\""))
     );
 }
+
+#[test]
+fn running_tool_call_uses_app_formatted_argument_details_for_subtitle() {
+    let mut app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
+
+    app.apply_agent_event_for_test(AgentEvent::ToolCallStarted {
+        call_id: "call-1".into(),
+        tool_name: "read_file".into(),
+        kind: ToolKind::Local,
+        arguments: "{\"path\":\"Cargo.toml\"}".into(),
+        batch_id: 7,
+        replay_index: 0,
+        normalized_claims: Vec::new(),
+    });
+
+    let lines = render_to_lines_for_test(&mut app, 100, 35);
+    assert!(lines.iter().any(|line| line.contains("Cargo.toml")));
+    assert!(!lines.iter().any(|line| line.contains("invalid args")));
+}
+
+#[test]
+fn completed_tool_call_does_not_overtrigger_invalid_args_on_output_details() {
+    let mut app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
+
+    app.apply_agent_event_for_test(AgentEvent::ToolCallStarted {
+        call_id: "call-1".into(),
+        tool_name: "read_file".into(),
+        kind: ToolKind::Local,
+        arguments: "{\"path\":\"Cargo.toml\"}".into(),
+        batch_id: 7,
+        replay_index: 0,
+        normalized_claims: Vec::new(),
+    });
+    app.apply_agent_event_for_test(AgentEvent::ToolCallCompleted {
+        call_id: "call-1".into(),
+        output: "package\nname = \"blazar\"".into(),
+        is_error: false,
+    });
+
+    let lines = render_to_lines_for_test(&mut app, 100, 35);
+    assert!(!lines.iter().any(|line| line.contains("invalid args")));
+}

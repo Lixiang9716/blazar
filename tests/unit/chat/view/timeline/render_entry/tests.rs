@@ -1,4 +1,4 @@
-use super::common::extract_tool_subtitle;
+use super::common::{extract_tool_subtitle, extract_tool_subtitle_from_details};
 use super::*;
 use crate::agent::tools::ToolKind;
 use crate::chat::model::ToolCallStatus;
@@ -387,6 +387,27 @@ fn extract_tool_subtitle_handles_known_keys_fallbacks_and_truncation() {
     );
     assert_eq!(
         extract_tool_subtitle("unknown", "{bad json"),
+        "invalid args"
+    );
+    assert_eq!(
+        extract_tool_subtitle_from_details(
+            "read_file",
+            "{\"path\":\"src/main.rs\"}\nbatch_id=1 replay_index=0 normalized_claims=<none>"
+        ),
+        "src/main.rs"
+    );
+    assert_eq!(
+        extract_tool_subtitle_from_details(
+            "read_file",
+            "package\nname = \"blazar\"\n\nbatch_id=1 replay_index=0 normalized_claims=<none>"
+        ),
+        ""
+    );
+    assert_eq!(
+        extract_tool_subtitle_from_details(
+            "read_file",
+            "{bad json\nbatch_id=1 replay_index=0 normalized_claims=<none>"
+        ),
         "invalid args"
     );
 

@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
-use super::super::common::extract_tool_subtitle;
+use super::super::common::extract_tool_subtitle_from_details;
+use crate::chat::app::turns::{tool_call_details_payload, tool_call_metadata_line};
 use crate::chat::model::{EntryKind, TimelineEntry, ToolCallStatus};
 use std::borrow::Cow;
 
@@ -55,7 +56,7 @@ pub(crate) fn tool_descriptor(entry: &TimelineEntry) -> Option<EntryDescriptor> 
     };
 
     let preview_source = preview_source_text(status, entry);
-    let subtitle = extract_tool_subtitle(tool_name, &entry.details);
+    let subtitle = extract_tool_subtitle_from_details(tool_name, &entry.details);
 
     Some(EntryDescriptor {
         status_visual,
@@ -78,20 +79,10 @@ fn preview_source_text<'a>(status: &ToolCallStatus, entry: &'a TimelineEntry) ->
 }
 
 fn completed_output_text(details: &str) -> Option<String> {
-    let mut lines: Vec<&str> = details.lines().collect();
-    if !matches!(lines.last(), Some(line) if is_tool_metadata_line(line)) {
-        return None;
-    }
+    tool_call_metadata_line(details)?;
 
-    lines.pop();
-    let content = lines.join("\n").trim().to_owned();
+    let content = tool_call_details_payload(details).trim().to_owned();
     (!content.is_empty()).then_some(content)
-}
-
-fn is_tool_metadata_line(line: &str) -> bool {
-    line.starts_with("batch_id=")
-        && line.contains(" replay_index=")
-        && line.contains(" normalized_claims=")
 }
 
 fn build_preview_lines(text: &str) -> Vec<String> {
