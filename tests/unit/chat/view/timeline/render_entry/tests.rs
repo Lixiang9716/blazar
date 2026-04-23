@@ -15,6 +15,13 @@ fn lines_text(lines: &[Line<'_>]) -> Vec<String> {
         .collect()
 }
 
+fn first_line_status_style(lines: &[Line<'_>]) -> Option<Style> {
+    lines
+        .first()
+        .and_then(|line| line.spans.last())
+        .map(|span| span.style)
+}
+
 #[test]
 fn render_entry_handles_user_and_empty_assistant_messages() {
     let theme = crate::chat::theme::build_theme();
@@ -60,9 +67,11 @@ fn render_entry_renders_tool_use_and_tool_call_statuses() {
         r#"{"path":"Cargo.toml"}"#,
         ToolCallStatus::Running,
     );
-    let running_text = lines_text(&render_entry(&running, &theme, 70)).join("\n");
-    assert!(running_text.contains("●"));
+    let running_lines = render_entry(&running, &theme, 70);
+    let running_text = lines_text(&running_lines).join("\n");
+    assert!(running_text.contains("read_file"));
     assert!(running_text.contains("Cargo.toml"));
+    assert_eq!(first_line_status_style(&running_lines), Some(theme.spinner));
 
     let success = TimelineEntry::tool_call(
         "c2",
@@ -72,9 +81,11 @@ fn render_entry_renders_tool_use_and_tool_call_statuses() {
         r#"{"command":"cargo test"}"#,
         ToolCallStatus::Success,
     );
-    let success_text = lines_text(&render_entry(&success, &theme, 70)).join("\n");
-    assert!(success_text.contains("●"));
+    let success_lines = render_entry(&success, &theme, 70);
+    let success_text = lines_text(&success_lines).join("\n");
+    assert!(success_text.contains("bash"));
     assert!(success_text.contains("cargo test"));
+    assert_eq!(first_line_status_style(&success_lines), Some(theme.diff_add));
 
     let error = TimelineEntry::tool_call(
         "c3",
@@ -84,9 +95,11 @@ fn render_entry_renders_tool_use_and_tool_call_statuses() {
         r#"{"pattern":"TODO"}"#,
         ToolCallStatus::Error,
     );
-    let error_text = lines_text(&render_entry(&error, &theme, 70)).join("\n");
-    assert!(error_text.contains("x"));
+    let error_lines = render_entry(&error, &theme, 70);
+    let error_text = lines_text(&error_lines).join("\n");
+    assert!(error_text.contains("grep"));
     assert!(error_text.contains("TODO"));
+    assert_eq!(first_line_status_style(&error_lines), Some(theme.marker_warning));
 
     let acp_agent = TimelineEntry::tool_call(
         "c4",
@@ -146,6 +159,15 @@ fn tool_descriptor_maps_status_and_semantic_summary() {
         error_descriptor.status_visual,
         super::tooling::descriptor::StatusVisual::ErrorX
     );
+}
+
+#[test]
+fn tool_descriptor_returns_none_for_non_tool_call_entries() {
+    let message = TimelineEntry::response("hello");
+    assert!(super::tooling::tool_descriptor(&message).is_none());
+
+    let bash = TimelineEntry::bash("echo hi", "ok");
+    assert!(super::tooling::tool_descriptor(&bash).is_none());
 }
 
 #[test]
