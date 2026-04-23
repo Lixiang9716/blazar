@@ -90,6 +90,7 @@ echo "Missing tools: ${missing[*]}"
 
 if $check_only; then
   echo "Check-only mode: no installation attempted."
+  echo "Action: rerun with '--install' to attempt auto-install when supported."
   case "$package_manager" in
     apt) echo "Action: run 'sudo apt-get install -y ${missing[*]}'" ;;
     brew) echo "Action: run 'brew install ${missing[*]}'" ;;
