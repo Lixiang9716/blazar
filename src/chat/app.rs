@@ -330,7 +330,15 @@ impl ChatApp {
         let command = self.command_registry.find(name).cloned().ok_or_else(|| {
             crate::chat::commands::CommandError::Unavailable(format!("unknown command: {name}"))
         })?;
-        futures::executor::block_on(
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|error| {
+                crate::chat::commands::CommandError::ExecutionFailed(format!(
+                    "failed to initialize tokio runtime: {error}"
+                ))
+            })?;
+        runtime.block_on(
             crate::chat::commands::orchestrator::execute_palette_command_from_command(
                 command, self, args,
             ),
