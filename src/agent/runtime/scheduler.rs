@@ -157,10 +157,46 @@ fn batch_conflicts<T>(batch: &[ScheduledCall<T>], claims: &[CapabilityClaim]) ->
 #[cfg(test)]
 mod tests {
     use super::{ScheduledCall, schedule_batches};
-    use crate::agent::capability::{CapabilityAccess, CapabilityClaim};
+    use crate::agent::capability::{CapabilityAccess, CapabilityClaim, ConflictPolicy};
 
     fn call(id: &'static str, claims: Vec<CapabilityClaim>) -> ScheduledCall<&'static str> {
         ScheduledCall { item: id, claims }
+    }
+
+    fn claim_ro(resource: &str) -> CapabilityClaim {
+        CapabilityClaim {
+            resource: resource.into(),
+            access: CapabilityAccess::ReadOnly,
+        }
+    }
+
+    fn claim_rw(resource: &str) -> CapabilityClaim {
+        CapabilityClaim {
+            resource: resource.into(),
+            access: CapabilityAccess::ReadWrite,
+        }
+    }
+
+    fn claim_ex(resource: &str) -> CapabilityClaim {
+        CapabilityClaim {
+            resource: resource.into(),
+            access: CapabilityAccess::Exclusive,
+        }
+    }
+
+    #[test]
+    fn scheduler_contract_matrix_is_stable_for_conflict_pairs() {
+        let cases = vec![
+            (claim_ro("fs:a"), claim_ro("fs:a"), false),
+            (claim_ro("fs:a"), claim_rw("fs:a"), true),
+            (claim_rw("fs:a"), claim_rw("fs:a"), true),
+            (claim_ex("process:bash"), claim_ro("fs:a"), true),
+        ];
+
+        for (left, right, expected_conflict) in cases {
+            let actual = ConflictPolicy::from_claims(&[left], &[right]).is_conflicting();
+            assert_eq!(actual, expected_conflict);
+        }
     }
 
     #[test]

@@ -1634,6 +1634,11 @@ fn run_turn_executes_non_conflicting_calls_in_parallel_batches_with_stable_resul
 }
 
 #[test]
+fn scheduler_replay_order_matches_original_call_order() {
+    run_turn_executes_non_conflicting_calls_in_parallel_batches_with_stable_result_order();
+}
+
+#[test]
 fn run_turn_serializes_conflicting_calls_into_separate_batches() {
     struct ConflictingBatchProvider;
 
