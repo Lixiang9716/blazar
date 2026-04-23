@@ -1,4 +1,6 @@
-use crate::observability::logging::format_event_json;
+use crate::observability::logging::{
+    emit_structured_event, format_event_json, with_captured_structured_events_for_test,
+};
 use serde_json::Value;
 
 #[test]
@@ -51,4 +53,69 @@ fn structured_log_uses_string_timestamp() {
         value["ts"].is_string(),
         "ts should be a string for stable downstream parsing"
     );
+}
+
+#[test]
+fn structured_capture_isolation_is_stable_for_parallel_tests() {
+    let thread_a = std::thread::spawn(|| {
+        with_captured_structured_events_for_test(|| {
+            emit_structured_event(
+                log::Level::Info,
+                "blazar::test",
+                "capture_probe",
+                "probe-a",
+                None,
+                Some("turn-a"),
+                None,
+                None,
+                Some("ProviderTransient"),
+            );
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        })
+        .1
+    });
+
+    let thread_b = std::thread::spawn(|| {
+        with_captured_structured_events_for_test(|| {
+            emit_structured_event(
+                log::Level::Info,
+                "blazar::test",
+                "capture_probe",
+                "probe-b",
+                None,
+                Some("turn-b"),
+                None,
+                None,
+                Some("ProviderTransient"),
+            );
+        })
+        .1
+    });
+
+    let events_a = thread_a.join().expect("thread A should capture events");
+    let events_b = thread_b.join().expect("thread B should capture events");
+
+    let turn_ids_a: Vec<String> = events_a
+        .into_iter()
+        .filter_map(|raw| serde_json::from_str::<Value>(&raw).ok())
+        .filter_map(|event| {
+            event
+                .get("turn_id")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
+        .collect();
+    let turn_ids_b: Vec<String> = events_b
+        .into_iter()
+        .filter_map(|raw| serde_json::from_str::<Value>(&raw).ok())
+        .filter_map(|event| {
+            event
+                .get("turn_id")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
+        .collect();
+
+    assert_eq!(turn_ids_a, vec!["turn-a".to_string()]);
+    assert_eq!(turn_ids_b, vec!["turn-b".to_string()]);
 }

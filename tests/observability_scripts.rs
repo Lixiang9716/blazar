@@ -1,6 +1,7 @@
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn unique_log_file(prefix: &str) -> PathBuf {
@@ -48,6 +49,11 @@ fn run_just(args: &[&str]) -> Output {
         .current_dir(repo_root)
         .output()
         .expect("just command should execute")
+}
+
+fn just_is_available() -> bool {
+    static JUST_AVAILABLE: OnceLock<bool> = OnceLock::new();
+    *JUST_AVAILABLE.get_or_init(|| Command::new("just").arg("--version").output().is_ok())
 }
 
 #[test]
@@ -290,6 +296,11 @@ fn logs_turn_empty_log_returns_no_matches() {
 
 #[test]
 fn just_logs_errors_accepts_log_file_paths_with_spaces() {
+    if !just_is_available() {
+        eprintln!("skipping: just is not installed");
+        return;
+    }
+
     let log_file = unique_log_file("just-errors-with-space");
     let parent = log_file.parent().expect("log file should have parent");
     let spaced_dir = parent.join("space dir");
@@ -318,6 +329,11 @@ fn just_logs_errors_accepts_log_file_paths_with_spaces() {
 
 #[test]
 fn just_logs_turn_accepts_spaced_turn_id_and_log_path() {
+    if !just_is_available() {
+        eprintln!("skipping: just is not installed");
+        return;
+    }
+
     let log_file = unique_log_file("just-turn-with-space");
     let parent = log_file.parent().expect("log file should have parent");
     let spaced_dir = parent.join("turn space dir");

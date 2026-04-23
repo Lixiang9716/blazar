@@ -107,6 +107,14 @@ fn captured_structured_events_for_test() -> &'static std::sync::Mutex<Vec<String
 }
 
 #[cfg(test)]
+fn structured_event_capture_lock_for_test() -> &'static std::sync::Mutex<()> {
+    use std::sync::{Mutex, OnceLock};
+
+    static CAPTURE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    CAPTURE_LOCK.get_or_init(|| Mutex::new(()))
+}
+
+#[cfg(test)]
 fn capture_structured_event_for_test(event: String) {
     if let Ok(mut captured) = captured_structured_events_for_test().lock() {
         captured.push(event);
@@ -114,18 +122,25 @@ fn capture_structured_event_for_test(event: String) {
 }
 
 #[cfg(test)]
-pub fn clear_captured_structured_events_for_test() {
-    if let Ok(mut captured) = captured_structured_events_for_test().lock() {
+pub fn with_captured_structured_events_for_test<T>(
+    operation: impl FnOnce() -> T,
+) -> (T, Vec<String>) {
+    let _test_lock = structured_event_capture_lock_for_test()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    {
+        let mut captured = captured_structured_events_for_test()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         captured.clear();
     }
-}
 
-#[cfg(test)]
-pub fn take_captured_structured_events_for_test() -> Vec<String> {
-    captured_structured_events_for_test()
+    let result = operation();
+    let captured = captured_structured_events_for_test()
         .lock()
-        .map(|mut captured| std::mem::take(&mut *captured))
-        .unwrap_or_default()
+        .map(|mut events| std::mem::take(&mut *events))
+        .unwrap_or_default();
+    (result, captured)
 }
 
 #[cfg(test)]

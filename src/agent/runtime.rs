@@ -292,6 +292,18 @@ fn runtime_loop(
     }
 }
 
+fn transient_retry_app_log_message(turn_id: &str, attempt: u32, _error: &str) -> String {
+    format!(
+        "runtime: transient turn retry scheduled turn_id={turn_id} attempt={attempt} max_retries={MAX_TRANSIENT_RETRIES} error_kind=ProviderTransient details=redacted"
+    )
+}
+
+fn transient_retry_exhausted_app_log_message(turn_id: &str, retries: u32, _error: &str) -> String {
+    format!(
+        "runtime: transient turn failed turn_id={turn_id} retries={retries} error_kind=ProviderTransient details=redacted"
+    )
+}
+
 /// Execute a turn with up to `MAX_TRANSIENT_RETRIES` retries on transient errors.
 #[allow(clippy::too_many_arguments)]
 fn run_turn_with_retry(
@@ -361,12 +373,13 @@ fn run_turn_with_retry(
             TurnOutcome::TransientError(err) => {
                 if attempt < MAX_TRANSIENT_RETRIES {
                     warn!(
-                        "runtime: transient error on turn {turn_id} attempt {attempt}: {err}, retrying"
+                        "{}",
+                        transient_retry_app_log_message(turn_id, attempt, &err)
                     );
                     std::thread::sleep(std::time::Duration::from_millis(500));
                 } else {
-                    let message = format!("runtime: turn {turn_id} failed after {attempt} retries");
-                    warn!("{message}: {err}");
+                    let message = transient_retry_exhausted_app_log_message(turn_id, attempt, &err);
+                    warn!("{message}");
                     emit_structured_event(
                         log::Level::Warn,
                         module_path!(),

@@ -858,6 +858,77 @@ fn retry_gives_up_after_max_attempts() {
 }
 
 #[test]
+fn transient_runtime_app_log_messages_redact_provider_error_text() {
+    let sensitive = "timeout while using sk-test-secret";
+    let retry_message = transient_retry_app_log_message("turn-redact", 0, sensitive);
+    let exhausted_message =
+        transient_retry_exhausted_app_log_message("turn-redact", MAX_TRANSIENT_RETRIES, sensitive);
+
+    for message in [retry_message, exhausted_message] {
+        assert!(message.contains("turn_id=turn-redact"));
+        assert!(message.contains("error_kind=ProviderTransient"));
+        assert!(message.contains("details=redacted"));
+        assert!(!message.contains("sk-test-secret"));
+    }
+}
+
+#[test]
+fn transient_failure_logs_redact_raw_provider_text() {
+    struct AlwaysTransientProvider;
+
+    impl LlmProvider for AlwaysTransientProvider {
+        fn stream_turn(
+            &self,
+            _model: &str,
+            _messages: &[ProviderMessage],
+            _tools: &[ToolSpec],
+            tx: Sender<ProviderEvent>,
+        ) {
+            let _ = tx.send(ProviderEvent::Error(
+                "timeout while using sk-test-secret".into(),
+            ));
+        }
+    }
+
+    let (_, captured) = crate::observability::logging::with_captured_structured_events_for_test(|| {
+        let (event_tx, _event_rx) = mpsc::channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let _ = run_turn_with_retry(
+            "turn-transient-redaction",
+            "hi",
+            &[],
+            &AlwaysTransientProvider,
+            "echo",
+            &empty_registry(),
+            &event_tx,
+            &cancel,
+        );
+    });
+
+    let structured_failure = captured
+        .into_iter()
+        .filter_map(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+        .find(|event| {
+            event.get("event").and_then(serde_json::Value::as_str) == Some("turn_failed")
+                && event.get("turn_id").and_then(serde_json::Value::as_str)
+                    == Some("turn-transient-redaction")
+                && event.get("error_kind").and_then(serde_json::Value::as_str)
+                    == Some("ProviderTransient")
+        })
+        .expect("expected structured transient turn_failed event");
+
+    let message = structured_failure
+        .get("message")
+        .and_then(serde_json::Value::as_str)
+        .expect("structured message should be present");
+    assert!(message.contains("turn_id=turn-transient-redaction"));
+    assert!(message.contains("retries=1"));
+    assert!(message.contains("error_kind=ProviderTransient"));
+    assert!(message.contains("details=redacted"));
+    assert!(!message.contains("sk-test-secret"));
+}
+
+#[test]
 fn fatal_error_skips_retry() {
     use std::sync::atomic::AtomicU32;
 
@@ -964,22 +1035,22 @@ fn runtime_failure_logs_include_turn_and_error_kind_fields() {
         }
     }
 
-    crate::observability::logging::clear_captured_structured_events_for_test();
+    let (_, captured) = crate::observability::logging::with_captured_structured_events_for_test(|| {
+        let (event_tx, _event_rx) = mpsc::channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let _ = run_turn_with_retry(
+            "turn-observe-failure",
+            "hi",
+            &[],
+            &FatalProvider,
+            "echo",
+            &empty_registry(),
+            &event_tx,
+            &cancel,
+        );
+    });
 
-    let (event_tx, _event_rx) = mpsc::channel();
-    let cancel = Arc::new(AtomicBool::new(false));
-    let _ = run_turn_with_retry(
-        "turn-observe-failure",
-        "hi",
-        &[],
-        &FatalProvider,
-        "echo",
-        &empty_registry(),
-        &event_tx,
-        &cancel,
-    );
-
-    let structured_failure = crate::observability::logging::take_captured_structured_events_for_test()
+    let structured_failure = captured
         .into_iter()
         .filter_map(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
         .find(|event| {
@@ -1049,41 +1120,41 @@ fn runtime_cancel_during_stream_logs_turn_and_error_kind_fields() {
         }
     }
 
-    crate::observability::logging::clear_captured_structured_events_for_test();
+    let (outcome, captured) = crate::observability::logging::with_captured_structured_events_for_test(|| {
+        let started = Arc::new(std::sync::Barrier::new(2));
+        let release = Arc::new(std::sync::Barrier::new(2));
+        let cancel = Arc::new(AtomicBool::new(false));
+        let (event_tx, _event_rx) = mpsc::channel();
 
-    let started = Arc::new(std::sync::Barrier::new(2));
-    let release = Arc::new(std::sync::Barrier::new(2));
-    let cancel = Arc::new(AtomicBool::new(false));
-    let (event_tx, _event_rx) = mpsc::channel();
+        let started_for_thread = Arc::clone(&started);
+        let release_for_thread = Arc::clone(&release);
+        let cancel_for_thread = Arc::clone(&cancel);
+        let handle = std::thread::spawn(move || {
+            let provider = CoordinatedCancelProvider {
+                started: started_for_thread,
+                release: release_for_thread,
+            };
+            run_turn_with_retry(
+                "turn-cancel-during-stream",
+                "hi",
+                &[],
+                &provider,
+                "echo",
+                &empty_registry(),
+                &event_tx,
+                &cancel_for_thread,
+            )
+        });
 
-    let started_for_thread = Arc::clone(&started);
-    let release_for_thread = Arc::clone(&release);
-    let cancel_for_thread = Arc::clone(&cancel);
-    let handle = std::thread::spawn(move || {
-        let provider = CoordinatedCancelProvider {
-            started: started_for_thread,
-            release: release_for_thread,
-        };
-        run_turn_with_retry(
-            "turn-cancel-during-stream",
-            "hi",
-            &[],
-            &provider,
-            "echo",
-            &empty_registry(),
-            &event_tx,
-            &cancel_for_thread,
-        )
+        started.wait();
+        cancel.store(true, Ordering::SeqCst);
+        release.wait();
+
+        handle.join().expect("run_turn_with_retry thread should join")
     });
-
-    started.wait();
-    cancel.store(true, Ordering::SeqCst);
-    release.wait();
-
-    let outcome = handle.join().expect("run_turn_with_retry thread should join");
     assert!(outcome.is_none(), "cancelled turn should not update history");
 
-    let saw_cancelled_structured = crate::observability::logging::take_captured_structured_events_for_test()
+    let saw_cancelled_structured = captured
         .into_iter()
         .filter_map(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
         .any(|event| {
