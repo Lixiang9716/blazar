@@ -1200,19 +1200,34 @@ fn turn_complete_plan_with_non_extractable_body_leaves_entry_untitled() {
 }
 
 #[test]
-fn build_pending_turn_and_dispatch_helpers_cover_plan_and_chat_paths() {
+fn build_pending_turn_parses_runtime_and_local_command_kinds() {
     let chat = super::turns::build_pending_turn("  hello ");
     assert_eq!(chat.user_text, "hello");
-    assert_eq!(chat.runtime_prompt, "hello");
-    assert_eq!(chat.kind, TurnKind::Chat);
+    assert_eq!(
+        chat.dispatch,
+        super::PendingDispatch::Runtime {
+            runtime_prompt: "hello".to_owned(),
+            kind: TurnKind::Chat,
+        }
+    );
+    assert!(!chat.timeline_inserted);
 
     let plan = super::turns::build_pending_turn("/plan   improve tests");
-    assert_eq!(plan.kind, TurnKind::Plan);
-    assert!(plan.runtime_prompt.contains("planning mode"));
-    assert!(plan.runtime_prompt.contains("User request:\nimprove tests"));
+    match &plan.dispatch {
+        super::PendingDispatch::Runtime {
+            runtime_prompt,
+            kind,
+        } => {
+            assert_eq!(*kind, TurnKind::Plan);
+            assert!(runtime_prompt.contains("planning mode"));
+            assert!(runtime_prompt.contains("User request:\nimprove tests"));
+        }
+        other => panic!("expected runtime dispatch, got {other:?}"),
+    }
+    assert!(!plan.timeline_inserted);
 
-    let repo_path = env!("CARGO_MANIFEST_DIR");
-    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
-    app.dispatch_next_queued();
-    assert!(app.pending_messages.is_empty());
+    let discover = super::turns::build_pending_turn("/discover-agents");
+    assert_eq!(discover.user_text, "/discover-agents");
+    assert_eq!(discover.dispatch, super::PendingDispatch::DiscoverAgents);
+    assert!(!discover.timeline_inserted);
 }

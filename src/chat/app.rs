@@ -63,10 +63,19 @@ enum TurnKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+enum PendingDispatch {
+    Runtime {
+        runtime_prompt: String,
+        kind: TurnKind,
+    },
+    DiscoverAgents,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct PendingTurn {
     user_text: String,
-    runtime_prompt: String,
-    kind: TurnKind,
+    dispatch: PendingDispatch,
+    timeline_inserted: bool,
 }
 
 impl ChatApp {
