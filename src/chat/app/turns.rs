@@ -157,7 +157,9 @@ pub(super) fn format_tool_call_details(
     let claims = if normalized_claims.is_empty() {
         "<none>".to_owned()
     } else {
-        normalized_claims.join(",")
+        let mut sorted_claims = normalized_claims.to_vec();
+        sorted_claims.sort();
+        sorted_claims.join(",")
     };
     let metadata_line =
         format!("batch_id={batch_id} replay_index={replay_index} normalized_claims={claims}");
