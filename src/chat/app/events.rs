@@ -3,6 +3,7 @@ use super::turns::{
 };
 use super::*;
 use crate::agent::runtime::RuntimeErrorKind;
+use crate::observability::logging::emit_structured_event;
 
 impl ChatApp {
     #[doc(hidden)]
@@ -61,6 +62,21 @@ impl ChatApp {
                     tool_name,
                     arguments.len()
                 );
+                let message = format!(
+                    "chat tool call started call_id={call_id} arguments_len={}",
+                    arguments.len()
+                );
+                emit_structured_event(
+                    log::Level::Debug,
+                    module_path!(),
+                    "tool_call_started",
+                    &message,
+                    None,
+                    self.current_turn_id(),
+                    Some(&tool_name),
+                    None,
+                    None,
+                );
                 self.timeline.push(TimelineEntry::tool_call(
                     call_id,
                     tool_name,
@@ -81,11 +97,34 @@ impl ChatApp {
                 output,
                 is_error,
             } => {
+                let completed_tool_name = self.timeline.iter().rev().find_map(|entry| match &entry
+                    .kind
+                {
+                    EntryKind::ToolCall {
+                        call_id: existing,
+                        tool_name,
+                        ..
+                    } if existing == &call_id => Some(tool_name.clone()),
+                    _ => None,
+                });
                 debug!(
                     "tick: ToolCallCompleted call_id={} is_error={} output_len={}",
                     call_id,
                     is_error,
                     output.len()
+                );
+                let message =
+                    format!("chat tool call completed call_id={call_id} is_error={is_error}");
+                emit_structured_event(
+                    log::Level::Debug,
+                    module_path!(),
+                    "tool_call_completed",
+                    &message,
+                    None,
+                    self.current_turn_id(),
+                    completed_tool_name.as_deref(),
+                    None,
+                    None,
                 );
                 if let Some(entry) = self.timeline.iter_mut().rev().find(|entry| {
                     matches!(
@@ -178,5 +217,12 @@ impl ChatApp {
             .rev()
             .find_map(|entry| (entry.actor == Actor::Assistant).then(|| entry.title.clone()))
             .flatten()
+    }
+
+    fn current_turn_id(&self) -> Option<&str> {
+        match &self.agent_state.turn_state {
+            crate::agent::state::TurnState::Streaming { turn_id } => Some(turn_id.as_str()),
+            _ => None,
+        }
     }
 }

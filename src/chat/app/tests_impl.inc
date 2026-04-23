@@ -878,6 +878,48 @@ fn tool_call_completed_without_matching_start_is_ignored_safely() {
 }
 
 #[test]
+fn tool_events_log_include_turn_and_tool_name() {
+    crate::observability::logging::clear_captured_structured_events_for_test();
+    let mut app = new_test_app();
+
+    app.apply_agent_event_for_test(AgentEvent::TurnStarted {
+        turn_id: "turn-tool-observe".into(),
+    });
+    app.apply_agent_event_for_test(AgentEvent::ToolCallStarted {
+        call_id: "call-log".into(),
+        tool_name: "bash".into(),
+        kind: crate::agent::tools::ToolKind::Local,
+        arguments: r#"{"command":"echo hi"}"#.into(),
+        batch_id: 0,
+        replay_index: 0,
+        normalized_claims: Vec::new(),
+    });
+
+    let saw_tool_fields = crate::observability::logging::take_captured_structured_events_for_test()
+        .into_iter()
+        .filter_map(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+        .any(|event| {
+            event
+                .get("event")
+                .and_then(serde_json::Value::as_str)
+                == Some("tool_call_started")
+                && event
+                    .get("turn_id")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("turn-tool-observe")
+                && event
+                    .get("tool_name")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("bash")
+        });
+
+    assert!(
+        saw_tool_fields,
+        "tool event logs should include turn_id and tool_name fields"
+    );
+}
+
+#[test]
 fn picker_commands_context_supports_non_slash_labels() {
     use crate::chat::picker::{ModalPicker, PickerContext, PickerItem};
 

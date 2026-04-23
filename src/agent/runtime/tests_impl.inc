@@ -949,6 +949,61 @@ fn turn_failed_event_carries_structured_error_kind() {
 }
 
 #[test]
+fn runtime_failure_logs_include_turn_and_error_kind_fields() {
+    struct FatalProvider;
+
+    impl LlmProvider for FatalProvider {
+        fn stream_turn(
+            &self,
+            _model: &str,
+            _messages: &[ProviderMessage],
+            _tools: &[ToolSpec],
+            tx: Sender<ProviderEvent>,
+        ) {
+            let _ = tx.send(ProviderEvent::Error("invalid API key".into()));
+        }
+    }
+
+    crate::observability::logging::clear_captured_structured_events_for_test();
+
+    let (event_tx, _event_rx) = mpsc::channel();
+    let cancel = Arc::new(AtomicBool::new(false));
+    let _ = run_turn_with_retry(
+        "turn-observe-failure",
+        "hi",
+        &[],
+        &FatalProvider,
+        "echo",
+        &empty_registry(),
+        &event_tx,
+        &cancel,
+    );
+
+    let saw_structured_failure = crate::observability::logging::take_captured_structured_events_for_test()
+        .into_iter()
+        .filter_map(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+        .any(|event| {
+            event
+                .get("event")
+                .and_then(serde_json::Value::as_str)
+                == Some("turn_failed")
+                && event
+                    .get("turn_id")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("turn-observe-failure")
+                && event
+                    .get("error_kind")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("ProviderFatal")
+        });
+
+    assert!(
+        saw_structured_failure,
+        "runtime failure logs should include turn_id and error_kind fields"
+    );
+}
+
+#[test]
 fn turn_failed_event_uses_tool_execution_kind_for_iteration_limit() {
     struct InfiniteToolProvider;
 

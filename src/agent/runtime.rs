@@ -20,6 +20,7 @@ use crate::agent::tools::read_file::ReadFileTool;
 use crate::agent::tools::vet::VetTool;
 use crate::agent::tools::write_file::WriteFileTool;
 use crate::config::{AGENTS_CONFIG_PATH, load_agents_config_from_path};
+use crate::observability::logging::emit_structured_event;
 use crate::provider::{LlmProvider, ProviderMessage};
 
 mod errors;
@@ -306,6 +307,17 @@ fn run_turn_with_retry(
     for attempt in 0..=MAX_TRANSIENT_RETRIES {
         if cancel_flag.load(Ordering::SeqCst) {
             info!("runtime: turn {turn_id} cancelled before attempt {attempt}");
+            emit_structured_event(
+                log::Level::Info,
+                module_path!(),
+                "turn_failed",
+                "runtime turn cancelled before retry attempt",
+                None,
+                Some(turn_id),
+                None,
+                None,
+                Some("Cancelled"),
+            );
             let _ = event_tx.send(AgentEvent::TurnFailed {
                 kind: RuntimeErrorKind::Cancelled,
                 error: "cancelled".to_string(),
@@ -340,7 +352,19 @@ fn run_turn_with_retry(
                     );
                     std::thread::sleep(std::time::Duration::from_millis(500));
                 } else {
-                    warn!("runtime: turn {turn_id} failed after {attempt} retries: {err}");
+                    let message = format!("runtime: turn {turn_id} failed after {attempt} retries");
+                    warn!("{message}: {err}");
+                    emit_structured_event(
+                        log::Level::Warn,
+                        module_path!(),
+                        "turn_failed",
+                        &message,
+                        None,
+                        Some(turn_id),
+                        None,
+                        None,
+                        Some("ProviderTransient"),
+                    );
                     let _ = event_tx.send(AgentEvent::TurnFailed {
                         kind: RuntimeErrorKind::ProviderTransient,
                         error: err,
@@ -349,7 +373,20 @@ fn run_turn_with_retry(
                 }
             }
             TurnOutcome::FatalError { kind, error } => {
-                warn!("runtime: turn {turn_id} fatal error ({kind:?}): {error}");
+                let message = format!("runtime: turn {turn_id} fatal error");
+                warn!("{message} ({kind:?}): {error}");
+                let error_kind = format!("{kind:?}");
+                emit_structured_event(
+                    log::Level::Warn,
+                    module_path!(),
+                    "turn_failed",
+                    &message,
+                    None,
+                    Some(turn_id),
+                    None,
+                    None,
+                    Some(&error_kind),
+                );
                 let _ = event_tx.send(AgentEvent::TurnFailed { kind, error });
                 return None;
             }
