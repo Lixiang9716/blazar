@@ -4,9 +4,9 @@ use crate::chat::view::timeline::render_entry::common::tool_badge;
 
 pub(crate) fn status_marker(status_visual: StatusVisual, theme: &ChatTheme) -> (&'static str, Style) {
     match status_visual {
-        StatusVisual::RunningDot => ("…", theme.spinner),
-        StatusVisual::EndedDot => ("✓", theme.diff_add),
-        StatusVisual::ErrorX => ("✗", theme.marker_warning),
+        StatusVisual::RunningDot => ("●", theme.spinner),
+        StatusVisual::EndedDot => ("●", theme.diff_add),
+        StatusVisual::ErrorX => ("x", theme.marker_warning),
     }
 }
 
