@@ -1,5 +1,5 @@
 use serde_json::Value;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -16,15 +16,25 @@ fn unique_log_file(prefix: &str) -> PathBuf {
 }
 
 fn run_script(script_name: &str, args: &[&str]) -> Output {
+    run_script_with_env(script_name, args, &[])
+}
+
+fn run_script_with_env(script_name: &str, args: &[&str], envs: &[(&str, &str)]) -> Output {
     let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let script_path = repo_root
         .join("scripts")
         .join("observability")
         .join(script_name);
+    let bash_path = if Path::new("/usr/bin/bash").exists() {
+        "/usr/bin/bash"
+    } else {
+        "/bin/bash"
+    };
 
-    Command::new("bash")
+    Command::new(bash_path)
         .arg(script_path)
         .args(args)
+        .envs(envs.iter().copied())
         .current_dir(repo_root)
         .output()
         .expect("script process should execute")
@@ -333,4 +343,36 @@ fn just_logs_turn_accepts_spaced_turn_id_and_log_path() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let lines: Vec<&str> = stdout.lines().collect();
     assert_eq!(lines.len(), 1);
+}
+
+#[test]
+fn install_tools_script_reports_missing_tools_in_check_mode() {
+    let fake_path = unique_log_file("install-tools-check-path");
+    std::fs::create_dir_all(&fake_path).expect("should create fake PATH directory");
+    let fake_path_text = fake_path.to_str().expect("utf-8 fake PATH");
+
+    let output = run_script_with_env(
+        "install-tools.sh",
+        &[],
+        &[("CHECK_ONLY", "1"), ("PATH", fake_path_text)],
+    );
+
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "check-only mode should return non-zero when tools are missing"
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Missing tools: jq lnav fzf"),
+        "stdout should list missing tools, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("Package manager: none detected"),
+        "stdout should report package manager detection, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("Check-only mode: no installation attempted."),
+        "stdout should mention check-only behavior, got: {stdout}"
+    );
 }
