@@ -324,9 +324,8 @@ impl ToolRegistry {
     }
 
     pub fn compatibility_tier(&self, name: &str) -> Option<ToolCompatibilityTier> {
-        self.get(name)
-            .map(|tool| tool.compatibility_tier())
-            .or_else(|| policy::compatibility_tier_for_name(name))
+        policy::compatibility_tier_for_name(name)
+            .or_else(|| self.get(name).map(|tool| tool.compatibility_tier()))
     }
 
     /// Returns the public specs for all registered tools.

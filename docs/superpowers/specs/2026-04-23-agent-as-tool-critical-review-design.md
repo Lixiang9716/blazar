@@ -140,3 +140,4 @@ before major new capability expansion.
 - `Tool` trait now defaults to `KernelNative` via `compatibility_tier()`.
 - `ToolRegistry` now exposes `compatibility_tier(name)` for governance introspection.
 - `bash` is explicitly tagged `CompatibilityBridge` under current architecture.
+- Follow-up RED→GREEN evidence: policy tiers now override per-tool defaults for governed bridges (including `vet`) so registry-level metadata stays visible.

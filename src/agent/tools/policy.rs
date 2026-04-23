@@ -11,6 +11,7 @@ pub enum ToolCompatibilityTier {
 pub fn compatibility_tier_for_name(name: &str) -> Option<ToolCompatibilityTier> {
     match name {
         "bash" => Some(ToolCompatibilityTier::CompatibilityBridge),
+        "vet" => Some(ToolCompatibilityTier::CompatibilityBridge),
         _ => None,
     }
 }
