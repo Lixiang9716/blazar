@@ -31,3 +31,24 @@ fn structured_log_contains_required_stable_keys() {
         assert!(value.get(key).is_some(), "missing key: {key}");
     }
 }
+
+#[test]
+fn structured_log_uses_string_timestamp() {
+    let raw = format_event_json(
+        "INFO",
+        "blazar::app",
+        "app_log",
+        "logger initialized",
+        None,
+        None,
+        None,
+        None,
+        None,
+    );
+    let value: Value = serde_json::from_str(&raw).expect("valid json");
+
+    assert!(
+        value["ts"].is_string(),
+        "ts should be a string for stable downstream parsing"
+    );
+}
