@@ -1004,6 +1004,85 @@ fn runtime_failure_logs_include_turn_and_error_kind_fields() {
 }
 
 #[test]
+fn runtime_cancel_during_stream_logs_turn_and_error_kind_fields() {
+    struct CoordinatedCancelProvider {
+        started: Arc<std::sync::Barrier>,
+        release: Arc<std::sync::Barrier>,
+    }
+
+    impl LlmProvider for CoordinatedCancelProvider {
+        fn stream_turn(
+            &self,
+            _model: &str,
+            _messages: &[ProviderMessage],
+            _tools: &[ToolSpec],
+            tx: Sender<ProviderEvent>,
+        ) {
+            self.started.wait();
+            self.release.wait();
+            let _ = tx.send(ProviderEvent::TextDelta("partial".into()));
+        }
+    }
+
+    crate::observability::logging::clear_captured_structured_events_for_test();
+
+    let started = Arc::new(std::sync::Barrier::new(2));
+    let release = Arc::new(std::sync::Barrier::new(2));
+    let cancel = Arc::new(AtomicBool::new(false));
+    let (event_tx, _event_rx) = mpsc::channel();
+
+    let started_for_thread = Arc::clone(&started);
+    let release_for_thread = Arc::clone(&release);
+    let cancel_for_thread = Arc::clone(&cancel);
+    let handle = std::thread::spawn(move || {
+        let provider = CoordinatedCancelProvider {
+            started: started_for_thread,
+            release: release_for_thread,
+        };
+        run_turn_with_retry(
+            "turn-cancel-during-stream",
+            "hi",
+            &[],
+            &provider,
+            "echo",
+            &empty_registry(),
+            &event_tx,
+            &cancel_for_thread,
+        )
+    });
+
+    started.wait();
+    cancel.store(true, Ordering::SeqCst);
+    release.wait();
+
+    let outcome = handle.join().expect("run_turn_with_retry thread should join");
+    assert!(outcome.is_none(), "cancelled turn should not update history");
+
+    let saw_cancelled_structured = crate::observability::logging::take_captured_structured_events_for_test()
+        .into_iter()
+        .filter_map(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+        .any(|event| {
+            event
+                .get("event")
+                .and_then(serde_json::Value::as_str)
+                == Some("turn_failed")
+                && event
+                    .get("turn_id")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("turn-cancel-during-stream")
+                && event
+                    .get("error_kind")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("Cancelled")
+        });
+
+    assert!(
+        saw_cancelled_structured,
+        "cancelled runtime turn should log turn_id and error_kind"
+    );
+}
+
+#[test]
 fn turn_failed_event_uses_tool_execution_kind_for_iteration_limit() {
     struct InfiniteToolProvider;
 
