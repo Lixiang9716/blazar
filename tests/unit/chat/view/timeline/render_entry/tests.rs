@@ -168,6 +168,34 @@ fn tool_descriptor_maps_status_and_semantic_summary() {
 }
 
 #[test]
+fn parallel_tool_calls_with_same_name_keep_distinct_identity() {
+    let theme = crate::chat::theme::build_theme();
+    let first = TimelineEntry::tool_call(
+        "call-a",
+        "bash",
+        ToolKind::Local,
+        "done",
+        r#"{"command":"echo a"}"#,
+        ToolCallStatus::Success,
+    );
+    let second = TimelineEntry::tool_call(
+        "call-b",
+        "bash",
+        ToolKind::Local,
+        "done",
+        r#"{"command":"echo a"}"#,
+        ToolCallStatus::Success,
+    );
+
+    let first_text = lines_text(&render_entry(&first, &theme, 70)).join("\n");
+    let second_text = lines_text(&render_entry(&second, &theme, 70)).join("\n");
+
+    assert!(first_text.contains("call-a"));
+    assert!(second_text.contains("call-b"));
+    assert_ne!(first_text, second_text);
+}
+
+#[test]
 fn tool_result_preview_is_capped_to_two_lines() {
     let entry = TimelineEntry::tool_call(
         "c-preview",

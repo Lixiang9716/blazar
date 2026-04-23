@@ -28,6 +28,14 @@ pub(crate) struct EntryDescriptor {
     pub call_identity: Option<String>,
 }
 
+impl EntryDescriptor {
+    pub(super) fn call_identity_suffix(&self) -> Option<&str> {
+        self.call_identity.as_deref()
+    }
+}
+
+const MAX_PREVIEW_LINES: usize = 2;
+
 pub(crate) fn tool_descriptor(entry: &TimelineEntry) -> Option<EntryDescriptor> {
     let EntryKind::ToolCall {
         call_id,
@@ -51,17 +59,22 @@ pub(crate) fn tool_descriptor(entry: &TimelineEntry) -> Option<EntryDescriptor> 
         status_visual,
         title: tool_name.clone(),
         subtitle: (!subtitle.is_empty()).then_some(subtitle),
-        preview_lines: entry.body.lines().take(2).map(ToOwned::to_owned).collect(),
+        preview_lines: build_preview_lines(&entry.body),
         result_mode: infer_result_mode(tool_name, &entry.body),
         call_identity: Some(call_id.clone()),
     })
 }
 
+fn build_preview_lines(text: &str) -> Vec<String> {
+    text.lines()
+        .take(MAX_PREVIEW_LINES)
+        .map(ToOwned::to_owned)
+        .collect()
+}
+
 fn infer_result_mode(tool_name: &str, body: &str) -> ResultMode {
-    let is_diff = matches!(tool_name, "edit_file")
-        || body.starts_with("diff --git")
-        || body.contains("\n@@")
-        || body.contains("@@ ");
+    let is_diff =
+        matches!(tool_name, "edit_file") || body.starts_with("diff --git") || body.contains("\n@@");
     if is_diff {
         return ResultMode::Diff;
     }
