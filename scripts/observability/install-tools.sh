@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# Task 3 placeholder: non-installing status checker. Task 4 owns full auto-install flow.
 
 TOOLS=(jq lnav fzf)
 missing=()

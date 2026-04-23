@@ -30,6 +30,16 @@ fn run_script(script_name: &str, args: &[&str]) -> Output {
         .expect("script process should execute")
 }
 
+fn run_just(args: &[&str]) -> Output {
+    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+
+    Command::new("just")
+        .args(args)
+        .current_dir(repo_root)
+        .output()
+        .expect("just command should execute")
+}
+
 #[test]
 fn logs_errors_filters_warn_and_error_levels() {
     let log_file = unique_log_file("logs-errors");
@@ -141,4 +151,186 @@ fn logs_turn_filters_by_turn_id() {
         );
     }
     assert_eq!(messages, vec!["a".to_string(), "c".to_string()]);
+}
+
+#[test]
+fn logs_errors_missing_log_file_exits_with_code_2() {
+    let missing = unique_log_file("missing-errors");
+    let output = run_script(
+        "logs-errors.sh",
+        &[missing.to_str().expect("utf-8 missing path")],
+    );
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("log file not found"),
+        "stderr should explain missing log file"
+    );
+}
+
+#[test]
+fn logs_turn_missing_log_file_exits_with_code_2() {
+    let missing = unique_log_file("missing-turn");
+    let output = run_script(
+        "logs-turn.sh",
+        &["turn-1", missing.to_str().expect("utf-8 missing path")],
+    );
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("log file not found"),
+        "stderr should explain missing log file"
+    );
+}
+
+#[test]
+fn logs_tail_missing_log_file_exits_with_code_2() {
+    let missing = unique_log_file("missing-tail");
+    let output = run_script(
+        "logs-tail.sh",
+        &[missing.to_str().expect("utf-8 missing path")],
+    );
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("log file not found"),
+        "stderr should explain missing log file"
+    );
+}
+
+#[test]
+fn logs_errors_fails_on_malformed_json_with_readable_message() {
+    let log_file = unique_log_file("malformed-errors");
+    std::fs::write(&log_file, "{this is not json}\n").expect("should write malformed log file");
+
+    let output = run_script(
+        "logs-errors.sh",
+        &[log_file.to_str().expect("utf-8 log file path")],
+    );
+
+    assert!(!output.status.success(), "malformed json should fail");
+    let stderr = String::from_utf8_lossy(&output.stderr).to_ascii_lowercase();
+    assert!(
+        stderr.contains("json") || stderr.contains("parse"),
+        "stderr should contain parser diagnostics, got: {stderr}"
+    );
+}
+
+#[test]
+fn logs_turn_fails_on_malformed_json_with_readable_message() {
+    let log_file = unique_log_file("malformed-turn");
+    std::fs::write(&log_file, "{still not json}\n").expect("should write malformed log file");
+
+    let output = run_script(
+        "logs-turn.sh",
+        &["turn-1", log_file.to_str().expect("utf-8 log file path")],
+    );
+
+    assert!(!output.status.success(), "malformed json should fail");
+    let stderr = String::from_utf8_lossy(&output.stderr).to_ascii_lowercase();
+    assert!(
+        stderr.contains("json") || stderr.contains("parse"),
+        "stderr should contain parser diagnostics, got: {stderr}"
+    );
+}
+
+#[test]
+fn logs_errors_empty_log_returns_no_matches() {
+    let log_file = unique_log_file("empty-errors");
+    std::fs::write(&log_file, "").expect("should write empty log file");
+
+    let output = run_script(
+        "logs-errors.sh",
+        &[log_file.to_str().expect("utf-8 log file path")],
+    );
+
+    assert!(
+        output.status.success(),
+        "empty log should not fail, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        output.stdout.is_empty(),
+        "empty log should return no matches, got: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+}
+
+#[test]
+fn logs_turn_empty_log_returns_no_matches() {
+    let log_file = unique_log_file("empty-turn");
+    std::fs::write(&log_file, "").expect("should write empty log file");
+
+    let output = run_script(
+        "logs-turn.sh",
+        &["turn-1", log_file.to_str().expect("utf-8 log file path")],
+    );
+
+    assert!(
+        output.status.success(),
+        "empty log should not fail, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        output.stdout.is_empty(),
+        "empty log should return no matches, got: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+}
+
+#[test]
+fn just_logs_errors_accepts_log_file_paths_with_spaces() {
+    let log_file = unique_log_file("just-errors-with-space");
+    let parent = log_file.parent().expect("log file should have parent");
+    let spaced_dir = parent.join("space dir");
+    std::fs::create_dir_all(&spaced_dir).expect("should create spaced directory");
+    let spaced_log = spaced_dir.join("errors log.jsonl");
+    std::fs::write(
+        &spaced_log,
+        "{\"level\":\"ERROR\",\"message\":\"spaced path should work\"}\n",
+    )
+    .expect("should write spaced log file");
+
+    let output = run_just(&[
+        "logs-errors",
+        spaced_log.to_str().expect("utf-8 spaced log path"),
+    ]);
+
+    assert!(
+        output.status.success(),
+        "just logs-errors should support spaced paths, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let lines: Vec<&str> = stdout.lines().collect();
+    assert_eq!(lines.len(), 1);
+}
+
+#[test]
+fn just_logs_turn_accepts_spaced_turn_id_and_log_path() {
+    let log_file = unique_log_file("just-turn-with-space");
+    let parent = log_file.parent().expect("log file should have parent");
+    let spaced_dir = parent.join("turn space dir");
+    std::fs::create_dir_all(&spaced_dir).expect("should create spaced directory");
+    let spaced_log = spaced_dir.join("turn log.jsonl");
+    std::fs::write(
+        &spaced_log,
+        "{\"level\":\"WARN\",\"turn_id\":\"turn alpha\",\"message\":\"x\"}\n",
+    )
+    .expect("should write spaced log file");
+
+    let output = run_just(&[
+        "logs-turn",
+        "turn alpha",
+        spaced_log.to_str().expect("utf-8 spaced log path"),
+    ]);
+
+    assert!(
+        output.status.success(),
+        "just logs-turn should support spaced args, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let lines: Vec<&str> = stdout.lines().collect();
+    assert_eq!(lines.len(), 1);
 }

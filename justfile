@@ -19,13 +19,13 @@ obs-install-tools:
     bash scripts/observability/install-tools.sh
 
 logs-tail log_file="logs/blazar.log":
-    bash scripts/observability/logs-tail.sh {{log_file}}
+    bash scripts/observability/logs-tail.sh {{quote(log_file)}}
 
 logs-errors log_file="logs/blazar.log":
-    bash scripts/observability/logs-errors.sh {{log_file}}
+    bash scripts/observability/logs-errors.sh {{quote(log_file)}}
 
 logs-turn turn_id log_file="logs/blazar.log":
-    bash scripts/observability/logs-turn.sh {{turn_id}} {{log_file}}
+    bash scripts/observability/logs-turn.sh {{quote(turn_id)}} {{quote(log_file)}}
 
 eval-self-test:
     python3 scripts/eval/open_benchmark_runner.py self-test
