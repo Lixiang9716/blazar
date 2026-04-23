@@ -58,7 +58,7 @@ pub(crate) fn tool_descriptor(entry: &TimelineEntry) -> Option<EntryDescriptor> 
 }
 
 fn infer_result_mode(tool_name: &str, body: &str) -> ResultMode {
-    let is_diff = tool_name.contains("edit")
+    let is_diff = matches!(tool_name, "edit_file")
         || body.starts_with("diff --git")
         || body.contains("\n@@")
         || body.contains("@@ ");

@@ -250,6 +250,25 @@ fn tool_result_mode_detects_diff_markdown_code_plain() {
 }
 
 #[test]
+fn tool_result_mode_does_not_treat_edit_substring_as_diff() {
+    use super::tooling::descriptor::ResultMode;
+
+    let entry = TimelineEntry::tool_call(
+        "c-non-diff",
+        "credit_lookup",
+        ToolKind::Local,
+        "plain result text",
+        r#"{"query":"credit"}"#,
+        ToolCallStatus::Success,
+    );
+
+    assert_eq!(
+        super::tooling::tool_descriptor(&entry).unwrap().result_mode,
+        ResultMode::Plain
+    );
+}
+
+#[test]
 fn tool_call_status_visual_uses_dot_for_running_and_success_x_for_error() {
     let theme = crate::chat::theme::build_theme();
 
