@@ -59,37 +59,15 @@ impl ModalPicker {
         }
     }
 
-    pub fn command_palette() -> Self {
-        Self::with_context(
-            "Commands",
-            vec![
-                PickerItem::new("/help", "Show available commands and shortcuts"),
-                PickerItem::new("/clear", "Clear the conversation history"),
-                PickerItem::new("/copy", "Copy the last response to the clipboard"),
-                PickerItem::new("/init", "Generate a blazar-instructions.md file"),
-                PickerItem::new("/skills", "List loaded skills and their status"),
-                PickerItem::new("/model", "Switch the active model"),
-                PickerItem::new("/mcp", "Manage MCP server configuration"),
-                PickerItem::new("/theme", "Switch the color theme"),
-                PickerItem::new("/history", "Browse conversation history"),
-                PickerItem::new("/plan", "Generate a plan with an auto-titled summary"),
-                PickerItem::new("/export", "Export conversation to file"),
-                PickerItem::new("/compact", "Compact conversation context"),
-                PickerItem::new("/config", "Open configuration settings"),
-                PickerItem::new("/tools", "List available tools"),
-                PickerItem::new("/agents", "List running background agents"),
-                PickerItem::new("/discover-agents", "Refresh discovered ACP agents"),
-                PickerItem::new("/context", "Show current context window usage"),
-                PickerItem::new("/diff", "Show pending file changes"),
-                PickerItem::new("/git", "Show git repository status"),
-                PickerItem::new("/undo", "Undo last file change"),
-                PickerItem::new("/terminal", "Open a shell terminal"),
-                PickerItem::new("/debug", "Toggle debug overlay"),
-                PickerItem::new("/log", "Show application logs"),
-                PickerItem::new("/quit", "Exit Blazar"),
-            ],
-            PickerContext::Commands,
-        )
+    pub fn command_palette_from_registry(
+        registry: &crate::chat::commands::CommandRegistry,
+    ) -> Self {
+        let items = registry
+            .list()
+            .into_iter()
+            .map(|spec| PickerItem::new(spec.name.clone(), spec.description.clone()))
+            .collect();
+        Self::with_context("Commands", items, PickerContext::Commands)
     }
 
     pub fn open(&mut self) {
@@ -171,6 +149,9 @@ impl ModalPicker {
     }
 
     pub fn push_filter(&mut self, ch: char) {
+        if self.context == PickerContext::Commands && self.filter.is_empty() && ch != '/' {
+            self.filter.push('/');
+        }
         self.filter.push(ch);
         self.reset_selection();
     }
@@ -201,22 +182,45 @@ impl ModalPicker {
     }
 
     pub fn filtered_items(&self) -> Vec<&PickerItem> {
-        if self.filter.is_empty() {
-            self.items.iter().collect()
-        } else {
-            self.items
+        if self.context != PickerContext::Commands {
+            if self.filter.is_empty() {
+                return self.items.iter().collect();
+            }
+
+            let filter = self.filter.to_lowercase();
+            return self
+                .items
                 .iter()
                 .filter(|item| {
-                    item.label
-                        .to_lowercase()
-                        .contains(&self.filter.to_lowercase())
-                        || item
-                            .description
-                            .to_lowercase()
-                            .contains(&self.filter.to_lowercase())
+                    item.label.to_lowercase().contains(&filter)
+                        || item.description.to_lowercase().contains(&filter)
                 })
-                .collect()
+                .collect();
         }
+
+        let filter = self.filter.trim();
+        if filter.is_empty() {
+            return self.items.iter().collect();
+        }
+        if !filter.starts_with('/') {
+            return Vec::new();
+        }
+
+        let specs: Vec<crate::chat::commands::CommandSpec> = self
+            .items
+            .iter()
+            .map(|item| crate::chat::commands::CommandSpec {
+                name: item.label.clone(),
+                description: item.description.clone(),
+                args_schema: serde_json::json!({ "type": "object" }),
+            })
+            .collect();
+
+        let ordered_names = crate::chat::commands::matcher::ranked_match_names(filter, &specs);
+        ordered_names
+            .into_iter()
+            .filter_map(|name| self.items.iter().find(|item| item.label == name))
+            .collect()
     }
 
     fn reset_selection(&mut self) {
@@ -244,6 +248,13 @@ impl ModalPicker {
 #[cfg(test)]
 mod tests {
     use super::{ModalPicker, PickerItem};
+    use crate::chat::commands::{CommandRegistry, builtins::register_builtin_commands};
+
+    fn command_palette_for_test() -> ModalPicker {
+        let mut registry = CommandRegistry::new();
+        register_builtin_commands(&mut registry).expect("built-ins should register in tests");
+        ModalPicker::command_palette_from_registry(&registry)
+    }
 
     #[test]
     fn open_close_tracks_visibility_with_overlay_state() {
@@ -259,24 +270,19 @@ mod tests {
 
     #[test]
     fn filter_updates_reset_selection() {
-        let mut picker = ModalPicker::new(
-            "Commands",
-            vec![
-                PickerItem::new("/help", "help"),
-                PickerItem::new("/clear", "clear"),
-            ],
-        );
+        let mut picker = command_palette_for_test();
         picker.open();
         picker.move_down();
         assert_eq!(picker.selected_index(), Some(1));
 
-        picker.push_filter('h');
+        picker.push_filter('p');
+        assert_eq!(picker.filter, "/p");
         assert_eq!(picker.selected_index(), Some(0));
     }
 
     #[test]
     fn command_palette_includes_plan_command() {
-        let picker = ModalPicker::command_palette();
+        let picker = command_palette_for_test();
         let commands: Vec<&str> = picker
             .items
             .iter()
@@ -291,7 +297,7 @@ mod tests {
 
     #[test]
     fn command_palette_includes_discover_agents_command() {
-        let picker = ModalPicker::command_palette();
+        let picker = command_palette_for_test();
         let commands: Vec<&str> = picker
             .items
             .iter()

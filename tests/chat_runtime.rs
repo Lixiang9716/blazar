@@ -1,7 +1,10 @@
 use blazar::chat::app::ChatApp;
 use blazar::chat::event_loop::resolve_repo_path;
 use blazar::chat::input::InputAction;
+use blazar::chat::model::Actor;
+use blazar::chat::picker::PickerContext;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use std::time::{Duration, Instant};
 
 const REPO_ROOT: &str = env!("CARGO_MANIFEST_DIR");
 
@@ -95,4 +98,93 @@ fn resolve_repo_path_falls_back_to_non_empty_string_when_schema_empty() {
         !path.is_empty(),
         "fallback must not be empty; got: {path:?}"
     );
+}
+
+#[test]
+fn chat_runtime_picker_theme_command_opens_theme_subpicker() {
+    let mut app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
+
+    app.handle_action(InputAction::Key(KeyEvent::new(
+        KeyCode::Char('/'),
+        KeyModifiers::NONE,
+    )));
+    for ch in "theme".chars() {
+        app.handle_action(InputAction::Key(KeyEvent::new(
+            KeyCode::Char(ch),
+            KeyModifiers::NONE,
+        )));
+    }
+    app.handle_action(InputAction::Submit);
+
+    assert_eq!(app.picker.context, PickerContext::ThemeSelect);
+    assert!(app.picker.is_open());
+}
+
+#[test]
+fn chat_runtime_picker_model_command_opens_model_subpicker() {
+    let mut app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
+
+    app.handle_action(InputAction::Key(KeyEvent::new(
+        KeyCode::Char('/'),
+        KeyModifiers::NONE,
+    )));
+    for ch in "model".chars() {
+        app.handle_action(InputAction::Key(KeyEvent::new(
+            KeyCode::Char(ch),
+            KeyModifiers::NONE,
+        )));
+    }
+    app.handle_action(InputAction::Submit);
+
+    assert_eq!(app.picker.context, PickerContext::ModelSelect);
+    assert!(app.picker.is_open());
+}
+
+#[test]
+fn chat_runtime_discover_agents_stays_local_without_streaming() {
+    let mut app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
+
+    app.send_message("/discover-agents");
+
+    assert!(
+        app.timeline()
+            .iter()
+            .any(|entry| entry.actor == Actor::User && entry.body == "/discover-agents")
+    );
+    assert!(
+        app.timeline()
+            .iter()
+            .any(|entry| entry.body.contains("Discovering ACP agents"))
+    );
+    assert!(!app.is_streaming());
+}
+
+#[test]
+fn chat_runtime_submit_exact_plan_from_composer_uses_planning_turn() {
+    let mut app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
+    app.set_composer_text("/plan");
+
+    app.handle_action(InputAction::Submit);
+
+    assert!(
+        app.timeline()
+            .iter()
+            .any(|entry| entry.actor == Actor::User && entry.body == "/plan"),
+        "submitting /plan should create a user turn entry"
+    );
+
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while Instant::now() < deadline {
+        app.tick();
+        if app.timeline().iter().any(|entry| {
+            entry.actor == Actor::Assistant
+                && entry.title.is_some()
+                && !entry.body.trim().is_empty()
+        }) {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    panic!("expected /plan submit to run planning prompt flow");
 }

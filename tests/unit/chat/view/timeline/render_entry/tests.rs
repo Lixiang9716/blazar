@@ -1,6 +1,7 @@
 use super::common::extract_tool_subtitle;
 use super::*;
 use crate::agent::tools::ToolKind;
+use crate::chat::model::ToolCallStatus;
 
 fn lines_text(lines: &[Line<'_>]) -> Vec<String> {
     lines
@@ -98,6 +99,128 @@ fn render_entry_renders_tool_use_and_tool_call_statuses() {
     let acp_agent_text = lines_text(&render_entry(&acp_agent, &theme, 70)).join("\n");
     assert!(acp_agent_text.contains("configured_reviewer"));
     assert!(acp_agent_text.contains("(ACP)"));
+}
+
+#[test]
+fn tool_descriptor_maps_status_and_semantic_summary() {
+    let running = TimelineEntry::tool_call(
+        "call-1",
+        "read_file",
+        ToolKind::Local,
+        "reading",
+        r#"{"path":"src/main.rs"}"#,
+        ToolCallStatus::Running,
+    );
+    let descriptor = super::tooling::tool_descriptor(&running);
+
+    assert_eq!(
+        descriptor.status_visual,
+        super::tooling::descriptor::StatusVisual::RunningDot
+    );
+    assert_eq!(descriptor.subtitle.as_deref(), Some("src/main.rs"));
+}
+
+#[test]
+fn parallel_tool_calls_with_same_name_keep_distinct_identity() {
+    let theme = crate::chat::theme::build_theme();
+    let first = TimelineEntry::tool_call(
+        "call-a",
+        "bash",
+        ToolKind::Local,
+        "done",
+        r#"{"command":"echo a"}"#,
+        ToolCallStatus::Success,
+    );
+    let second = TimelineEntry::tool_call(
+        "call-b",
+        "bash",
+        ToolKind::Local,
+        "done",
+        r#"{"command":"echo a"}"#,
+        ToolCallStatus::Success,
+    );
+
+    let first_text = lines_text(&render_entry(&first, &theme, 70)).join("\n");
+    let second_text = lines_text(&render_entry(&second, &theme, 70)).join("\n");
+
+    assert!(first_text.contains("call-a"));
+    assert!(second_text.contains("call-b"));
+    assert_ne!(first_text, second_text);
+}
+
+#[test]
+fn tool_result_preview_is_capped_to_two_lines() {
+    let entry = TimelineEntry::tool_call(
+        "c-preview",
+        "bash",
+        ToolKind::Local,
+        "line-1\nline-2\nline-3\nline-4",
+        r#"{"command":"cargo test"}"#,
+        ToolCallStatus::Success,
+    );
+
+    let descriptor = super::tooling::tool_descriptor(&entry);
+
+    assert_eq!(descriptor.preview_lines.len(), 2);
+    assert_eq!(
+        descriptor.preview_lines,
+        vec!["line-1".to_string(), "line-2".to_string()]
+    );
+}
+
+#[test]
+fn tool_result_mode_detects_diff_markdown_code_plain() {
+    use super::tooling::descriptor::ResultMode;
+
+    let diff_entry = TimelineEntry::tool_call(
+        "c-diff",
+        "edit_file",
+        ToolKind::Local,
+        "diff --git a/src/main.rs b/src/main.rs\n@@ -1 +1 @@\n-old\n+new",
+        r#"{"path":"src/main.rs"}"#,
+        ToolCallStatus::Success,
+    );
+    let markdown_entry = TimelineEntry::tool_call(
+        "c-md",
+        "notes",
+        ToolKind::Local,
+        "# Title\n- item",
+        r#"{"path":"notes.md"}"#,
+        ToolCallStatus::Success,
+    );
+    let code_entry = TimelineEntry::tool_call(
+        "c-code",
+        "bash",
+        ToolKind::Local,
+        "```rust\nfn main() {}\n```",
+        r#"{"command":"cargo fmt"}"#,
+        ToolCallStatus::Success,
+    );
+    let plain_entry = TimelineEntry::tool_call(
+        "c-plain",
+        "read_file",
+        ToolKind::Local,
+        "just plain text",
+        r#"{"path":"Cargo.toml"}"#,
+        ToolCallStatus::Success,
+    );
+
+    assert_eq!(
+        super::tooling::tool_descriptor(&diff_entry).result_mode,
+        ResultMode::Diff
+    );
+    assert_eq!(
+        super::tooling::tool_descriptor(&markdown_entry).result_mode,
+        ResultMode::Markdown
+    );
+    assert_eq!(
+        super::tooling::tool_descriptor(&code_entry).result_mode,
+        ResultMode::Code
+    );
+    assert_eq!(
+        super::tooling::tool_descriptor(&plain_entry).result_mode,
+        ResultMode::Plain
+    );
 }
 
 #[test]

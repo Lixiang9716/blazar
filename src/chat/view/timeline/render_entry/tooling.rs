@@ -1,5 +1,12 @@
-use super::common::{extract_tool_subtitle, tool_badge};
 use super::*;
+
+pub(super) mod descriptor;
+mod renderer;
+
+#[allow(dead_code)]
+pub(super) fn tool_descriptor(entry: &TimelineEntry) -> descriptor::EntryDescriptor {
+    descriptor::tool_descriptor(entry)
+}
 
 pub(super) fn render_tool_use_entry<'a>(
     entry: &TimelineEntry,
@@ -48,51 +55,8 @@ pub(super) fn render_tool_call_entry<'a>(
     theme: &ChatTheme,
     marker_style: Style,
 ) -> Vec<Line<'a>> {
-    let mut lines = Vec::new();
-
-    if let EntryKind::ToolCall {
-        tool_name,
-        kind,
-        status,
-        ..
-    } = &entry.kind
-    {
-        let (status_marker, status_style) = match status {
-            ToolCallStatus::Running => ("…", theme.spinner),
-            ToolCallStatus::Success => ("✓", theme.diff_add),
-            ToolCallStatus::Error => ("✗", theme.marker_warning),
-        };
-
-        let mut header = vec![
-            Span::raw(MARGIN),
-            Span::styled("● ", marker_style),
-            Span::styled(tool_name.clone(), theme.tool_label),
-        ];
-        if let Some(badge) = tool_badge(*kind) {
-            header.push(Span::raw(" "));
-            header.push(Span::styled(badge, theme.dim_text));
-        }
-        header.extend([Span::raw(" "), Span::styled(status_marker, status_style)]);
-        lines.push(Line::from(header));
-
-        // Show key argument (file path / command) as a subtitle
-        let subtitle = extract_tool_subtitle(tool_name, &entry.details);
-        if !subtitle.is_empty() {
-            lines.push(Line::from(vec![
-                Span::raw(INDENT),
-                Span::styled(subtitle, theme.tool_target),
-            ]));
-        }
-
-        for body_line in entry.body.lines() {
-            lines.push(Line::from(vec![
-                Span::raw(INDENT),
-                Span::styled(body_line.to_owned(), theme.dim_text),
-            ]));
-        }
-    }
-
-    lines
+    let descriptor = descriptor::tool_descriptor(entry);
+    renderer::render_tool_descriptor(&descriptor, entry, theme, marker_style)
 }
 
 pub(super) fn render_bash_entry<'a>(
