@@ -17,6 +17,7 @@ use crate::agent::tools::agent::AgentTool;
 use crate::agent::tools::bash::BashTool;
 use crate::agent::tools::list_dir::ListDirTool;
 use crate::agent::tools::read_file::ReadFileTool;
+use crate::agent::tools::vet::VetTool;
 use crate::agent::tools::write_file::WriteFileTool;
 use crate::config::{AGENTS_CONFIG_PATH, load_agents_config_from_path};
 use crate::provider::{LlmProvider, ProviderMessage};
@@ -362,6 +363,7 @@ fn build_tool_registry(
     tools.register(Box::new(WriteFileTool::new(workspace_root.to_path_buf())));
     tools.register(Box::new(ListDirTool::new(workspace_root.to_path_buf())));
     tools.register(Box::new(BashTool::new(workspace_root.to_path_buf())));
+    tools.register(Box::new(VetTool::new(workspace_root.to_path_buf())));
     tools.register(Box::new(AgentTool::new(
         "sub_agent",
         "Delegate a task to a sub-agent that can read files, write files, list directories, and run bash commands. Use when the task is self-contained and benefits from independent reasoning.",

@@ -3,6 +3,7 @@ pub mod agent;
 pub mod bash;
 pub mod list_dir;
 pub mod read_file;
+pub mod vet;
 pub mod write_file;
 
 use serde_json::Value;
@@ -762,6 +763,7 @@ mod tests {
         let read_tool = read_file::ReadFileTool::new(workspace_root.clone());
         let write_tool = write_file::WriteFileTool::new(workspace_root.clone());
         let bash_tool = bash::BashTool::new(workspace_root.clone());
+        let vet_tool = vet::VetTool::new(workspace_root.clone());
         let agent_tool = agent::AgentTool::new(
             "delegate",
             "delegate work",
@@ -800,6 +802,13 @@ mod tests {
         );
         assert_eq!(
             bash_tool.resource_claims(&json!({"command":"pwd"})),
+            vec![ResourceClaim {
+                resource: "process:bash".into(),
+                access: ResourceAccess::Exclusive,
+            }]
+        );
+        assert_eq!(
+            vet_tool.resource_claims(&json!({})),
             vec![ResourceClaim {
                 resource: "process:bash".into(),
                 access: ResourceAccess::Exclusive,
