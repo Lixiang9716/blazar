@@ -19,9 +19,11 @@ pub fn run_adapter_conformance_suite<P: AgentAdapterContractProbe>(probe: P) -> 
     let mut failures = Vec::new();
     if let Err(err) = probe.fetch_agent() {
         failures.push(format!("fetch_agent: {err}"));
+        return ConformanceReport { failures };
     }
     if let Err(err) = probe.create_run() {
         failures.push(format!("create_run: {err}"));
+        return ConformanceReport { failures };
     }
     if let Err(err) = probe.poll_terminal() {
         failures.push(format!("poll_terminal: {err}"));
