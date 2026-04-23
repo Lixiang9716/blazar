@@ -445,5 +445,5 @@ impl LlmProvider for OpenAiProvider {
 }
 
 #[cfg(test)]
-#[path = "openai_compat_tests.rs"]
+#[path = "../../tests/unit/provider/openai_compat_tests.rs"]
 mod tests;

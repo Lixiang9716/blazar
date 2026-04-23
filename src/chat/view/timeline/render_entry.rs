@@ -6,6 +6,7 @@ mod status;
 mod tooling;
 
 #[cfg(test)]
+#[path = "../../../../tests/unit/chat/view/timeline/render_entry/tests.rs"]
 mod tests;
 
 use common::marker_style_for;

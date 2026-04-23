@@ -31,6 +31,7 @@ mod scheduler;
 pub(crate) mod turn;
 
 #[cfg(test)]
+#[path = "../../tests/unit/agent/runtime/tests.rs"]
 mod tests;
 
 pub use errors::RuntimeErrorKind;

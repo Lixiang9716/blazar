@@ -84,5 +84,5 @@ where
 }
 
 #[cfg(test)]
-#[path = "acp/tests.rs"]
+#[path = "../../../tests/unit/agent/tools/acp/tests.rs"]
 mod tests;

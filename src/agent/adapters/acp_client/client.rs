@@ -298,5 +298,5 @@ fn join_url(endpoint: &str, path: &str) -> Result<Url, AcpClientError> {
 }
 
 #[cfg(test)]
-#[path = "client_tests.rs"]
+#[path = "../../../../tests/unit/agent/adapters/acp_client/client_tests.rs"]
 mod tests;

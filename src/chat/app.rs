@@ -18,6 +18,7 @@ mod events;
 mod turns;
 
 #[cfg(test)]
+#[path = "../../tests/unit/chat/app/tests.rs"]
 mod tests;
 
 pub struct ChatApp {

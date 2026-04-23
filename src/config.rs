@@ -348,5 +348,5 @@ const fn default_enabled() -> bool {
 }
 
 #[cfg(test)]
-#[path = "config_tests.rs"]
+#[path = "../tests/unit/config_tests.rs"]
 mod tests;

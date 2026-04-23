@@ -373,5 +373,5 @@ fn init_logger() {
 }
 
 #[cfg(test)]
-#[path = "app_tests.rs"]
+#[path = "../tests/unit/app_tests.rs"]
 mod tests;

@@ -164,5 +164,5 @@ pub fn with_captured_structured_events_for_test<T>(
 }
 
 #[cfg(test)]
-#[path = "logging_tests.rs"]
+#[path = "../../tests/unit/observability/logging_tests.rs"]
 mod tests;

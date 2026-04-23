@@ -32,5 +32,5 @@ pub fn run_adapter_conformance_suite<P: AgentAdapterContractProbe>(probe: P) -> 
 }
 
 #[cfg(test)]
-#[path = "conformance_tests.rs"]
+#[path = "../../../tests/unit/agent/adapters/conformance_tests.rs"]
 mod tests;

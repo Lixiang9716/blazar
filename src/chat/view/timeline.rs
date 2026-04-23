@@ -16,6 +16,7 @@ mod render_entry;
 mod text_wrap;
 
 #[cfg(test)]
+#[path = "../../../tests/unit/chat/view/timeline/tests.rs"]
 mod tests;
 
 use render_entry::render_entry;
