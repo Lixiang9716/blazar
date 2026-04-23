@@ -31,11 +31,12 @@ pub fn format_event_json(
     .to_string()
 }
 
-fn timestamp_seconds() -> u64 {
+fn timestamp_seconds() -> String {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs())
         .unwrap_or_default()
+        .to_string()
 }
 
 pub fn flexi_structured_format(
