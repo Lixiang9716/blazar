@@ -492,6 +492,57 @@ fn turn_failed_events_use_error_kind_for_cancel_hint() {
 }
 
 #[test]
+fn turn_failed_logs_redact_sensitive_error_text_for_app_log_path() {
+    crate::observability::logging::clear_captured_structured_events_for_test();
+    let mut app = new_test_app();
+    let sensitive_error = "invalid API key sk-test-secret";
+
+    app.apply_agent_event_for_test(AgentEvent::TurnStarted {
+        turn_id: "turn-sensitive".into(),
+    });
+    app.apply_agent_event_for_test(AgentEvent::TurnFailed {
+        kind: crate::agent::runtime::RuntimeErrorKind::ProviderFatal,
+        error: sensitive_error.into(),
+    });
+
+    let logged = crate::observability::logging::take_captured_structured_events_for_test()
+        .into_iter()
+        .filter_map(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+        .find(|event| {
+            event
+                .get("event")
+                .and_then(serde_json::Value::as_str)
+                == Some("turn_failed")
+                && event
+                    .get("turn_id")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("turn-sensitive")
+                && event
+                    .get("error_kind")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("ProviderFatal")
+        })
+        .expect("expected redacted structured turn_failed app log event");
+
+    let message = logged
+        .get("message")
+        .and_then(serde_json::Value::as_str)
+        .expect("structured message should be present");
+    assert!(message.contains("details=redacted"));
+    assert!(message.contains("kind=ProviderFatal"));
+    assert!(message.contains("turn_id=turn-sensitive"));
+    assert!(!message.contains("invalid API key"));
+    assert!(!message.contains("sk-test-secret"));
+    assert_eq!(
+        message,
+        super::events::turn_failed_app_log_message(
+            crate::agent::runtime::RuntimeErrorKind::ProviderFatal,
+            Some("turn-sensitive"),
+        )
+    );
+}
+
+#[test]
 fn quit_and_scroll_actions_follow_runtime_state_rules() {
     let repo_path = env!("CARGO_MANIFEST_DIR");
     let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");

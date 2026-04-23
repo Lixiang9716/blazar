@@ -12,6 +12,7 @@ impl ChatApp {
     }
 
     pub(super) fn apply_agent_event(&mut self, event: AgentEvent) {
+        let turn_id_context = self.current_turn_id().map(str::to_owned);
         let _ = self.agent_state.apply_event(&event);
 
         match event {
@@ -174,7 +175,20 @@ impl ChatApp {
                     debug!("tick: TurnCancelled");
                     self.timeline.push(TimelineEntry::hint("Turn cancelled."));
                 } else {
-                    warn!("tick: TurnFailed error={error}");
+                    let safe_log_message =
+                        turn_failed_app_log_message(kind, turn_id_context.as_deref());
+                    warn!("{safe_log_message}");
+                    emit_structured_event(
+                        log::Level::Warn,
+                        module_path!(),
+                        "turn_failed",
+                        &safe_log_message,
+                        None,
+                        turn_id_context.as_deref(),
+                        None,
+                        None,
+                        Some(runtime_error_kind_label(kind)),
+                    );
                     self.timeline
                         .push(TimelineEntry::warning(format!("Agent error: {error}")));
                 }
@@ -224,5 +238,28 @@ impl ChatApp {
             crate::agent::state::TurnState::Streaming { turn_id } => Some(turn_id.as_str()),
             _ => None,
         }
+    }
+}
+
+pub(super) fn turn_failed_app_log_message(kind: RuntimeErrorKind, turn_id: Option<&str>) -> String {
+    match turn_id {
+        Some(turn_id) => format!(
+            "tick: TurnFailed kind={} turn_id={turn_id} details=redacted",
+            runtime_error_kind_label(kind)
+        ),
+        None => format!(
+            "tick: TurnFailed kind={} details=redacted",
+            runtime_error_kind_label(kind)
+        ),
+    }
+}
+
+fn runtime_error_kind_label(kind: RuntimeErrorKind) -> &'static str {
+    match kind {
+        RuntimeErrorKind::ProviderTransient => "ProviderTransient",
+        RuntimeErrorKind::ProviderFatal => "ProviderFatal",
+        RuntimeErrorKind::ProtocolInvalidPayload => "ProtocolInvalidPayload",
+        RuntimeErrorKind::ToolExecution => "ToolExecution",
+        RuntimeErrorKind::Cancelled => "Cancelled",
     }
 }
