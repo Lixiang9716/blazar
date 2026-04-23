@@ -21,7 +21,10 @@ use crate::agent::tools::write_file::WriteFileTool;
 use crate::config::{AGENTS_CONFIG_PATH, load_agents_config_from_path};
 use crate::provider::{LlmProvider, ProviderMessage};
 
+mod events;
+mod executor;
 mod json_repair;
+mod scheduler;
 pub(crate) mod turn;
 
 #[cfg(test)]

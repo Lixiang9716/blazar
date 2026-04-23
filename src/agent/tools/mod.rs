@@ -3,6 +3,7 @@ pub mod agent;
 pub mod bash;
 pub mod list_dir;
 pub mod read_file;
+#[allow(dead_code)]
 pub mod scheduler;
 pub mod write_file;
 
