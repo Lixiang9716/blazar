@@ -2,8 +2,33 @@ use super::*;
 
 impl ChatApp {
     pub fn send_message(&mut self, input: &str) {
+        self.send_message_internal(input, true);
+    }
+
+    pub(crate) fn send_message_without_command_dispatch(&mut self, input: &str) {
+        self.send_message_internal(input, false);
+    }
+
+    pub(crate) fn execute_discover_agents_command(&mut self) {
+        self.push_user_message("/discover-agents");
+        self.refresh_acp_agents();
+    }
+
+    fn send_message_internal(&mut self, input: &str, allow_command_dispatch: bool) {
         let trimmed = input.trim();
         if trimmed.is_empty() {
+            return;
+        }
+
+        if allow_command_dispatch
+            && trimmed != "/plan"
+            && self.command_registry.find(trimmed).is_some()
+        {
+            if let Err(err) = self.execute_palette_command_sync(trimmed, serde_json::json!({})) {
+                self.timeline
+                    .push(TimelineEntry::warning(format!("Command failed: {err}")));
+                self.scroll_offset = u16::MAX;
+            }
             return;
         }
 
@@ -24,22 +49,7 @@ impl ChatApp {
             return;
         }
 
-        self.messages.push(ChatMessage {
-            author: Author::User,
-            body: turn.user_text.clone(),
-        });
-
-        self.has_user_sent = true;
-
-        // Add user message to timeline
-        self.timeline
-            .push(TimelineEntry::user_message(turn.user_text.clone()));
-
-        // Handle local commands without dispatching a model turn.
-        if trimmed == "/discover-agents" {
-            self.refresh_acp_agents();
-            return;
-        }
+        self.push_user_message(&turn.user_text);
 
         // Admission control: queue if agent is busy instead of dropping
         if self.agent_state.is_busy() {
@@ -64,6 +74,17 @@ impl ChatApp {
 
         // Auto-scroll to bottom
         self.scroll_offset = u16::MAX;
+    }
+
+    fn push_user_message(&mut self, body: &str) {
+        self.messages.push(ChatMessage {
+            author: Author::User,
+            body: body.to_owned(),
+        });
+
+        self.has_user_sent = true;
+        self.timeline
+            .push(TimelineEntry::user_message(body.to_owned()));
     }
 
     pub(super) fn refresh_acp_agents(&mut self) {

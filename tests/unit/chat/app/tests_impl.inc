@@ -101,6 +101,52 @@ fn new_test_app() -> ChatApp {
     ChatApp::new_for_test(env!("CARGO_MANIFEST_DIR")).expect("test app should initialize")
 }
 
+struct RuntimeProbeCommand {
+    spec: crate::chat::commands::CommandSpec,
+}
+
+impl RuntimeProbeCommand {
+    fn new(name: &str) -> Self {
+        Self {
+            spec: crate::chat::commands::CommandSpec {
+                name: name.to_owned(),
+                description: "Runtime probe command".to_owned(),
+                args_schema: serde_json::json!({ "type": "object" }),
+            },
+        }
+    }
+}
+
+impl crate::chat::commands::PaletteCommand for RuntimeProbeCommand {
+    fn spec(&self) -> &crate::chat::commands::CommandSpec {
+        &self.spec
+    }
+
+    fn execute<'a>(
+        &'a self,
+        ctx: &'a mut crate::chat::commands::orchestrator::CommandContext<'a>,
+        _args: serde_json::Value,
+    ) -> crate::chat::commands::types::CommandExecFuture<'a> {
+        Box::pin(async move {
+            if tokio::runtime::Handle::try_current().is_err() {
+                return Err(crate::chat::commands::CommandError::ExecutionFailed(
+                    "missing tokio runtime context".to_owned(),
+                ));
+            }
+            ctx.app.set_composer_text("/runtime-ok");
+            Ok(crate::chat::commands::CommandResult {
+                summary: "runtime context available".to_owned(),
+            })
+        })
+    }
+}
+
+fn register_runtime_probe_command(app: &mut ChatApp, name: &str) {
+    app.command_registry
+        .register(Arc::new(RuntimeProbeCommand::new(name)))
+        .expect("runtime probe command should register");
+}
+
 #[test]
 fn chat_runtime_tool_registry_reports_bridge_compatibility_tier_for_bash() {
     let registry = ToolRegistry::new(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")));
@@ -397,7 +443,11 @@ fn picker_backspace_pops_filter_then_closes_overlay() {
         KeyCode::Char('h'),
         KeyModifiers::NONE,
     )));
-    assert_eq!(app.picker.filter, "h");
+    assert_eq!(app.picker.filter, "/h");
+
+    app.handle_action(InputAction::Backspace);
+    assert!(app.picker.is_open());
+    assert_eq!(app.picker.filter, "/");
 
     app.handle_action(InputAction::Backspace);
     assert!(app.picker.is_open());
@@ -868,6 +918,28 @@ fn picker_model_selection_trims_checkmark_suffix_before_switch() {
     assert!(!hint.body.contains('✓'));
 
     std::fs::remove_dir_all(&repo_path).expect("cleanup scratch repo");
+}
+
+#[test]
+fn execute_palette_command_sync_provides_tokio_runtime_outside_tokio_context() {
+    let mut app = new_test_app();
+    register_runtime_probe_command(&mut app, "/runtime-probe-sync");
+
+    let result = app.execute_palette_command_sync("/runtime-probe-sync", serde_json::json!({}));
+
+    assert!(result.is_ok(), "runtime probe should execute successfully");
+    assert_eq!(app.composer_text(), "/runtime-ok");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn execute_palette_command_sync_is_safe_inside_tokio_runtime() {
+    let mut app = new_test_app();
+    register_runtime_probe_command(&mut app, "/runtime-probe-async");
+
+    let result = app.execute_palette_command_sync("/runtime-probe-async", serde_json::json!({}));
+
+    assert!(result.is_ok(), "runtime probe should not panic in tokio runtime");
+    assert_eq!(app.composer_text(), "/runtime-ok");
 }
 
 #[test]
