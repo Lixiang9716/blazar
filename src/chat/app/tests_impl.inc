@@ -978,6 +978,31 @@ fn chat_timeline_preserves_capability_metadata_for_tool_entries() {
 }
 
 #[test]
+fn chat_timeline_renders_sorted_claims_for_stable_metadata() {
+    let mut app = new_test_app();
+
+    app.apply_agent_event_for_test(AgentEvent::ToolCallStarted {
+        call_id: "call-meta-unstable".into(),
+        tool_name: "write_file".into(),
+        kind: crate::agent::tools::ToolKind::Local,
+        arguments: r#"{"path":"src/lib.rs"}"#.into(),
+        batch_id: 8,
+        replay_index: 1,
+        normalized_claims: vec![
+            "process:bash#exclusive".into(),
+            "fs:src/lib.rs#read-write".into(),
+        ],
+    });
+
+    let entry = app.timeline.last().expect("tool entry should exist");
+    assert!(
+        entry
+            .details
+            .contains("normalized_claims=fs:src/lib.rs#read-write,process:bash#exclusive")
+    );
+}
+
+#[test]
 fn turn_complete_plan_with_non_extractable_body_leaves_entry_untitled() {
     let repo_path = env!("CARGO_MANIFEST_DIR");
     let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
