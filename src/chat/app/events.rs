@@ -1,4 +1,6 @@
-use super::turns::extract_plan_title_and_body;
+use super::turns::{
+    extract_plan_title_and_body, extract_tool_call_metadata_line, format_tool_call_details,
+};
 use super::*;
 use crate::agent::runtime::RuntimeErrorKind;
 
@@ -49,7 +51,9 @@ impl ChatApp {
                 tool_name,
                 kind,
                 arguments,
-                ..
+                batch_id,
+                replay_index,
+                normalized_claims,
             } => {
                 debug!(
                     "tick: ToolCallStarted call_id={} tool={} arguments_len={}",
@@ -62,7 +66,12 @@ impl ChatApp {
                     tool_name,
                     kind,
                     summarize_tool_arguments(&arguments),
-                    arguments,
+                    format_tool_call_details(
+                        &arguments,
+                        batch_id,
+                        replay_index,
+                        &normalized_claims,
+                    ),
                     ToolCallStatus::Running,
                 ));
                 self.scroll_offset = u16::MAX;
@@ -85,7 +94,11 @@ impl ChatApp {
                     )
                 }) {
                     entry.body = summarize_tool_output(&output);
-                    entry.details = output;
+                    entry.details = match extract_tool_call_metadata_line(&entry.details) {
+                        Some(metadata_line) if output.is_empty() => metadata_line,
+                        Some(metadata_line) => format!("{output}\n\n{metadata_line}"),
+                        None => output,
+                    };
                     if let EntryKind::ToolCall { status, .. } = &mut entry.kind {
                         *status = if is_error {
                             ToolCallStatus::Error

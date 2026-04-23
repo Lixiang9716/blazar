@@ -393,6 +393,110 @@ fn tool_call_started_event_includes_registry_tool_kind() {
 }
 
 #[test]
+fn tool_call_started_includes_batch_and_replay_metadata() {
+    struct MetadataProvider;
+
+    impl LlmProvider for MetadataProvider {
+        fn stream_turn(
+            &self,
+            _model: &str,
+            messages: &[ProviderMessage],
+            _tools: &[ToolSpec],
+            tx: Sender<ProviderEvent>,
+        ) {
+            let saw_tool_result = messages
+                .iter()
+                .any(|message| matches!(message, ProviderMessage::ToolResult { .. }));
+            if saw_tool_result {
+                let _ = tx.send(ProviderEvent::TurnComplete);
+                return;
+            }
+
+            let _ = tx.send(ProviderEvent::ToolCall {
+                call_id: "call-meta".into(),
+                name: "claimed_tool".into(),
+                arguments: "{}".into(),
+            });
+            let _ = tx.send(ProviderEvent::TurnComplete);
+        }
+    }
+
+    struct ClaimedTool;
+
+    impl Tool for ClaimedTool {
+        fn spec(&self) -> ToolSpec {
+            ToolSpec {
+                name: "claimed_tool".into(),
+                description: "returns claims".into(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": false
+                }),
+            }
+        }
+
+        fn resource_claims(&self, _args: &serde_json::Value) -> Vec<ResourceClaim> {
+            vec![
+                ResourceClaim {
+                    resource: "fs:src/lib.rs".into(),
+                    access: ResourceAccess::ReadOnly,
+                },
+                ResourceClaim {
+                    resource: "process:bash".into(),
+                    access: ResourceAccess::Exclusive,
+                },
+            ]
+        }
+
+        fn execute(&self, _args: serde_json::Value) -> crate::agent::tools::ToolResult {
+            crate::agent::tools::ToolResult::success("ok")
+        }
+    }
+
+    let mut registry = empty_registry();
+    registry.register(Box::new(ClaimedTool));
+
+    let (event_tx, event_rx) = mpsc::channel();
+    let cancel = Arc::new(AtomicBool::new(false));
+    let mut messages = user_messages("run claimed tool");
+
+    let outcome = execute_turn(
+        &mut messages,
+        &MetadataProvider,
+        "echo",
+        &registry,
+        &ChannelObserver { tx: &event_tx },
+        &cancel,
+    );
+
+    assert!(matches!(outcome, TurnOutcome::Complete));
+
+    let started_event = event_rx
+        .try_iter()
+        .find_map(|event| match event {
+            AgentEvent::ToolCallStarted {
+                batch_id,
+                replay_index,
+                normalized_claims,
+                ..
+            } => Some((batch_id, replay_index, normalized_claims)),
+            _ => None,
+        })
+        .expect("tool start event should be emitted");
+
+    assert_eq!(started_event.0, 0);
+    assert_eq!(started_event.1, 0);
+    assert_eq!(
+        started_event.2,
+        vec![
+            "fs:src/lib.rs#read-only".to_string(),
+            "process:bash#exclusive".to_string(),
+        ]
+    );
+}
+
+#[test]
 fn run_turn_preserves_resource_only_tool_results_in_provider_messages() {
     struct ResourceResultProvider;
 
@@ -818,10 +922,7 @@ fn turn_failed_event_carries_structured_error_kind() {
         )
     });
 
-    assert!(
-        saw_structured,
-        "TurnFailed should include RuntimeErrorKind"
-    );
+    assert!(saw_structured, "TurnFailed should include RuntimeErrorKind");
 }
 
 #[test]
@@ -1742,7 +1843,10 @@ fn scheduler_replay_order_matches_original_call_order() {
             _ => None,
         })
         .collect::<Vec<_>>();
-    assert_eq!(completion_events, vec!["call-slow", "call-fast", "call-mid"]);
+    assert_eq!(
+        completion_events,
+        vec!["call-slow", "call-fast", "call-mid"]
+    );
 }
 
 #[test]
@@ -1842,6 +1946,7 @@ impl crate::agent::runtime::turn::TurnObserver for CancellingObserver {
         _tool_name: &str,
         _kind: ToolKind,
         _arguments: &str,
+        _metadata: crate::agent::runtime::events::ToolCallStartMetadata,
     ) {
         let mut started = self.started.lock().expect("started lock");
         started.push(call_id.to_string());

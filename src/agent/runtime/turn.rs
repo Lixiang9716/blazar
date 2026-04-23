@@ -115,7 +115,8 @@ pub(crate) fn execute_turn(
                     .collect();
                 let mut current_pass_successes: HashSet<(String, String)> = HashSet::new();
 
-                for batch in schedule_batches(planned_calls) {
+                for (batch_index, batch) in schedule_batches(planned_calls).into_iter().enumerate()
+                {
                     if cancel_flag.load(Ordering::SeqCst) {
                         observer.on_turn_failed(RuntimeErrorKind::Cancelled, "cancelled");
                         return TurnOutcome::Cancelled;
@@ -133,8 +134,9 @@ pub(crate) fn execute_turn(
                     let truncated_batch = batch_len < batch.len();
                     let executing_batch = batch.into_iter().take(batch_len).collect::<Vec<_>>();
 
+                    let batch_id = u32::try_from(batch_index).unwrap_or(u32::MAX);
                     let batch_execution =
-                        execute_batch(executing_batch, tools, observer, cancel_flag);
+                        execute_batch(executing_batch, batch_id, tools, observer, cancel_flag);
                     for mut executed in batch_execution.executed_calls {
                         if let Some(signature) = executed.success_signature.clone() {
                             if executed.result.is_error {

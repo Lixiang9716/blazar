@@ -147,3 +147,36 @@ pub(super) fn extract_plan_title_and_body(text: &str) -> Option<(String, String)
     let body = lines.collect::<Vec<_>>().join("\n").trim().to_owned();
     Some((title, body))
 }
+
+pub(super) fn format_tool_call_details(
+    arguments: &str,
+    batch_id: u32,
+    replay_index: usize,
+    normalized_claims: &[String],
+) -> String {
+    let claims = if normalized_claims.is_empty() {
+        "<none>".to_owned()
+    } else {
+        normalized_claims.join(",")
+    };
+    let metadata_line =
+        format!("batch_id={batch_id} replay_index={replay_index} normalized_claims={claims}");
+
+    if arguments.is_empty() {
+        metadata_line
+    } else {
+        format!("{arguments}\n{metadata_line}")
+    }
+}
+
+pub(super) fn extract_tool_call_metadata_line(details: &str) -> Option<String> {
+    details
+        .lines()
+        .rev()
+        .find(|line| {
+            line.starts_with("batch_id=")
+                && line.contains(" replay_index=")
+                && line.contains(" normalized_claims=")
+        })
+        .map(ToOwned::to_owned)
+}

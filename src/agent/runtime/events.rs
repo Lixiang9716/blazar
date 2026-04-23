@@ -1,14 +1,27 @@
 use std::sync::mpsc::Sender;
 
-use crate::agent::protocol::AgentEvent;
 use super::RuntimeErrorKind;
+use crate::agent::protocol::AgentEvent;
 use crate::agent::tools::ToolKind;
+
+pub(crate) struct ToolCallStartMetadata {
+    pub(crate) batch_id: u32,
+    pub(crate) replay_index: usize,
+    pub(crate) normalized_claims: Vec<String>,
+}
 
 /// Observer that receives lifecycle events during a turn.
 pub(crate) trait TurnObserver {
     fn on_text_delta(&self, text: &str);
     fn on_thinking_delta(&self, text: &str);
-    fn on_tool_call_started(&self, call_id: &str, tool_name: &str, kind: ToolKind, arguments: &str);
+    fn on_tool_call_started(
+        &self,
+        call_id: &str,
+        tool_name: &str,
+        kind: ToolKind,
+        arguments: &str,
+        metadata: ToolCallStartMetadata,
+    );
     fn on_tool_call_completed(&self, call_id: &str, output: &str, is_error: bool);
     fn on_turn_failed(&self, kind: RuntimeErrorKind, error: &str);
 }
@@ -37,12 +50,16 @@ impl TurnObserver for ChannelObserver<'_> {
         tool_name: &str,
         kind: ToolKind,
         arguments: &str,
+        metadata: ToolCallStartMetadata,
     ) {
         let _ = self.tx.send(AgentEvent::ToolCallStarted {
             call_id: call_id.to_owned(),
             tool_name: tool_name.to_owned(),
             kind,
             arguments: arguments.to_owned(),
+            batch_id: metadata.batch_id,
+            replay_index: metadata.replay_index,
+            normalized_claims: metadata.normalized_claims,
         });
     }
 
@@ -77,6 +94,7 @@ impl TurnObserver for SilentObserver {
         _tool_name: &str,
         _kind: ToolKind,
         _arguments: &str,
+        _metadata: ToolCallStartMetadata,
     ) {
     }
 

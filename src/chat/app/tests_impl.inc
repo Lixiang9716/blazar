@@ -898,6 +898,9 @@ fn tool_call_completed_sets_error_status_and_summary() {
         tool_name: "bash".into(),
         kind: crate::agent::tools::ToolKind::Local,
         arguments: r#"{"command":"exit 1"}"#.into(),
+        batch_id: 0,
+        replay_index: 0,
+        normalized_claims: Vec::new(),
     });
     app.apply_agent_event_for_test(AgentEvent::ToolCallCompleted {
         call_id: "call-err".into(),
@@ -927,6 +930,9 @@ fn agent_tool_calls_render_acp_badge() {
         tool_name: "configured_reviewer".into(),
         kind: crate::agent::tools::ToolKind::Agent { is_acp: true },
         arguments: r#"{"prompt":"review the patch"}"#.into(),
+        batch_id: 0,
+        replay_index: 0,
+        normalized_claims: Vec::new(),
     });
 
     let entry = app.timeline.last().expect("tool entry should exist");
@@ -941,6 +947,34 @@ fn agent_tool_calls_render_acp_badge() {
     let rendered = render_to_lines_for_test(&mut app, 100, 35).join("\n");
     assert!(rendered.contains("configured_reviewer"));
     assert!(rendered.contains("(ACP)"));
+}
+
+#[test]
+fn chat_timeline_preserves_capability_metadata_for_tool_entries() {
+    let mut app = new_test_app();
+
+    app.apply_agent_event_for_test(AgentEvent::ToolCallStarted {
+        call_id: "call-meta".into(),
+        tool_name: "write_file".into(),
+        kind: crate::agent::tools::ToolKind::Local,
+        arguments: r#"{"path":"src/lib.rs"}"#.into(),
+        batch_id: 7,
+        replay_index: 2,
+        normalized_claims: vec![
+            "fs:src/lib.rs#read-write".into(),
+            "process:bash#exclusive".into(),
+        ],
+    });
+
+    let entry = app.timeline.last().expect("tool entry should exist");
+    assert!(entry.details.contains(r#"{"path":"src/lib.rs"}"#));
+    assert!(entry.details.contains("batch_id=7"));
+    assert!(entry.details.contains("replay_index=2"));
+    assert!(
+        entry
+            .details
+            .contains("normalized_claims=fs:src/lib.rs#read-write,process:bash#exclusive")
+    );
 }
 
 #[test]

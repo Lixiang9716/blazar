@@ -44,6 +44,9 @@ pub enum AgentEvent {
         tool_name: String,
         kind: ToolKind,
         arguments: String,
+        batch_id: u32,
+        replay_index: usize,
+        normalized_claims: Vec<String>,
     },
     /// A tool call finished executing.
     ToolCallCompleted {
@@ -58,5 +61,8 @@ pub enum AgentEvent {
     /// The current turn completed successfully.
     TurnComplete,
     /// The current turn failed.
-    TurnFailed { kind: RuntimeErrorKind, error: String },
+    TurnFailed {
+        kind: RuntimeErrorKind,
+        error: String,
+    },
 }

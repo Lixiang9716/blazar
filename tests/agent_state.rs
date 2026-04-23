@@ -127,6 +127,9 @@ fn tool_call_events_track_multiple_active_tools_by_call_id() {
         tool_name: "read_file".into(),
         kind: ToolKind::Local,
         arguments: "{\"path\":\"Cargo.toml\"}".into(),
+        batch_id: 0,
+        replay_index: 0,
+        normalized_claims: Vec::new(),
     });
     assert!(!changed, "ToolCallStarted should not change turn_state");
 
@@ -135,6 +138,9 @@ fn tool_call_events_track_multiple_active_tools_by_call_id() {
         tool_name: "delegate".into(),
         kind: ToolKind::Agent { is_acp: false },
         arguments: "{\"prompt\":\"review\"}".into(),
+        batch_id: 0,
+        replay_index: 0,
+        normalized_claims: Vec::new(),
     });
 
     assert_eq!(state.tool_call_count, 2);
@@ -176,6 +182,9 @@ fn duplicate_tool_call_started_is_ignored_without_overwriting_active_tool() {
         tool_name: "read_file".into(),
         kind: ToolKind::Local,
         arguments: "{\"path\":\"Cargo.toml\"}".into(),
+        batch_id: 0,
+        replay_index: 0,
+        normalized_claims: Vec::new(),
     });
 
     state.apply_event(&AgentEvent::ToolCallStarted {
@@ -183,6 +192,9 @@ fn duplicate_tool_call_started_is_ignored_without_overwriting_active_tool() {
         tool_name: "delegate".into(),
         kind: ToolKind::Agent { is_acp: false },
         arguments: "{\"prompt\":\"review\"}".into(),
+        batch_id: 0,
+        replay_index: 0,
+        normalized_claims: Vec::new(),
     });
 
     assert_eq!(state.tool_call_count, 1);
@@ -203,6 +215,9 @@ fn unknown_tool_call_completed_is_ignored_without_changing_state() {
         tool_name: "read_file".into(),
         kind: ToolKind::Local,
         arguments: "{\"path\":\"Cargo.toml\"}".into(),
+        batch_id: 0,
+        replay_index: 0,
+        normalized_claims: Vec::new(),
     });
 
     let changed = state.apply_event(&AgentEvent::ToolCallCompleted {

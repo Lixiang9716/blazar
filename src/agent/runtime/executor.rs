@@ -5,12 +5,13 @@ use std::sync::mpsc;
 use log::warn;
 
 use crate::agent::capability::{
-    CapabilityContentPart, CapabilityInput, CapabilityKind, CapabilityResult,
+    CapabilityAccess, CapabilityClaim, CapabilityContentPart, CapabilityInput, CapabilityKind,
+    CapabilityResult,
 };
 use crate::agent::tools::{ToolKind, ToolRegistry};
 
 use super::JSON_REPAIR_NOTE;
-use super::events::TurnObserver;
+use super::events::{ToolCallStartMetadata, TurnObserver};
 use super::scheduler::{PendingToolCall, PlannedToolAction, PlannedToolCall, ScheduledCall};
 
 pub(super) struct ExecutedToolCall {
@@ -26,6 +27,7 @@ pub(super) struct BatchExecution {
 
 pub(super) fn execute_batch(
     batch: Vec<ScheduledCall<PlannedToolCall>>,
+    batch_id: u32,
     tools: &ToolRegistry,
     observer: &dyn TurnObserver,
     cancel_flag: &Arc<AtomicBool>,
@@ -44,11 +46,17 @@ pub(super) fn execute_batch(
                 break;
             }
 
+            let normalized_claims = normalize_claims(&scheduled.claims);
             observer.on_tool_call_started(
                 &scheduled.item.pending.call_id,
                 &scheduled.item.pending.name,
                 tool_kind_for_name(tools, &scheduled.item.pending.name),
                 &scheduled.item.pending.arguments,
+                ToolCallStartMetadata {
+                    batch_id,
+                    replay_index: index,
+                    normalized_claims,
+                },
             );
 
             match scheduled.item.action {
@@ -106,6 +114,29 @@ pub(super) fn execute_batch(
     BatchExecution {
         executed_calls,
         cancelled_before_launch_completed: spawned_count < batch_len,
+    }
+}
+
+fn normalize_claims(claims: &[CapabilityClaim]) -> Vec<String> {
+    let mut normalized = claims
+        .iter()
+        .map(|claim| {
+            format!(
+                "{}#{}",
+                claim.resource,
+                normalize_access_label(claim.access)
+            )
+        })
+        .collect::<Vec<_>>();
+    normalized.sort();
+    normalized
+}
+
+fn normalize_access_label(access: CapabilityAccess) -> &'static str {
+    match access {
+        CapabilityAccess::ReadOnly => "read-only",
+        CapabilityAccess::ReadWrite => "read-write",
+        CapabilityAccess::Exclusive => "exclusive",
     }
 }
 

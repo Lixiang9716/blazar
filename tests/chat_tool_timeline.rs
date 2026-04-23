@@ -15,6 +15,9 @@ fn completed_tool_call_renders_summary_in_timeline() {
         tool_name: "read_file".into(),
         kind: ToolKind::Local,
         arguments: "{\"path\":\"Cargo.toml\"}".into(),
+        batch_id: 0,
+        replay_index: 0,
+        normalized_claims: Vec::new(),
     });
     app.apply_agent_event_for_test(AgentEvent::ToolCallCompleted {
         call_id: "call-1".into(),
@@ -37,6 +40,9 @@ fn toggle_details_reveals_full_tool_output() {
         tool_name: "read_file".into(),
         kind: ToolKind::Local,
         arguments: "{\"path\":\"Cargo.toml\"}".into(),
+        batch_id: 0,
+        replay_index: 0,
+        normalized_claims: Vec::new(),
     });
     app.apply_agent_event_for_test(AgentEvent::ToolCallCompleted {
         call_id: "call-1".into(),
