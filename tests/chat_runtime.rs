@@ -4,6 +4,7 @@ use blazar::chat::input::InputAction;
 use blazar::chat::model::Actor;
 use blazar::chat::picker::PickerContext;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use std::time::{Duration, Instant};
 
 const REPO_ROOT: &str = env!("CARGO_MANIFEST_DIR");
 
@@ -156,4 +157,36 @@ fn chat_runtime_discover_agents_stays_local_without_streaming() {
             .any(|entry| entry.body.contains("Discovering ACP agents"))
     );
     assert!(!app.is_streaming());
+}
+
+#[test]
+fn chat_runtime_submit_exact_plan_from_composer_uses_planning_turn() {
+    let mut app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
+    app.set_composer_text("/plan");
+
+    app.handle_action(InputAction::Submit);
+
+    assert!(
+        app.timeline()
+            .iter()
+            .any(|entry| entry.actor == Actor::User && entry.body == "/plan"),
+        "submitting /plan should create a user turn entry"
+    );
+
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while Instant::now() < deadline {
+        app.tick();
+        if app.timeline().iter().any(|entry| {
+            entry.actor == Actor::Assistant
+                && (entry.title.as_deref() == Some("You are in planning mode.")
+                    || entry
+                        .body
+                        .contains("Generate a concise implementation plan only."))
+        }) {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    panic!("expected /plan submit to run planning prompt flow");
 }

@@ -20,7 +20,10 @@ impl ChatApp {
             return;
         }
 
-        if allow_command_dispatch && self.command_registry.find(trimmed).is_some() {
+        if allow_command_dispatch
+            && trimmed != "/plan"
+            && self.command_registry.find(trimmed).is_some()
+        {
             if let Err(err) = self.execute_palette_command_sync(trimmed, serde_json::json!({})) {
                 self.timeline
                     .push(TimelineEntry::warning(format!("Command failed: {err}")));
