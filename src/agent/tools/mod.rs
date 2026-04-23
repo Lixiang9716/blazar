@@ -352,6 +352,9 @@ impl ToolRegistry {
 }
 
 fn should_use_local_capability_wrapper(kind: ToolKind) -> bool {
+    // Keep local capability wrappers on built-in local tooling (including
+    // delegated non-ACP agent turns), while ACP-backed agents stay on the
+    // protocol adapter path.
     matches!(kind, ToolKind::Local | ToolKind::Agent { is_acp: false })
 }
 
@@ -907,5 +910,76 @@ mod tests {
         let wrapped_write = write_capability.execute(CapabilityInput::new(write_args));
         assert_eq!(wrapped_write.text_output(), direct_write.text_output());
         assert_eq!(wrapped_write.is_error, direct_write.is_error);
+    }
+
+    #[test]
+    fn tool_registry_routes_wrapper_path_by_tool_kind_policy() {
+        struct RoutingProbeTool {
+            name: &'static str,
+            kind: ToolKind,
+        }
+
+        impl Tool for RoutingProbeTool {
+            fn spec(&self) -> ToolSpec {
+                ToolSpec {
+                    name: self.name.into(),
+                    description: "routing probe".into(),
+                    parameters: json!({
+                        "type": "object",
+                        "properties": {},
+                        "additionalProperties": false
+                    }),
+                }
+            }
+
+            fn kind(&self) -> ToolKind {
+                self.kind
+            }
+
+            fn execute(&self, _args: Value) -> ToolResult {
+                ToolResult {
+                    content: Vec::new(),
+                    exit_code: None,
+                    is_error: true,
+                    output_truncated: false,
+                }
+            }
+        }
+
+        let mut registry = ToolRegistry::new(PathBuf::from(env!("CARGO_MANIFEST_DIR")));
+        registry.register(Box::new(RoutingProbeTool {
+            name: "local-probe",
+            kind: ToolKind::Local,
+        }));
+        registry.register(Box::new(RoutingProbeTool {
+            name: "delegate-probe",
+            kind: ToolKind::Agent { is_acp: false },
+        }));
+        registry.register(Box::new(RoutingProbeTool {
+            name: "acp-probe",
+            kind: ToolKind::Agent { is_acp: true },
+        }));
+
+        let local = registry
+            .execute("local-probe", json!({}))
+            .expect("local probe should execute");
+        let delegated = registry
+            .execute("delegate-probe", json!({}))
+            .expect("delegate probe should execute");
+        let acp = registry
+            .execute("acp-probe", json!({}))
+            .expect("acp probe should execute");
+
+        let wrapped_projection = vec![ContentPart::Text {
+            text: String::new(),
+        }];
+        assert_eq!(local.content, wrapped_projection);
+        assert_eq!(
+            delegated.content,
+            vec![ContentPart::Text {
+                text: String::new(),
+            }]
+        );
+        assert!(acp.content.is_empty());
     }
 }
