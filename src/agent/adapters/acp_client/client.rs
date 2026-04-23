@@ -425,4 +425,151 @@ mod tests {
             other => panic!("expected protocol error, got {other:?}"),
         }
     }
+
+    #[test]
+    fn create_run_parses_successful_payload() {
+        let server = MockServer::start();
+        let create_run = server.mock(|when, then| {
+            when.method(POST).path("/runs").json_body(json!({
+                "agent_id": "reviewer",
+                "input": { "prompt": "review this patch" }
+            }));
+            then.status(200).json_body(json!({
+                "id": "run-123"
+            }));
+        });
+
+        let transport = ReqwestAcpTransport::new().expect("transport should initialize");
+        let run_id = transport
+            .create_run(
+                &server.base_url(),
+                "reviewer",
+                &json!({ "prompt": "review this patch" }),
+            )
+            .expect("run id should parse");
+
+        assert_eq!(run_id, "run-123");
+        create_run.assert();
+    }
+
+    #[test]
+    fn create_run_maps_protocol_errors_for_missing_run_id() {
+        let server = MockServer::start();
+        server.mock(|when, then| {
+            when.method(POST).path("/runs");
+            then.status(200).json_body(json!({
+                "status": "queued"
+            }));
+        });
+
+        let transport = ReqwestAcpTransport::new().expect("transport should initialize");
+        let error = transport
+            .create_run(
+                &server.base_url(),
+                "reviewer",
+                &json!({ "prompt": "hello" }),
+            )
+            .expect_err("missing run id should fail");
+
+        match error {
+            AcpClientError::Protocol {
+                endpoint,
+                action,
+                message,
+            } => {
+                assert_eq!(endpoint, server.base_url());
+                assert_eq!(action, "POST /runs");
+                assert!(
+                    message.contains("run id"),
+                    "unexpected protocol message: {message}"
+                );
+            }
+            other => panic!("expected protocol error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn get_run_parses_successful_payload() {
+        let server = MockServer::start();
+        let get_run = server.mock(|when, then| {
+            when.method(GET).path("/runs/run-123");
+            then.status(200).json_body(json!({
+                "status": "completed",
+                "output": {
+                    "text": "analysis complete"
+                }
+            }));
+        });
+
+        let transport = ReqwestAcpTransport::new().expect("transport should initialize");
+        let status = transport
+            .get_run(&server.base_url(), "run-123")
+            .expect("run status should parse");
+
+        let AcpRunStatus::Complete(result) = status else {
+            panic!("completed run should map to terminal result");
+        };
+        assert_eq!(result.text_output(), "analysis complete");
+        assert!(!result.is_error);
+        get_run.assert();
+    }
+
+    #[test]
+    fn get_run_maps_http_status_errors() {
+        let server = MockServer::start();
+        server.mock(|when, then| {
+            when.method(GET).path("/runs/missing");
+            then.status(404);
+        });
+
+        let transport = ReqwestAcpTransport::new().expect("transport should initialize");
+        let error = transport
+            .get_run(&server.base_url(), "missing")
+            .expect_err("missing run should fail");
+
+        match error {
+            AcpClientError::HttpStatus {
+                endpoint,
+                action,
+                status,
+            } => {
+                assert_eq!(endpoint, server.base_url());
+                assert_eq!(action, "GET /runs/missing");
+                assert_eq!(status, reqwest::StatusCode::NOT_FOUND);
+            }
+            other => panic!("expected HTTP status error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn get_run_maps_protocol_errors_for_invalid_payload() {
+        let server = MockServer::start();
+        server.mock(|when, then| {
+            when.method(GET).path("/runs/run-123");
+            then.status(200).json_body(json!({
+                "status": "completed"
+            }));
+        });
+
+        let transport = ReqwestAcpTransport::new().expect("transport should initialize");
+        let error = transport
+            .get_run(&server.base_url(), "run-123")
+            .expect_err("invalid payload should fail protocol validation");
+
+        match error {
+            AcpClientError::Protocol {
+                endpoint,
+                action,
+                message,
+            } => {
+                assert_eq!(endpoint, server.base_url());
+                assert_eq!(action, "GET /runs/run-123");
+                assert!(
+                    message.contains("must contain output"),
+                    "unexpected protocol message: {message}"
+                );
+            }
+            other => panic!("expected protocol error, got {other:?}"),
+        }
+    }
 }
