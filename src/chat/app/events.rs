@@ -63,7 +63,7 @@ impl ChatApp {
                     arguments.len()
                 );
                 let message = format!(
-                    "chat tool call started call_id={call_id} arguments_len={}",
+                    "chat tool call started call_id={call_id} tool={tool_name} arguments_len={}",
                     arguments.len()
                 );
                 emit_structured_event(
