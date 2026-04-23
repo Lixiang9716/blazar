@@ -1,5 +1,6 @@
 use super::turns::extract_plan_title_and_body;
 use super::*;
+use crate::agent::runtime::RuntimeErrorKind;
 
 impl ChatApp {
     #[doc(hidden)]
@@ -116,8 +117,8 @@ impl ChatApp {
                 self.active_turn_title = None;
                 self.dispatch_next_queued();
             }
-            AgentEvent::TurnFailed { error, .. } => {
-                if error == "cancelled" {
+            AgentEvent::TurnFailed { kind, error } => {
+                if kind == RuntimeErrorKind::Cancelled {
                     debug!("tick: TurnCancelled");
                     self.timeline.push(TimelineEntry::hint("Turn cancelled."));
                 } else {

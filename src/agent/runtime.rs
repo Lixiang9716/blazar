@@ -348,11 +348,11 @@ fn run_turn_with_retry(
                     return None;
                 }
             }
-            TurnOutcome::FatalError(err) => {
-                warn!("runtime: turn {turn_id} fatal error: {err}");
+            TurnOutcome::FatalError { kind, error } => {
+                warn!("runtime: turn {turn_id} fatal error ({kind:?}): {error}");
                 let _ = event_tx.send(AgentEvent::TurnFailed {
-                    kind: RuntimeErrorKind::ProviderFatal,
-                    error: err,
+                    kind,
+                    error,
                 });
                 return None;
             }

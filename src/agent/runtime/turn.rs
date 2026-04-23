@@ -18,7 +18,10 @@ pub(crate) enum TurnOutcome {
     Complete,
     Cancelled,
     TransientError(String),
-    FatalError(String),
+    FatalError {
+        kind: RuntimeErrorKind,
+        error: String,
+    },
 }
 
 pub(super) struct ProviderPass {
@@ -119,7 +122,10 @@ pub(crate) fn execute_turn(
                     }
 
                     if tool_iterations >= MAX_TOOL_ITERATIONS {
-                        return TurnOutcome::FatalError("tool iteration limit exceeded".into());
+                        return TurnOutcome::FatalError {
+                            kind: RuntimeErrorKind::ToolExecution,
+                            error: "tool iteration limit exceeded".into(),
+                        };
                     }
 
                     let remaining_iterations = MAX_TOOL_ITERATIONS - tool_iterations;
@@ -165,7 +171,10 @@ pub(crate) fn execute_turn(
                     }
 
                     if truncated_batch {
-                        return TurnOutcome::FatalError("tool iteration limit exceeded".into());
+                        return TurnOutcome::FatalError {
+                            kind: RuntimeErrorKind::ToolExecution,
+                            error: "tool iteration limit exceeded".into(),
+                        };
                     }
                 }
                 previous_pass_successes = current_pass_successes;
@@ -173,11 +182,16 @@ pub(crate) fn execute_turn(
             TurnOutcome::Cancelled => return TurnOutcome::Cancelled,
             TurnOutcome::TransientError(err) => {
                 if tool_iterations > 0 {
-                    return TurnOutcome::FatalError(err);
+                    return TurnOutcome::FatalError {
+                        kind: RuntimeErrorKind::ProviderTransient,
+                        error: err,
+                    };
                 }
                 return TurnOutcome::TransientError(err);
             }
-            TurnOutcome::FatalError(err) => return TurnOutcome::FatalError(err),
+            TurnOutcome::FatalError { kind, error } => {
+                return TurnOutcome::FatalError { kind, error };
+            }
         }
     }
 }
@@ -272,7 +286,10 @@ pub(super) fn stream_provider_pass(
                     pass.outcome = if is_transient_error(&err) {
                         TurnOutcome::TransientError(err)
                     } else {
-                        TurnOutcome::FatalError(err)
+                        TurnOutcome::FatalError {
+                            kind: RuntimeErrorKind::ProviderFatal,
+                            error: err,
+                        }
                     };
                     return;
                 }

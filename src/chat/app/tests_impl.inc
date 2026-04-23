@@ -459,13 +459,13 @@ fn turn_helpers_ignore_blank_input_and_validate_plan_title() {
 }
 
 #[test]
-fn turn_failed_events_render_hint_for_cancel_and_warning_for_errors() {
+fn turn_failed_events_use_error_kind_for_cancel_hint() {
     let repo_path = env!("CARGO_MANIFEST_DIR");
     let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
 
     app.apply_agent_event_for_test(AgentEvent::TurnFailed {
         kind: crate::agent::runtime::RuntimeErrorKind::Cancelled,
-        error: "cancelled".into(),
+        error: "not-the-cancelled-literal".into(),
     });
     assert!(matches!(
         app.timeline.last().map(|entry| &entry.kind),
@@ -474,11 +474,11 @@ fn turn_failed_events_render_hint_for_cancel_and_warning_for_errors() {
 
     app.apply_agent_event_for_test(AgentEvent::TurnFailed {
         kind: crate::agent::runtime::RuntimeErrorKind::ProviderFatal,
-        error: "boom".into(),
+        error: "cancelled".into(),
     });
     let last = app.timeline.last().expect("warning entry should exist");
     assert!(matches!(last.kind, EntryKind::Warning));
-    assert!(last.body.contains("Agent error: boom"));
+    assert!(last.body.contains("Agent error: cancelled"));
 }
 
 #[test]

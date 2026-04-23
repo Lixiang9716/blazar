@@ -561,9 +561,15 @@ fn run_turn_stops_on_cancel_flag() {
     });
 
     let events: Vec<_> = event_rx.try_iter().collect();
-    let has_cancelled = events
-        .iter()
-        .any(|event| matches!(event, AgentEvent::TurnFailed { error, .. } if error == "cancelled"));
+    let has_cancelled = events.iter().any(|event| {
+        matches!(
+            event,
+            AgentEvent::TurnFailed {
+                kind: RuntimeErrorKind::Cancelled,
+                ..
+            }
+        )
+    });
     assert!(has_cancelled, "should emit TurnFailed with 'cancelled'");
 }
 
@@ -624,7 +630,13 @@ fn run_turn_returns_fatal_on_auth_error() {
         &ChannelObserver { tx: &event_tx },
         &cancel,
     );
-    assert!(matches!(outcome, TurnOutcome::FatalError(_)));
+    assert!(matches!(
+        outcome,
+        TurnOutcome::FatalError {
+            kind: RuntimeErrorKind::ProviderFatal,
+            ..
+        }
+    ));
 }
 
 #[test]
@@ -813,6 +825,60 @@ fn turn_failed_event_carries_structured_error_kind() {
 }
 
 #[test]
+fn turn_failed_event_uses_tool_execution_kind_for_iteration_limit() {
+    struct InfiniteToolProvider;
+
+    impl LlmProvider for InfiniteToolProvider {
+        fn stream_turn(
+            &self,
+            _model: &str,
+            _messages: &[ProviderMessage],
+            _tools: &[ToolSpec],
+            tx: Sender<ProviderEvent>,
+        ) {
+            let _ = tx.send(ProviderEvent::ToolCall {
+                call_id: "call-loop".into(),
+                name: "count".into(),
+                arguments: "{}".into(),
+            });
+            let _ = tx.send(ProviderEvent::TurnComplete);
+        }
+    }
+
+    let mut registry = empty_registry();
+    registry.register(Box::new(CountingTool {
+        calls: Arc::new(AtomicU32::new(0)),
+    }));
+
+    let (event_tx, event_rx) = mpsc::channel();
+    let cancel = Arc::new(AtomicBool::new(false));
+    let _ = run_turn_with_retry(
+        "turn-test",
+        "count forever",
+        &[],
+        &InfiniteToolProvider,
+        "echo",
+        &registry,
+        &event_tx,
+        &cancel,
+    );
+
+    let saw_tool_execution = event_rx.try_iter().any(|event| {
+        matches!(
+            event,
+            AgentEvent::TurnFailed {
+                kind: RuntimeErrorKind::ToolExecution,
+                error,
+            } if error == "tool iteration limit exceeded"
+        )
+    });
+    assert!(
+        saw_tool_execution,
+        "tool iteration limit should classify as ToolExecution"
+    );
+}
+
+#[test]
 fn cancel_before_retry_attempt_stops_immediately() {
     struct TimeoutProvider;
 
@@ -843,9 +909,15 @@ fn cancel_before_retry_attempt_stops_immediately() {
     );
 
     let events: Vec<_> = event_rx.try_iter().collect();
-    let has_cancelled = events
-        .iter()
-        .any(|event| matches!(event, AgentEvent::TurnFailed { error, .. } if error == "cancelled"));
+    let has_cancelled = events.iter().any(|event| {
+        matches!(
+            event,
+            AgentEvent::TurnFailed {
+                kind: RuntimeErrorKind::Cancelled,
+                ..
+            }
+        )
+    });
     assert!(
         has_cancelled,
         "pre-cancelled flag should abort before first attempt"
@@ -922,12 +994,15 @@ fn retry_does_not_rerun_tools_after_transient_error() {
         1,
         "transient retries must not rerun tool side effects"
     );
-    assert!(
-        events
-            .iter()
-            .any(|event| matches!(event, AgentEvent::TurnFailed { .. })),
-        "turn should fail instead of retrying after tool execution"
-    );
+    assert!(events.iter().any(|event| {
+        matches!(
+            event,
+            AgentEvent::TurnFailed {
+                kind: RuntimeErrorKind::ProviderTransient,
+                ..
+            }
+        )
+    }));
 }
 
 #[test]
@@ -972,7 +1047,10 @@ fn run_turn_enforces_tool_iteration_limit() {
 
     assert!(matches!(
         outcome,
-        TurnOutcome::FatalError(ref err) if err == "tool iteration limit exceeded"
+        TurnOutcome::FatalError {
+            kind: RuntimeErrorKind::ToolExecution,
+            error: ref err,
+        } if err == "tool iteration limit exceeded"
     ));
     assert_eq!(
         counter.load(Ordering::SeqCst),

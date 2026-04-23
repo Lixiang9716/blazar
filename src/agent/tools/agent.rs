@@ -107,8 +107,11 @@ impl Tool for AgentTool {
                 ToolResult::success(text)
             }
             TurnOutcome::Cancelled => ToolResult::failure("sub-agent turn was cancelled"),
-            TurnOutcome::TransientError(err) | TurnOutcome::FatalError(err) => {
+            TurnOutcome::TransientError(err) => {
                 ToolResult::failure(format!("sub-agent error: {err}"))
+            }
+            TurnOutcome::FatalError { error, .. } => {
+                ToolResult::failure(format!("sub-agent error: {error}"))
             }
         }
     }
