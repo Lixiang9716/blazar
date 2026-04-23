@@ -37,7 +37,9 @@ fn logs_errors_filters_warn_and_error_levels() {
         &log_file,
         concat!(
             "{\"level\":\"INFO\",\"message\":\"startup\"}\n",
+            "{\"level\":\"warn\",\"message\":\"slow request lower\"}\n",
             "{\"level\":\"WARN\",\"message\":\"slow request\"}\n",
+            "{\"level\":\"error\",\"message\":\"tool failed lower\"}\n",
             "{\"level\":\"ERROR\",\"message\":\"tool failed\"}\n",
         ),
     )
@@ -56,8 +58,9 @@ fn logs_errors_filters_warn_and_error_levels() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let lines: Vec<&str> = stdout.lines().collect();
-    assert_eq!(lines.len(), 2, "expected only WARN+ERROR records");
+    assert_eq!(lines.len(), 4, "expected warn/error records regardless of case");
 
+    let mut messages = Vec::new();
     for line in lines {
         let record: Value = serde_json::from_str(line).expect("line should be valid json");
         let level = record
@@ -65,10 +68,25 @@ fn logs_errors_filters_warn_and_error_levels() {
             .and_then(Value::as_str)
             .expect("record should include string level");
         assert!(
-            matches!(level, "WARN" | "ERROR"),
+            matches!(level.to_ascii_uppercase().as_str(), "WARN" | "ERROR"),
             "unexpected level in output: {level}"
         );
+        messages.push(
+            record
+                .get("message")
+                .and_then(Value::as_str)
+                .expect("record should include string message")
+                .to_string(),
+        );
     }
+    assert!(
+        messages.iter().any(|msg| msg == "slow request lower"),
+        "lowercase warn event should be preserved"
+    );
+    assert!(
+        messages.iter().any(|msg| msg == "tool failed lower"),
+        "lowercase error event should be preserved"
+    );
 }
 
 #[test]
@@ -86,7 +104,7 @@ fn logs_turn_filters_by_turn_id() {
 
     let output = run_script(
         "logs-turn.sh",
-        &["turn-1", log_file.to_str().expect("utf-8 log file path")],
+        &["  turn-1  ", log_file.to_str().expect("utf-8 log file path")],
     );
 
     assert!(
@@ -99,6 +117,7 @@ fn logs_turn_filters_by_turn_id() {
     let lines: Vec<&str> = stdout.lines().collect();
     assert_eq!(lines.len(), 2, "expected only turn-1 records");
 
+    let mut messages = Vec::new();
     for line in lines {
         let record: Value = serde_json::from_str(line).expect("line should be valid json");
         let turn_id = record
@@ -106,5 +125,13 @@ fn logs_turn_filters_by_turn_id() {
             .and_then(Value::as_str)
             .expect("record should include string turn_id");
         assert_eq!(turn_id, "turn-1");
+        messages.push(
+            record
+                .get("message")
+                .and_then(Value::as_str)
+                .expect("record should include string message")
+                .to_string(),
+        );
     }
+    assert_eq!(messages, vec!["a".to_string(), "c".to_string()]);
 }
