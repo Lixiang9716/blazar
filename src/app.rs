@@ -365,7 +365,7 @@ fn init_logger() {
                 Cleanup::KeepLogFiles(3),
             )
             .write_mode(WriteMode::BufferAndFlush)
-            .format(flexi_logger::detailed_format)
+            .format(crate::observability::logging::flexi_structured_format)
             .start()
     }) {
         eprintln!("Failed to init logger: {e}");
