@@ -1,36 +1,8 @@
-use super::common::{extract_tool_subtitle, tool_badge};
+use super::common::tool_badge;
 use super::*;
 
 pub(super) mod descriptor;
-
-#[allow(dead_code)]
-pub(super) fn tool_descriptor(entry: &TimelineEntry) -> descriptor::EntryDescriptor {
-    let EntryKind::ToolCall {
-        call_id,
-        tool_name,
-        status,
-        ..
-    } = &entry.kind
-    else {
-        unreachable!("tool_descriptor only handles tool call entries");
-    };
-
-    let status_visual = match status {
-        ToolCallStatus::Running => descriptor::StatusVisual::RunningDot,
-        ToolCallStatus::Success => descriptor::StatusVisual::EndedDot,
-        ToolCallStatus::Error => descriptor::StatusVisual::ErrorX,
-    };
-    let subtitle = extract_tool_subtitle(tool_name, &entry.details);
-
-    descriptor::EntryDescriptor {
-        status_visual,
-        title: tool_name.clone(),
-        subtitle: (!subtitle.is_empty()).then_some(subtitle),
-        preview_lines: Vec::new(),
-        result_mode: descriptor::ResultMode::Plain,
-        call_identity: Some(call_id.clone()),
-    }
-}
+pub(crate) use descriptor::tool_descriptor;
 
 pub(super) fn render_tool_use_entry<'a>(
     entry: &TimelineEntry,
@@ -81,23 +53,21 @@ pub(super) fn render_tool_call_entry<'a>(
 ) -> Vec<Line<'a>> {
     let mut lines = Vec::new();
 
-    if let EntryKind::ToolCall {
-        tool_name,
-        kind,
-        status,
-        ..
-    } = &entry.kind
-    {
-        let (status_marker, status_style) = match status {
-            ToolCallStatus::Running => ("…", theme.spinner),
-            ToolCallStatus::Success => ("✓", theme.diff_add),
-            ToolCallStatus::Error => ("✗", theme.marker_warning),
+    let Some(descriptor) = tool_descriptor(entry) else {
+        return lines;
+    };
+
+    if let EntryKind::ToolCall { kind, .. } = &entry.kind {
+        let (status_marker, status_style) = match descriptor.status_visual {
+            descriptor::StatusVisual::RunningDot => ("●", theme.spinner),
+            descriptor::StatusVisual::EndedDot => ("●", theme.diff_add),
+            descriptor::StatusVisual::ErrorX => ("x", theme.marker_warning),
         };
 
         let mut header = vec![
             Span::raw(MARGIN),
             Span::styled("● ", marker_style),
-            Span::styled(tool_name.clone(), theme.tool_label),
+            Span::styled(descriptor.title.clone(), theme.tool_label),
         ];
         if let Some(badge) = tool_badge(*kind) {
             header.push(Span::raw(" "));
@@ -106,9 +76,7 @@ pub(super) fn render_tool_call_entry<'a>(
         header.extend([Span::raw(" "), Span::styled(status_marker, status_style)]);
         lines.push(Line::from(header));
 
-        // Show key argument (file path / command) as a subtitle
-        let subtitle = extract_tool_subtitle(tool_name, &entry.details);
-        if !subtitle.is_empty() {
+        if let Some(subtitle) = descriptor.subtitle {
             lines.push(Line::from(vec![
                 Span::raw(INDENT),
                 Span::styled(subtitle, theme.tool_target),

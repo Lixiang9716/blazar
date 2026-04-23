@@ -1,5 +1,5 @@
 use crate::chat::app::ChatApp;
-use crate::chat::model::{Actor, EntryKind, TimelineEntry, ToolCallStatus};
+use crate::chat::model::{Actor, EntryKind, TimelineEntry};
 use crate::chat::theme::ChatTheme;
 use core::cmp;
 use ratatui_core::{

@@ -1,6 +1,7 @@
 use super::common::extract_tool_subtitle;
 use super::*;
 use crate::agent::tools::ToolKind;
+use crate::chat::model::ToolCallStatus;
 
 fn lines_text(lines: &[Line<'_>]) -> Vec<String> {
     lines
@@ -60,7 +61,7 @@ fn render_entry_renders_tool_use_and_tool_call_statuses() {
         ToolCallStatus::Running,
     );
     let running_text = lines_text(&render_entry(&running, &theme, 70)).join("\n");
-    assert!(running_text.contains("…"));
+    assert!(running_text.contains("●"));
     assert!(running_text.contains("Cargo.toml"));
 
     let success = TimelineEntry::tool_call(
@@ -72,7 +73,7 @@ fn render_entry_renders_tool_use_and_tool_call_statuses() {
         ToolCallStatus::Success,
     );
     let success_text = lines_text(&render_entry(&success, &theme, 70)).join("\n");
-    assert!(success_text.contains("✓"));
+    assert!(success_text.contains("●"));
     assert!(success_text.contains("cargo test"));
 
     let error = TimelineEntry::tool_call(
@@ -84,7 +85,7 @@ fn render_entry_renders_tool_use_and_tool_call_statuses() {
         ToolCallStatus::Error,
     );
     let error_text = lines_text(&render_entry(&error, &theme, 70)).join("\n");
-    assert!(error_text.contains("✗"));
+    assert!(error_text.contains("x"));
     assert!(error_text.contains("TODO"));
 
     let acp_agent = TimelineEntry::tool_call(
@@ -110,13 +111,41 @@ fn tool_descriptor_maps_status_and_semantic_summary() {
         r#"{"path":"src/main.rs"}"#,
         ToolCallStatus::Running,
     );
-    let descriptor = super::tooling::tool_descriptor(&running);
+    let descriptor = super::tooling::tool_descriptor(&running).unwrap();
 
     assert_eq!(
         descriptor.status_visual,
         super::tooling::descriptor::StatusVisual::RunningDot
     );
     assert_eq!(descriptor.subtitle.as_deref(), Some("src/main.rs"));
+
+    let success = TimelineEntry::tool_call(
+        "call-2",
+        "bash",
+        ToolKind::Local,
+        "done",
+        r#"{"command":"cargo test"}"#,
+        ToolCallStatus::Success,
+    );
+    let success_descriptor = super::tooling::tool_descriptor(&success).unwrap();
+    assert_eq!(
+        success_descriptor.status_visual,
+        super::tooling::descriptor::StatusVisual::EndedDot
+    );
+
+    let error = TimelineEntry::tool_call(
+        "call-3",
+        "grep",
+        ToolKind::Local,
+        "failed",
+        r#"{"pattern":"TODO"}"#,
+        ToolCallStatus::Error,
+    );
+    let error_descriptor = super::tooling::tool_descriptor(&error).unwrap();
+    assert_eq!(
+        error_descriptor.status_visual,
+        super::tooling::descriptor::StatusVisual::ErrorX
+    );
 }
 
 #[test]
