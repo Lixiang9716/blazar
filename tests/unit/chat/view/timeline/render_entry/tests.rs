@@ -168,6 +168,88 @@ fn tool_descriptor_maps_status_and_semantic_summary() {
 }
 
 #[test]
+fn tool_result_preview_is_capped_to_two_lines() {
+    let entry = TimelineEntry::tool_call(
+        "c-preview",
+        "bash",
+        ToolKind::Local,
+        "line-1\nline-2\nline-3\nline-4",
+        r#"{"command":"cargo test"}"#,
+        ToolCallStatus::Success,
+    );
+
+    let descriptor = super::tooling::tool_descriptor(&entry).unwrap();
+
+    assert_eq!(
+        descriptor.preview_lines,
+        vec!["line-1".to_string(), "line-2".to_string()]
+    );
+}
+
+#[test]
+fn tool_result_mode_detects_diff_markdown_code_plain() {
+    use super::tooling::descriptor::ResultMode;
+
+    let diff_entry = TimelineEntry::tool_call(
+        "c-diff",
+        "edit_file",
+        ToolKind::Local,
+        "diff --git a/src/main.rs b/src/main.rs\n@@ -1 +1 @@\n-old\n+new",
+        r#"{"path":"src/main.rs"}"#,
+        ToolCallStatus::Success,
+    );
+    let markdown_entry = TimelineEntry::tool_call(
+        "c-md",
+        "notes",
+        ToolKind::Local,
+        "# Title\n- item",
+        r#"{"path":"notes.md"}"#,
+        ToolCallStatus::Success,
+    );
+    let code_entry = TimelineEntry::tool_call(
+        "c-code",
+        "bash",
+        ToolKind::Local,
+        "```rust\nfn main() {}\n```",
+        r#"{"command":"cargo fmt"}"#,
+        ToolCallStatus::Success,
+    );
+    let plain_entry = TimelineEntry::tool_call(
+        "c-plain",
+        "read_file",
+        ToolKind::Local,
+        "just plain text",
+        r#"{"path":"Cargo.toml"}"#,
+        ToolCallStatus::Success,
+    );
+
+    assert_eq!(
+        super::tooling::tool_descriptor(&diff_entry)
+            .unwrap()
+            .result_mode,
+        ResultMode::Diff
+    );
+    assert_eq!(
+        super::tooling::tool_descriptor(&markdown_entry)
+            .unwrap()
+            .result_mode,
+        ResultMode::Markdown
+    );
+    assert_eq!(
+        super::tooling::tool_descriptor(&code_entry)
+            .unwrap()
+            .result_mode,
+        ResultMode::Code
+    );
+    assert_eq!(
+        super::tooling::tool_descriptor(&plain_entry)
+            .unwrap()
+            .result_mode,
+        ResultMode::Plain
+    );
+}
+
+#[test]
 fn tool_call_status_visual_uses_dot_for_running_and_success_x_for_error() {
     let theme = crate::chat::theme::build_theme();
 

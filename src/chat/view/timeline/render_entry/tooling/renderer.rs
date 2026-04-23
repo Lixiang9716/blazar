@@ -45,10 +45,10 @@ pub(super) fn render_tool_call_entry<'a>(
             ]));
         }
 
-        for body_line in entry.body.lines() {
+        for body_line in descriptor.preview_lines.iter() {
             lines.push(Line::from(vec![
                 Span::raw(INDENT),
-                Span::styled(body_line.to_owned(), theme.dim_text),
+                Span::styled(body_line.clone(), theme.dim_text),
             ]));
         }
     }

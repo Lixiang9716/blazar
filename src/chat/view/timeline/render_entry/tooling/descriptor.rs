@@ -51,8 +51,28 @@ pub(crate) fn tool_descriptor(entry: &TimelineEntry) -> Option<EntryDescriptor> 
         status_visual,
         title: tool_name.clone(),
         subtitle: (!subtitle.is_empty()).then_some(subtitle),
-        preview_lines: Vec::new(),
-        result_mode: ResultMode::Plain,
+        preview_lines: entry.body.lines().take(2).map(ToOwned::to_owned).collect(),
+        result_mode: infer_result_mode(tool_name, &entry.body),
         call_identity: Some(call_id.clone()),
     })
+}
+
+fn infer_result_mode(tool_name: &str, body: &str) -> ResultMode {
+    let is_diff = tool_name.contains("edit")
+        || body.starts_with("diff --git")
+        || body.contains("\n@@")
+        || body.contains("@@ ");
+    if is_diff {
+        return ResultMode::Diff;
+    }
+
+    if body.contains("```") {
+        return ResultMode::Code;
+    }
+
+    if body.contains("# ") || body.contains("\n- ") || body.starts_with("- ") {
+        return ResultMode::Markdown;
+    }
+
+    ResultMode::Plain
 }
