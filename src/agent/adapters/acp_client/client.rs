@@ -296,3 +296,133 @@ fn join_url(endpoint: &str, path: &str) -> Result<Url, AcpClientError> {
             source: source.to_string(),
         })
 }
+
+#[cfg(test)]
+mod tests {
+    use httpmock::prelude::*;
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn get_agent_parses_successful_payload() {
+        let server = MockServer::start();
+        let get_agent = server.mock(|when, then| {
+            when.method(GET).path("/agents/reviewer");
+            then.status(200).json_body(json!({
+                "id": "reviewer",
+                "name": "ACP Reviewer",
+                "description": "Reviews code changes",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "prompt": { "type": "string" }
+                    }
+                }
+            }));
+        });
+
+        let transport = ReqwestAcpTransport::new().expect("transport should initialize");
+        let metadata = transport
+            .get_agent(&server.base_url(), "reviewer")
+            .expect("agent metadata should parse");
+
+        assert_eq!(metadata.id, "reviewer");
+        assert_eq!(metadata.name, "ACP Reviewer");
+        assert_eq!(metadata.description, "Reviews code changes");
+        get_agent.assert();
+    }
+
+    #[test]
+    fn get_agent_maps_http_status_errors() {
+        let server = MockServer::start();
+        server.mock(|when, then| {
+            when.method(GET).path("/agents/missing");
+            then.status(404);
+        });
+
+        let transport = ReqwestAcpTransport::new().expect("transport should initialize");
+        let error = transport
+            .get_agent(&server.base_url(), "missing")
+            .expect_err("missing agent should return an error");
+
+        match error {
+            AcpClientError::HttpStatus {
+                endpoint,
+                action,
+                status,
+            } => {
+                assert_eq!(endpoint, server.base_url());
+                assert_eq!(action, "GET /agents/missing");
+                assert_eq!(status, reqwest::StatusCode::NOT_FOUND);
+            }
+            other => panic!("expected HTTP status error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn list_agents_parses_successful_payload() {
+        let server = MockServer::start();
+        let list_agents = server.mock(|when, then| {
+            when.method(GET).path("/agents");
+            then.status(200).json_body(json!({
+                "agents": [
+                    {
+                        "id": "reviewer",
+                        "name": "ACP Reviewer",
+                        "description": "Reviews code",
+                        "input_schema": { "type": "object" }
+                    },
+                    {
+                        "id": "planner",
+                        "name": "ACP Planner",
+                        "description": "Plans implementation",
+                        "input_schema": { "type": "object" }
+                    }
+                ]
+            }));
+        });
+
+        let transport = ReqwestAcpTransport::new().expect("transport should initialize");
+        let agents = transport
+            .list_agents(&server.base_url())
+            .expect("agent list should parse");
+
+        assert_eq!(agents.len(), 2);
+        assert_eq!(agents[0].id, "reviewer");
+        assert_eq!(agents[1].id, "planner");
+        list_agents.assert();
+    }
+
+    #[test]
+    fn list_agents_maps_protocol_errors_for_non_array_payload() {
+        let server = MockServer::start();
+        server.mock(|when, then| {
+            when.method(GET).path("/agents");
+            then.status(200).json_body(json!({
+                "agents": { "id": "not-an-array" }
+            }));
+        });
+
+        let transport = ReqwestAcpTransport::new().expect("transport should initialize");
+        let error = transport
+            .list_agents(&server.base_url())
+            .expect_err("non-array payload should fail");
+
+        match error {
+            AcpClientError::Protocol {
+                endpoint,
+                action,
+                message,
+            } => {
+                assert_eq!(endpoint, server.base_url());
+                assert_eq!(action, "GET /agents");
+                assert!(
+                    message.contains("array of agents"),
+                    "unexpected protocol message: {message}"
+                );
+            }
+            other => panic!("expected protocol error, got {other:?}"),
+        }
+    }
+}
