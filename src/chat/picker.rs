@@ -59,37 +59,22 @@ impl ModalPicker {
         }
     }
 
+    pub fn command_palette_from_registry(
+        registry: &crate::chat::commands::CommandRegistry,
+    ) -> Self {
+        let items = registry
+            .list()
+            .into_iter()
+            .map(|spec| PickerItem::new(spec.name.clone(), spec.description.clone()))
+            .collect();
+        Self::with_context("Commands", items, PickerContext::Commands)
+    }
+
     pub fn command_palette() -> Self {
-        Self::with_context(
-            "Commands",
-            vec![
-                PickerItem::new("/help", "Show available commands and shortcuts"),
-                PickerItem::new("/clear", "Clear the conversation history"),
-                PickerItem::new("/copy", "Copy the last response to the clipboard"),
-                PickerItem::new("/init", "Generate a blazar-instructions.md file"),
-                PickerItem::new("/skills", "List loaded skills and their status"),
-                PickerItem::new("/model", "Switch the active model"),
-                PickerItem::new("/mcp", "Manage MCP server configuration"),
-                PickerItem::new("/theme", "Switch the color theme"),
-                PickerItem::new("/history", "Browse conversation history"),
-                PickerItem::new("/plan", "Generate a plan with an auto-titled summary"),
-                PickerItem::new("/export", "Export conversation to file"),
-                PickerItem::new("/compact", "Compact conversation context"),
-                PickerItem::new("/config", "Open configuration settings"),
-                PickerItem::new("/tools", "List available tools"),
-                PickerItem::new("/agents", "List running background agents"),
-                PickerItem::new("/discover-agents", "Refresh discovered ACP agents"),
-                PickerItem::new("/context", "Show current context window usage"),
-                PickerItem::new("/diff", "Show pending file changes"),
-                PickerItem::new("/git", "Show git repository status"),
-                PickerItem::new("/undo", "Undo last file change"),
-                PickerItem::new("/terminal", "Open a shell terminal"),
-                PickerItem::new("/debug", "Toggle debug overlay"),
-                PickerItem::new("/log", "Show application logs"),
-                PickerItem::new("/quit", "Exit Blazar"),
-            ],
-            PickerContext::Commands,
-        )
+        let mut registry = crate::chat::commands::CommandRegistry::new();
+        crate::chat::commands::builtins::register_builtin_commands(&mut registry)
+            .expect("built-in command registration should succeed");
+        Self::command_palette_from_registry(&registry)
     }
 
     pub fn open(&mut self) {

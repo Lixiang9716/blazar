@@ -100,7 +100,10 @@ mod chat_command_matching_picker {
     fn command_picker_empty_filter_shows_all_commands() {
         let picker = ModalPicker::with_context(
             "Commands",
-            vec![PickerItem::new("/plan", "Generate plan"), PickerItem::new("/help", "Help")],
+            vec![
+                PickerItem::new("/plan", "Generate plan"),
+                PickerItem::new("/help", "Help"),
+            ],
             PickerContext::Commands,
         );
 
@@ -117,7 +120,10 @@ mod chat_command_matching_picker {
     fn command_picker_auto_prefixes_slash_on_first_character() {
         let mut picker = ModalPicker::with_context(
             "Commands",
-            vec![PickerItem::new("/plan", "Generate plan"), PickerItem::new("/help", "Help")],
+            vec![
+                PickerItem::new("/plan", "Generate plan"),
+                PickerItem::new("/help", "Help"),
+            ],
             PickerContext::Commands,
         );
 
