@@ -99,25 +99,57 @@ fn display_to_string(value: impl Display) -> String {
 }
 
 #[cfg(test)]
-fn captured_structured_events_for_test() -> &'static std::sync::Mutex<Vec<String>> {
-    use std::sync::{Mutex, OnceLock};
-
-    static CAPTURED: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
-    CAPTURED.get_or_init(|| Mutex::new(Vec::new()))
-}
-
-#[cfg(test)]
-fn structured_event_capture_lock_for_test() -> &'static std::sync::Mutex<()> {
-    use std::sync::{Mutex, OnceLock};
-
-    static CAPTURE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    CAPTURE_LOCK.get_or_init(|| Mutex::new(()))
+thread_local! {
+    static CAPTURED_STRUCTURED_EVENTS_FOR_TEST: std::cell::RefCell<Option<Vec<String>>> =
+        const { std::cell::RefCell::new(None) };
 }
 
 #[cfg(test)]
 fn capture_structured_event_for_test(event: String) {
-    if let Ok(mut captured) = captured_structured_events_for_test().lock() {
-        captured.push(event);
+    CAPTURED_STRUCTURED_EVENTS_FOR_TEST.with(|captured| {
+        if let Some(events) = captured.borrow_mut().as_mut() {
+            events.push(event);
+        }
+    });
+}
+
+#[cfg(test)]
+struct StructuredEventCaptureGuard {
+    previous: Option<Vec<String>>,
+    restore_on_drop: bool,
+}
+
+#[cfg(test)]
+impl StructuredEventCaptureGuard {
+    fn new() -> Self {
+        let previous =
+            CAPTURED_STRUCTURED_EVENTS_FOR_TEST.with(|captured| captured.replace(Some(Vec::new())));
+        Self {
+            previous,
+            restore_on_drop: true,
+        }
+    }
+
+    fn finish(mut self) -> Vec<String> {
+        let captured = CAPTURED_STRUCTURED_EVENTS_FOR_TEST.with(|events| {
+            let mut events = events.borrow_mut();
+            let captured = events.take().unwrap_or_default();
+            *events = self.previous.take();
+            captured
+        });
+        self.restore_on_drop = false;
+        captured
+    }
+}
+
+#[cfg(test)]
+impl Drop for StructuredEventCaptureGuard {
+    fn drop(&mut self) {
+        if self.restore_on_drop {
+            CAPTURED_STRUCTURED_EVENTS_FOR_TEST.with(|captured| {
+                *captured.borrow_mut() = self.previous.take();
+            });
+        }
     }
 }
 
@@ -125,21 +157,9 @@ fn capture_structured_event_for_test(event: String) {
 pub fn with_captured_structured_events_for_test<T>(
     operation: impl FnOnce() -> T,
 ) -> (T, Vec<String>) {
-    let _test_lock = structured_event_capture_lock_for_test()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    {
-        let mut captured = captured_structured_events_for_test()
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        captured.clear();
-    }
-
+    let capture = StructuredEventCaptureGuard::new();
     let result = operation();
-    let captured = captured_structured_events_for_test()
-        .lock()
-        .map(|mut events| std::mem::take(&mut *events))
-        .unwrap_or_default();
+    let captured = capture.finish();
     (result, captured)
 }
 

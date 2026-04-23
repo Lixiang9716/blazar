@@ -1120,16 +1120,16 @@ fn runtime_cancel_during_stream_logs_turn_and_error_kind_fields() {
         }
     }
 
-    let (outcome, captured) = crate::observability::logging::with_captured_structured_events_for_test(|| {
-        let started = Arc::new(std::sync::Barrier::new(2));
-        let release = Arc::new(std::sync::Barrier::new(2));
-        let cancel = Arc::new(AtomicBool::new(false));
-        let (event_tx, _event_rx) = mpsc::channel();
+    let started = Arc::new(std::sync::Barrier::new(2));
+    let release = Arc::new(std::sync::Barrier::new(2));
+    let cancel = Arc::new(AtomicBool::new(false));
+    let (event_tx, _event_rx) = mpsc::channel();
 
-        let started_for_thread = Arc::clone(&started);
-        let release_for_thread = Arc::clone(&release);
-        let cancel_for_thread = Arc::clone(&cancel);
-        let handle = std::thread::spawn(move || {
+    let started_for_thread = Arc::clone(&started);
+    let release_for_thread = Arc::clone(&release);
+    let cancel_for_thread = Arc::clone(&cancel);
+    let handle = std::thread::spawn(move || {
+        crate::observability::logging::with_captured_structured_events_for_test(|| {
             let provider = CoordinatedCancelProvider {
                 started: started_for_thread,
                 release: release_for_thread,
@@ -1144,14 +1144,16 @@ fn runtime_cancel_during_stream_logs_turn_and_error_kind_fields() {
                 &event_tx,
                 &cancel_for_thread,
             )
-        });
-
-        started.wait();
-        cancel.store(true, Ordering::SeqCst);
-        release.wait();
-
-        handle.join().expect("run_turn_with_retry thread should join")
+        })
     });
+
+    started.wait();
+    cancel.store(true, Ordering::SeqCst);
+    release.wait();
+
+    let (outcome, captured) = handle
+        .join()
+        .expect("run_turn_with_retry thread should join");
     assert!(outcome.is_none(), "cancelled turn should not update history");
 
     let saw_cancelled_structured = captured

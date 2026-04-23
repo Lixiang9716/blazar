@@ -119,3 +119,48 @@ fn structured_capture_isolation_is_stable_for_parallel_tests() {
     assert_eq!(turn_ids_a, vec!["turn-a".to_string()]);
     assert_eq!(turn_ids_b, vec!["turn-b".to_string()]);
 }
+
+#[test]
+fn structured_capture_is_opt_in_for_current_thread_only() {
+    let (_, captured) = with_captured_structured_events_for_test(|| {
+        emit_structured_event(
+            log::Level::Info,
+            "blazar::test",
+            "capture_probe",
+            "captured",
+            None,
+            Some("turn-captured"),
+            None,
+            None,
+            Some("ProviderTransient"),
+        );
+        std::thread::spawn(|| {
+            emit_structured_event(
+                log::Level::Info,
+                "blazar::test",
+                "capture_probe",
+                "uncaptured",
+                None,
+                Some("turn-uncaptured"),
+                None,
+                None,
+                Some("ProviderTransient"),
+            );
+        })
+        .join()
+        .expect("uncaptured emitter thread should complete");
+    });
+
+    let turn_ids: Vec<String> = captured
+        .into_iter()
+        .filter_map(|raw| serde_json::from_str::<Value>(&raw).ok())
+        .filter_map(|event| {
+            event
+                .get("turn_id")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
+        .collect();
+
+    assert_eq!(turn_ids, vec!["turn-captured".to_string()]);
+}
