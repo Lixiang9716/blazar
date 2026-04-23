@@ -1,5 +1,10 @@
 #![allow(dead_code)]
 
+use super::super::common::extract_tool_subtitle_from_details;
+use crate::chat::app::turns::{tool_call_details_payload, tool_call_metadata_line};
+use crate::chat::model::{EntryKind, TimelineEntry, ToolCallStatus};
+use std::borrow::Cow;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum StatusVisual {
     RunningDot,
@@ -31,12 +36,9 @@ impl EntryDescriptor {
     }
 }
 
-use crate::chat::model::{EntryKind, TimelineEntry, ToolCallStatus};
-use crate::chat::view::timeline::render_entry::common::extract_tool_subtitle;
-
 const MAX_PREVIEW_LINES: usize = 2;
 
-pub(super) fn tool_descriptor(entry: &TimelineEntry) -> EntryDescriptor {
+pub(crate) fn tool_descriptor(entry: &TimelineEntry) -> Option<EntryDescriptor> {
     let EntryKind::ToolCall {
         call_id,
         tool_name,
@@ -44,7 +46,7 @@ pub(super) fn tool_descriptor(entry: &TimelineEntry) -> EntryDescriptor {
         ..
     } = &entry.kind
     else {
-        unreachable!("tool_descriptor only handles tool call entries");
+        return None;
     };
 
     let status_visual = match status {
@@ -53,16 +55,34 @@ pub(super) fn tool_descriptor(entry: &TimelineEntry) -> EntryDescriptor {
         ToolCallStatus::Error => StatusVisual::ErrorX,
     };
 
-    let subtitle = extract_tool_subtitle(tool_name, &entry.details);
+    let preview_source = preview_source_text(status, entry);
+    let subtitle = extract_tool_subtitle_from_details(tool_name, &entry.details);
 
-    EntryDescriptor {
+    Some(EntryDescriptor {
         status_visual,
         title: tool_name.clone(),
         subtitle: (!subtitle.is_empty()).then_some(subtitle),
-        preview_lines: build_preview_lines(&entry.body),
-        result_mode: infer_result_mode(tool_name, &entry.body),
+        preview_lines: build_preview_lines(preview_source.as_ref()),
+        result_mode: infer_result_mode(tool_name, preview_source.as_ref()),
         call_identity: Some(call_id.clone()),
+    })
+}
+
+fn preview_source_text<'a>(status: &ToolCallStatus, entry: &'a TimelineEntry) -> Cow<'a, str> {
+    if !matches!(status, ToolCallStatus::Running)
+        && let Some(full_output) = completed_output_text(&entry.details)
+    {
+        return Cow::Owned(full_output);
     }
+
+    Cow::Borrowed(&entry.body)
+}
+
+fn completed_output_text(details: &str) -> Option<String> {
+    tool_call_metadata_line(details)?;
+
+    let content = tool_call_details_payload(details).trim().to_owned();
+    (!content.is_empty()).then_some(content)
 }
 
 fn build_preview_lines(text: &str) -> Vec<String> {
@@ -72,16 +92,18 @@ fn build_preview_lines(text: &str) -> Vec<String> {
         .collect()
 }
 
-fn infer_result_mode(tool_name: &str, text: &str) -> ResultMode {
-    if tool_name == "edit_file" || text.contains("diff --git") || text.contains("@@") {
+fn infer_result_mode(tool_name: &str, body: &str) -> ResultMode {
+    let is_diff =
+        matches!(tool_name, "edit_file") || body.starts_with("diff --git") || body.contains("\n@@");
+    if is_diff {
         return ResultMode::Diff;
     }
 
-    if text.contains("```") {
+    if body.contains("```") {
         return ResultMode::Code;
     }
 
-    if text.contains("# ") || text.contains("- ") {
+    if body.contains("# ") || body.contains("\n- ") || body.starts_with("- ") {
         return ResultMode::Markdown;
     }
 

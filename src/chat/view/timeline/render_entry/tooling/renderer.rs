@@ -2,11 +2,14 @@ use super::descriptor::{EntryDescriptor, ResultMode, StatusVisual};
 use super::*;
 use crate::chat::view::timeline::render_entry::common::tool_badge;
 
-fn status_marker(descriptor: &EntryDescriptor, theme: &ChatTheme) -> (&'static str, Style) {
-    match descriptor.status_visual {
-        StatusVisual::RunningDot => ("…", theme.spinner),
-        StatusVisual::EndedDot => ("✓", theme.diff_add),
-        StatusVisual::ErrorX => ("✗", theme.marker_warning),
+pub(crate) fn status_marker(
+    status_visual: StatusVisual,
+    theme: &ChatTheme,
+) -> (&'static str, Style) {
+    match status_visual {
+        StatusVisual::RunningDot => ("●", theme.spinner),
+        StatusVisual::EndedDot => ("●", theme.diff_add),
+        StatusVisual::ErrorX => ("x", theme.marker_warning),
     }
 }
 
@@ -22,7 +25,7 @@ pub(super) fn render_tool_descriptor<'a>(
         return lines;
     };
 
-    let (status_marker, status_style) = status_marker(descriptor, theme);
+    let (status_marker, status_style) = status_marker(descriptor.status_visual, theme);
 
     let mut header = vec![
         Span::raw(MARGIN),

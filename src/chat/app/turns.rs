@@ -192,14 +192,24 @@ pub(super) fn format_tool_call_details(
     }
 }
 
+pub(crate) fn tool_call_details_payload(details: &str) -> &str {
+    match tool_call_metadata_line(details)
+        .and_then(|metadata| details.strip_suffix(metadata))
+        .map(|prefix| prefix.trim_end_matches('\n'))
+    {
+        Some(payload) => payload,
+        None => details,
+    }
+}
+
 pub(super) fn extract_tool_call_metadata_line(details: &str) -> Option<String> {
-    details
-        .lines()
-        .rev()
-        .find(|line| {
-            line.starts_with("batch_id=")
-                && line.contains(" replay_index=")
-                && line.contains(" normalized_claims=")
-        })
-        .map(ToOwned::to_owned)
+    tool_call_metadata_line(details).map(ToOwned::to_owned)
+}
+
+pub(crate) fn tool_call_metadata_line(details: &str) -> Option<&str> {
+    details.lines().rev().find(|line| {
+        line.starts_with("batch_id=")
+            && line.contains(" replay_index=")
+            && line.contains(" normalized_claims=")
+    })
 }

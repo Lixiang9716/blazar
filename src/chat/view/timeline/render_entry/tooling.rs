@@ -1,12 +1,8 @@
 use super::*;
 
 pub(super) mod descriptor;
-mod renderer;
-
-#[allow(dead_code)]
-pub(super) fn tool_descriptor(entry: &TimelineEntry) -> descriptor::EntryDescriptor {
-    descriptor::tool_descriptor(entry)
-}
+pub(super) mod renderer;
+pub(crate) use descriptor::tool_descriptor;
 
 pub(super) fn render_tool_use_entry<'a>(
     entry: &TimelineEntry,
@@ -55,7 +51,10 @@ pub(super) fn render_tool_call_entry<'a>(
     theme: &ChatTheme,
     marker_style: Style,
 ) -> Vec<Line<'a>> {
-    let descriptor = descriptor::tool_descriptor(entry);
+    let Some(descriptor) = tool_descriptor(entry) else {
+        return Vec::new();
+    };
+
     renderer::render_tool_descriptor(&descriptor, entry, theme, marker_style)
 }
 
