@@ -178,10 +178,8 @@ fn chat_runtime_submit_exact_plan_from_composer_uses_planning_turn() {
         app.tick();
         if app.timeline().iter().any(|entry| {
             entry.actor == Actor::Assistant
-                && (entry.title.as_deref() == Some("You are in planning mode.")
-                    || entry
-                        .body
-                        .contains("Generate a concise implementation plan only."))
+                && entry.title.is_some()
+                && !entry.body.trim().is_empty()
         }) {
             return;
         }

@@ -70,13 +70,6 @@ impl ModalPicker {
         Self::with_context("Commands", items, PickerContext::Commands)
     }
 
-    pub fn command_palette() -> Self {
-        let mut registry = crate::chat::commands::CommandRegistry::new();
-        crate::chat::commands::builtins::register_builtin_commands(&mut registry)
-            .expect("built-in command registration should succeed");
-        Self::command_palette_from_registry(&registry)
-    }
-
     pub fn open(&mut self) {
         self.overlay_state.open();
         self.filter.clear();
@@ -255,6 +248,13 @@ impl ModalPicker {
 #[cfg(test)]
 mod tests {
     use super::{ModalPicker, PickerItem};
+    use crate::chat::commands::{CommandRegistry, builtins::register_builtin_commands};
+
+    fn command_palette_for_test() -> ModalPicker {
+        let mut registry = CommandRegistry::new();
+        register_builtin_commands(&mut registry).expect("built-ins should register in tests");
+        ModalPicker::command_palette_from_registry(&registry)
+    }
 
     #[test]
     fn open_close_tracks_visibility_with_overlay_state() {
@@ -287,7 +287,7 @@ mod tests {
 
     #[test]
     fn command_palette_includes_plan_command() {
-        let picker = ModalPicker::command_palette();
+        let picker = command_palette_for_test();
         let commands: Vec<&str> = picker
             .items
             .iter()
@@ -302,7 +302,7 @@ mod tests {
 
     #[test]
     fn command_palette_includes_discover_agents_command() {
-        let picker = ModalPicker::command_palette();
+        let picker = command_palette_for_test();
         let commands: Vec<&str> = picker
             .items
             .iter()

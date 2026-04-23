@@ -1,5 +1,6 @@
 use blazar::chat::commands::CommandSpec;
 use blazar::chat::commands::matcher::ranked_match_names;
+use blazar::chat::commands::{CommandRegistry, builtins::register_builtin_commands};
 use blazar::chat::picker::{ModalPicker, PickerContext, PickerItem};
 use serde_json::json;
 
@@ -66,9 +67,15 @@ mod chat_command_matching {
 mod chat_command_matching_picker {
     use super::*;
 
+    fn command_palette_for_test() -> ModalPicker {
+        let mut registry = CommandRegistry::new();
+        register_builtin_commands(&mut registry).expect("built-ins should register");
+        ModalPicker::command_palette_from_registry(&registry)
+    }
+
     #[test]
     fn command_picker_requires_slash_prefix() {
-        let mut picker = ModalPicker::command_palette();
+        let mut picker = command_palette_for_test();
         picker.filter = "plan".to_string();
 
         assert!(picker.filtered_items().is_empty());

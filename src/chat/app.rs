@@ -113,7 +113,7 @@ impl ChatApp {
             branch,
             scroll_offset: u16::MAX, // auto-scroll sentinel
             show_details: false,
-            picker: ModalPicker::command_palette(),
+            picker: ModalPicker::command_palette_from_registry(&command_registry),
             command_registry,
             tick_count: 0,
             demo_queue: Vec::new(),
@@ -330,11 +330,25 @@ impl ChatApp {
         let command = self.command_registry.find(name).cloned().ok_or_else(|| {
             crate::chat::commands::CommandError::Unavailable(format!("unknown command: {name}"))
         })?;
-        futures::executor::block_on(
-            crate::chat::commands::orchestrator::execute_palette_command_from_command(
-                command, self, args,
-            ),
-        )
+        let exec_future = crate::chat::commands::orchestrator::execute_palette_command_from_command(
+            command, self, args,
+        );
+
+        if tokio::runtime::Handle::try_current().is_ok() {
+            // Avoid nested Tokio runtime panics when a command path is triggered under an
+            // existing runtime (for example, model list calls that use provider-owned runtimes).
+            return futures::executor::block_on(exec_future);
+        }
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|error| {
+                crate::chat::commands::CommandError::ExecutionFailed(format!(
+                    "failed to initialize tokio runtime: {error}"
+                ))
+            })?;
+        runtime.block_on(exec_future)
     }
 
     pub fn should_quit(&self) -> bool {
