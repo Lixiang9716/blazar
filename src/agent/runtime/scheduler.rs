@@ -185,17 +185,50 @@ mod tests {
     }
 
     #[test]
-    fn scheduler_contract_matrix_is_stable_for_conflict_pairs() {
+    fn scheduler_contract_matrix_is_stable_for_claim_set_pairs() {
         let cases = vec![
-            (claim_ro("fs:a"), claim_ro("fs:a"), false),
-            (claim_ro("fs:a"), claim_rw("fs:a"), true),
-            (claim_rw("fs:a"), claim_rw("fs:a"), true),
-            (claim_ex("process:bash"), claim_ro("fs:a"), true),
+            ("ro/ro same resource", vec![claim_ro("fs:a")], vec![claim_ro("fs:a")], false),
+            ("ro/rw same resource", vec![claim_ro("fs:a")], vec![claim_rw("fs:a")], true),
+            ("rw/ro same resource", vec![claim_rw("fs:a")], vec![claim_ro("fs:a")], true),
+            ("rw/rw same resource", vec![claim_rw("fs:a")], vec![claim_rw("fs:a")], true),
+            (
+                "rw/rw different resources",
+                vec![claim_rw("fs:a")],
+                vec![claim_rw("fs:b")],
+                false,
+            ),
+            (
+                "ex/ro different resources",
+                vec![claim_ex("process:bash")],
+                vec![claim_ro("fs:a")],
+                true,
+            ),
+            (
+                "ex/ex same resource",
+                vec![claim_ex("process:bash")],
+                vec![claim_ex("process:bash")],
+                true,
+            ),
+            (
+                "multi-claim without overlap conflicts",
+                vec![claim_ro("fs:a"), claim_rw("fs:b")],
+                vec![claim_ro("fs:a"), claim_ro("fs:c")],
+                false,
+            ),
+            (
+                "multi-claim with overlapping rw conflicts",
+                vec![claim_ro("fs:a"), claim_rw("fs:b")],
+                vec![claim_ro("fs:a"), claim_rw("fs:b")],
+                true,
+            ),
         ];
 
-        for (left, right, expected_conflict) in cases {
-            let actual = ConflictPolicy::from_claims(&[left], &[right]).is_conflicting();
-            assert_eq!(actual, expected_conflict);
+        for (name, left, right, expected_conflict) in cases {
+            let actual = ConflictPolicy::from_claims(&left, &right).is_conflicting();
+            assert_eq!(
+                actual, expected_conflict,
+                "unexpected conflict policy for {name}"
+            );
         }
     }
 

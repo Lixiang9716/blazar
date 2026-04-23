@@ -1635,7 +1635,114 @@ fn run_turn_executes_non_conflicting_calls_in_parallel_batches_with_stable_resul
 
 #[test]
 fn scheduler_replay_order_matches_original_call_order() {
-    run_turn_executes_non_conflicting_calls_in_parallel_batches_with_stable_result_order();
+    struct ReplayOrderProvider;
+
+    impl LlmProvider for ReplayOrderProvider {
+        fn stream_turn(
+            &self,
+            _model: &str,
+            messages: &[ProviderMessage],
+            _tools: &[ToolSpec],
+            tx: Sender<ProviderEvent>,
+        ) {
+            let saw_tool_results = messages
+                .iter()
+                .any(|message| matches!(message, ProviderMessage::ToolResult { .. }));
+            if saw_tool_results {
+                let _ = tx.send(ProviderEvent::TextDelta("done".into()));
+                let _ = tx.send(ProviderEvent::TurnComplete);
+                return;
+            }
+
+            let _ = tx.send(ProviderEvent::ToolCall {
+                call_id: "call-slow".into(),
+                name: "slow_replay".into(),
+                arguments: "{}".into(),
+            });
+            let _ = tx.send(ProviderEvent::ToolCall {
+                call_id: "call-fast".into(),
+                name: "fast_replay".into(),
+                arguments: "{}".into(),
+            });
+            let _ = tx.send(ProviderEvent::ToolCall {
+                call_id: "call-mid".into(),
+                name: "mid_replay".into(),
+                arguments: "{}".into(),
+            });
+            let _ = tx.send(ProviderEvent::TurnComplete);
+        }
+    }
+
+    let active_calls = Arc::new(AtomicU32::new(0));
+    let max_parallel_calls = Arc::new(AtomicU32::new(0));
+    let completion_log = Arc::new(Mutex::new(Vec::new()));
+
+    let mut registry = empty_registry();
+    registry.register(Box::new(TrackedClaimedTool {
+        name: "slow_replay",
+        resource: "fs:src/slow.rs",
+        access: ResourceAccess::ReadOnly,
+        delay: Duration::from_millis(90),
+        active_calls: Arc::clone(&active_calls),
+        max_parallel_calls: Arc::clone(&max_parallel_calls),
+        completion_log: Arc::clone(&completion_log),
+    }));
+    registry.register(Box::new(TrackedClaimedTool {
+        name: "fast_replay",
+        resource: "fs:src/fast.rs",
+        access: ResourceAccess::ReadOnly,
+        delay: Duration::from_millis(10),
+        active_calls: Arc::clone(&active_calls),
+        max_parallel_calls: Arc::clone(&max_parallel_calls),
+        completion_log: Arc::clone(&completion_log),
+    }));
+    registry.register(Box::new(TrackedClaimedTool {
+        name: "mid_replay",
+        resource: "fs:src/mid.rs",
+        access: ResourceAccess::ReadOnly,
+        delay: Duration::from_millis(45),
+        active_calls,
+        max_parallel_calls: Arc::clone(&max_parallel_calls),
+        completion_log: Arc::clone(&completion_log),
+    }));
+
+    let (event_tx, event_rx) = mpsc::channel();
+    let cancel = Arc::new(AtomicBool::new(false));
+    let mut messages = user_messages("verify replay order");
+
+    let outcome = execute_turn(
+        &mut messages,
+        &ReplayOrderProvider,
+        "echo",
+        &registry,
+        &ChannelObserver { tx: &event_tx },
+        &cancel,
+    );
+
+    assert!(matches!(outcome, TurnOutcome::Complete));
+    assert_eq!(max_parallel_calls.load(Ordering::SeqCst), 3);
+    assert_eq!(
+        completion_log.lock().expect("log lock").as_slice(),
+        ["fast_replay", "mid_replay", "slow_replay"]
+    );
+
+    let tool_results = messages
+        .iter()
+        .filter_map(|message| match message {
+            ProviderMessage::ToolResult { tool_call_id, .. } => Some(tool_call_id.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(tool_results, vec!["call-slow", "call-fast", "call-mid"]);
+
+    let completion_events = event_rx
+        .try_iter()
+        .filter_map(|event| match event {
+            AgentEvent::ToolCallCompleted { call_id, .. } => Some(call_id),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(completion_events, vec!["call-slow", "call-fast", "call-mid"]);
 }
 
 #[test]
