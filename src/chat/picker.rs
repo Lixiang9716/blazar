@@ -171,6 +171,9 @@ impl ModalPicker {
     }
 
     pub fn push_filter(&mut self, ch: char) {
+        if self.context == PickerContext::Commands && self.filter.is_empty() && ch != '/' {
+            self.filter.push('/');
+        }
         self.filter.push(ch);
         self.reset_selection();
     }
@@ -218,6 +221,9 @@ impl ModalPicker {
         }
 
         let filter = self.filter.trim();
+        if filter.is_empty() {
+            return self.items.iter().collect();
+        }
         if !filter.starts_with('/') {
             return Vec::new();
         }

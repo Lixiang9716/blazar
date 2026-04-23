@@ -397,7 +397,11 @@ fn picker_backspace_pops_filter_then_closes_overlay() {
         KeyCode::Char('h'),
         KeyModifiers::NONE,
     )));
-    assert_eq!(app.picker.filter, "h");
+    assert_eq!(app.picker.filter, "/h");
+
+    app.handle_action(InputAction::Backspace);
+    assert!(app.picker.is_open());
+    assert_eq!(app.picker.filter, "/");
 
     app.handle_action(InputAction::Backspace);
     assert!(app.picker.is_open());

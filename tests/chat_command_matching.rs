@@ -97,6 +97,42 @@ mod chat_command_matching_picker {
     }
 
     #[test]
+    fn command_picker_empty_filter_shows_all_commands() {
+        let picker = ModalPicker::with_context(
+            "Commands",
+            vec![PickerItem::new("/plan", "Generate plan"), PickerItem::new("/help", "Help")],
+            PickerContext::Commands,
+        );
+
+        let labels: Vec<&str> = picker
+            .filtered_items()
+            .into_iter()
+            .map(|item| item.label.as_str())
+            .collect();
+
+        assert_eq!(labels, vec!["/plan", "/help"]);
+    }
+
+    #[test]
+    fn command_picker_auto_prefixes_slash_on_first_character() {
+        let mut picker = ModalPicker::with_context(
+            "Commands",
+            vec![PickerItem::new("/plan", "Generate plan"), PickerItem::new("/help", "Help")],
+            PickerContext::Commands,
+        );
+
+        picker.push_filter('p');
+
+        assert_eq!(picker.filter, "/p");
+        let labels: Vec<&str> = picker
+            .filtered_items()
+            .into_iter()
+            .map(|item| item.label.as_str())
+            .collect();
+        assert_eq!(labels, vec!["/plan", "/help"]);
+    }
+
+    #[test]
     fn non_command_picker_preserves_contains_matching() {
         let mut picker = ModalPicker::with_context(
             "Themes",
