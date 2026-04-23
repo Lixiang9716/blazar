@@ -368,6 +368,52 @@ fn dispatch_next_queued_drains_on_turn_failed() {
 }
 
 #[test]
+fn runtime_submit_failure_continues_queued_dispatch() {
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+
+    app.pending_messages
+        .push_back(build_pending_turn("queued-a"));
+    app.pending_messages
+        .push_back(build_pending_turn("queued-b"));
+    app.agent_runtime.shutdown_for_test();
+
+    app.apply_agent_event_for_test(AgentEvent::TurnComplete);
+
+    assert!(app.pending_messages.is_empty());
+    assert!(app.messages().iter().any(|msg| msg.body == "queued-a"));
+    assert!(app.messages().iter().any(|msg| msg.body == "queued-b"));
+    let warning_count = app
+        .timeline
+        .iter()
+        .filter(|entry| entry.kind == EntryKind::Warning)
+        .count();
+    assert!(warning_count >= 2);
+}
+
+#[test]
+fn discover_dispatch_failure_continues_queued_dispatch() {
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+
+    app.pending_messages
+        .push_back(build_pending_turn("/discover-agents"));
+    app.pending_messages.push_back(build_pending_turn("after"));
+    app.agent_runtime.shutdown_for_test();
+
+    app.apply_agent_event_for_test(AgentEvent::TurnComplete);
+
+    assert!(app.pending_messages.is_empty());
+    assert!(app.messages().iter().any(|msg| msg.body == "/discover-agents"));
+    assert!(app.messages().iter().any(|msg| msg.body == "after"));
+    assert!(
+        app.timeline
+            .iter()
+            .any(|entry| entry.kind == EntryKind::Warning && entry.body.contains("Failed to refresh ACP agents"))
+    );
+}
+
+#[test]
 fn paste_action_inserts_into_composer_without_submitting() {
     let repo_path = env!("CARGO_MANIFEST_DIR");
     let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");

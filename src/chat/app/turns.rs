@@ -36,10 +36,12 @@ impl ChatApp {
             return;
         }
 
-        self.dispatch_turn(turn);
+        if !self.dispatch_turn(turn) {
+            self.dispatch_next_queued();
+        }
     }
 
-    pub(super) fn refresh_acp_agents(&mut self) {
+    pub(super) fn refresh_acp_agents(&mut self) -> bool {
         self.timeline
             .push(TimelineEntry::hint("Discovering ACP agents..."));
         self.scroll_offset = u16::MAX;
@@ -50,10 +52,13 @@ impl ChatApp {
                 "Failed to refresh ACP agents: {error}"
             )));
             self.scroll_offset = u16::MAX;
+            return false;
         }
+
+        true
     }
 
-    pub(super) fn dispatch_turn(&mut self, mut turn: PendingTurn) {
+    pub(super) fn dispatch_turn(&mut self, mut turn: PendingTurn) -> bool {
         if !turn.timeline_inserted {
             self.messages.push(ChatMessage {
                 author: Author::User,
@@ -64,7 +69,7 @@ impl ChatApp {
             turn.timeline_inserted = true;
         }
 
-        match turn.dispatch {
+        let dispatched = match turn.dispatch {
             PendingDispatch::Runtime {
                 runtime_prompt,
                 kind,
@@ -77,24 +82,30 @@ impl ChatApp {
                     self.active_turn_title = None;
                     self.timeline
                         .push(TimelineEntry::warning(format!("Runtime error: {e}")));
+                    self.scroll_offset = u16::MAX;
+                    return false;
                 }
+                true
             }
             PendingDispatch::DiscoverAgents => self.refresh_acp_agents(),
-        }
+        };
 
         self.scroll_offset = u16::MAX;
+        dispatched
     }
 
     /// Dispatches the next queued message to the agent runtime (FIFO).
     /// Called after any terminal turn event (TurnComplete, TurnFailed).
     pub(super) fn dispatch_next_queued(&mut self) {
-        if let Some(turn) = self.pending_messages.pop_front() {
+        while let Some(turn) = self.pending_messages.pop_front() {
             info!(
                 "dispatch_next_queued: dispatching len={} remaining={}",
                 turn.user_text.len(),
                 self.pending_messages.len()
             );
-            self.dispatch_turn(turn);
+            if self.dispatch_turn(turn) {
+                break;
+            }
         }
     }
 }
