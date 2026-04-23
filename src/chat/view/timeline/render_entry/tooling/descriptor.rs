@@ -25,6 +25,12 @@ pub(crate) struct EntryDescriptor {
     pub call_identity: Option<String>,
 }
 
+impl EntryDescriptor {
+    pub(super) fn call_identity_suffix(&self) -> Option<&str> {
+        self.call_identity.as_deref()
+    }
+}
+
 use crate::chat::model::{EntryKind, TimelineEntry, ToolCallStatus};
 use crate::chat::view::timeline::render_entry::common::extract_tool_subtitle;
 
