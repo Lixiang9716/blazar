@@ -201,22 +201,42 @@ impl ModalPicker {
     }
 
     pub fn filtered_items(&self) -> Vec<&PickerItem> {
-        if self.filter.is_empty() {
-            self.items.iter().collect()
-        } else {
-            self.items
+        if self.context != PickerContext::Commands {
+            if self.filter.is_empty() {
+                return self.items.iter().collect();
+            }
+
+            let filter = self.filter.to_lowercase();
+            return self
+                .items
                 .iter()
                 .filter(|item| {
-                    item.label
-                        .to_lowercase()
-                        .contains(&self.filter.to_lowercase())
-                        || item
-                            .description
-                            .to_lowercase()
-                            .contains(&self.filter.to_lowercase())
+                    item.label.to_lowercase().contains(&filter)
+                        || item.description.to_lowercase().contains(&filter)
                 })
-                .collect()
+                .collect();
         }
+
+        let filter = self.filter.trim();
+        if !filter.starts_with('/') {
+            return Vec::new();
+        }
+
+        let specs: Vec<crate::chat::commands::CommandSpec> = self
+            .items
+            .iter()
+            .map(|item| crate::chat::commands::CommandSpec {
+                name: item.label.clone(),
+                description: item.description.clone(),
+                args_schema: serde_json::json!({ "type": "object" }),
+            })
+            .collect();
+
+        let ordered_names = crate::chat::commands::matcher::ranked_match_names(filter, &specs);
+        ordered_names
+            .into_iter()
+            .filter_map(|name| self.items.iter().find(|item| item.label == name))
+            .collect()
     }
 
     fn reset_selection(&mut self) {

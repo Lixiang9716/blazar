@@ -1,4 +1,5 @@
 pub mod builtins;
+pub mod matcher;
 pub mod registry;
 pub mod types;
 
