@@ -2,7 +2,10 @@ use super::descriptor::{EntryDescriptor, ResultMode, StatusVisual};
 use super::*;
 use crate::chat::view::timeline::render_entry::common::tool_badge;
 
-pub(crate) fn status_marker(status_visual: StatusVisual, theme: &ChatTheme) -> (&'static str, Style) {
+pub(crate) fn status_marker(
+    status_visual: StatusVisual,
+    theme: &ChatTheme,
+) -> (&'static str, Style) {
     match status_visual {
         StatusVisual::RunningDot => ("●", theme.spinner),
         StatusVisual::EndedDot => ("●", theme.diff_add),
