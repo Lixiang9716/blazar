@@ -21,6 +21,20 @@ fn tool_registry_exposes_compatibility_tier_for_each_tool() {
     assert_eq!(tier, Some(ToolCompatibilityTier::CompatibilityBridge));
 }
 
+#[test]
+fn tool_registry_applies_policy_tier_over_tool_default_for_vet() {
+    let workspace_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let mut registry = ToolRegistry::new(workspace_root.clone());
+    registry.register(Box::new(crate::agent::tools::vet::VetTool::new(
+        workspace_root,
+    )));
+
+    assert_eq!(
+        registry.compatibility_tier("vet"),
+        Some(ToolCompatibilityTier::CompatibilityBridge)
+    );
+}
+
 fn wait_until(timeout: Duration, mut condition: impl FnMut() -> bool) -> bool {
     let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
