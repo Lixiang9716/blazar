@@ -7,6 +7,7 @@ out = ["Xml"]
 # focused on deterministic core logic.
 exclude-files = [
   "src/agent/adapters/acp_client/client.rs",
+  "src/agent/adapters/conformance_tests.rs",
   "src/agent/tools/bash.rs",
   "src/chat/event_loop.rs",
   "src/provider/openai_compat.rs",

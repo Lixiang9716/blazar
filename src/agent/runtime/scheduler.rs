@@ -187,10 +187,30 @@ mod tests {
     #[test]
     fn scheduler_contract_matrix_is_stable_for_claim_set_pairs() {
         let cases = vec![
-            ("ro/ro same resource", vec![claim_ro("fs:a")], vec![claim_ro("fs:a")], false),
-            ("ro/rw same resource", vec![claim_ro("fs:a")], vec![claim_rw("fs:a")], true),
-            ("rw/ro same resource", vec![claim_rw("fs:a")], vec![claim_ro("fs:a")], true),
-            ("rw/rw same resource", vec![claim_rw("fs:a")], vec![claim_rw("fs:a")], true),
+            (
+                "ro/ro same resource",
+                vec![claim_ro("fs:a")],
+                vec![claim_ro("fs:a")],
+                false,
+            ),
+            (
+                "ro/rw same resource",
+                vec![claim_ro("fs:a")],
+                vec![claim_rw("fs:a")],
+                true,
+            ),
+            (
+                "rw/ro same resource",
+                vec![claim_rw("fs:a")],
+                vec![claim_ro("fs:a")],
+                true,
+            ),
+            (
+                "rw/rw same resource",
+                vec![claim_rw("fs:a")],
+                vec![claim_rw("fs:a")],
+                true,
+            ),
             (
                 "rw/rw different resources",
                 vec![claim_rw("fs:a")],

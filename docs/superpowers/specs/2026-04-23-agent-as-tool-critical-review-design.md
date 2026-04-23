@@ -135,9 +135,15 @@ before major new capability expansion.
 
 ## 7. Implementation Status (2026-04-23)
 
+- ✅ Task 1 complete: runtime error taxonomy is structured and propagated via `RuntimeErrorKind`.
+- ✅ Task 2 complete: scheduler conflict behavior is locked with an expanded contract matrix and independent replay-order guarantees.
+- ✅ Task 3 complete: tool-call observability metadata (`batch_id`, `replay_index`, `normalized_claims`) is threaded through runtime and timeline rendering.
 - ✅ Task 4 complete: Tool facade governance now includes compatibility-tier metadata.
-- Added `ToolCompatibilityTier` with `KernelNative` and `CompatibilityBridge`.
-- `Tool` trait now defaults to `KernelNative` via `compatibility_tier()`.
-- `ToolRegistry` now exposes `compatibility_tier(name)` for governance introspection.
-- `bash` is explicitly tagged `CompatibilityBridge` under current architecture.
-- Follow-up RED→GREEN evidence: policy tiers now override per-tool defaults for governed bridges (including `vet`) so registry-level metadata stays visible.
+  - Added `ToolCompatibilityTier` with `KernelNative` and `CompatibilityBridge`.
+  - `Tool` trait defaults to `KernelNative` via `compatibility_tier()`.
+  - `ToolRegistry` exposes `compatibility_tier(name)` for governance introspection.
+  - Policy tiers override per-tool defaults for governed bridges (including `bash` and `vet`) to keep registry-level metadata stable.
+- ✅ Task 5 complete: protocol-agnostic adapter conformance harness and ACP synthetic probe are in place, with explicit RED→GREEN regression evidence for dependency short-circuiting.
+- ✅ Task 6 verification complete:
+  - `just fmt-check`, `just lint`, and `just test` are green.
+  - `cargo tarpaulin --timeout 300` reports **90.06%** coverage with the repository profile.

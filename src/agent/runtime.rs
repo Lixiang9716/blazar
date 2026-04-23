@@ -22,8 +22,8 @@ use crate::agent::tools::write_file::WriteFileTool;
 use crate::config::{AGENTS_CONFIG_PATH, load_agents_config_from_path};
 use crate::provider::{LlmProvider, ProviderMessage};
 
-mod events;
 mod errors;
+mod events;
 mod executor;
 mod json_repair;
 mod scheduler;
@@ -32,8 +32,8 @@ pub(crate) mod turn;
 #[cfg(test)]
 mod tests;
 
-use turn::{ChannelObserver, TurnOutcome, execute_turn};
 pub use errors::RuntimeErrorKind;
+use turn::{ChannelObserver, TurnOutcome, execute_turn};
 
 #[cfg(test)]
 use crate::provider::ProviderEvent;
@@ -350,10 +350,7 @@ fn run_turn_with_retry(
             }
             TurnOutcome::FatalError { kind, error } => {
                 warn!("runtime: turn {turn_id} fatal error ({kind:?}): {error}");
-                let _ = event_tx.send(AgentEvent::TurnFailed {
-                    kind,
-                    error,
-                });
+                let _ = event_tx.send(AgentEvent::TurnFailed { kind, error });
                 return None;
             }
         }
