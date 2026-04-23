@@ -85,7 +85,10 @@ fn render_entry_renders_tool_use_and_tool_call_statuses() {
     let success_text = lines_text(&success_lines).join("\n");
     assert!(success_text.contains("bash"));
     assert!(success_text.contains("cargo test"));
-    assert_eq!(first_line_status_style(&success_lines), Some(theme.diff_add));
+    assert_eq!(
+        first_line_status_style(&success_lines),
+        Some(theme.diff_add)
+    );
 
     let error = TimelineEntry::tool_call(
         "c3",
@@ -99,7 +102,10 @@ fn render_entry_renders_tool_use_and_tool_call_statuses() {
     let error_text = lines_text(&error_lines).join("\n");
     assert!(error_text.contains("grep"));
     assert!(error_text.contains("TODO"));
-    assert_eq!(first_line_status_style(&error_lines), Some(theme.marker_warning));
+    assert_eq!(
+        first_line_status_style(&error_lines),
+        Some(theme.marker_warning)
+    );
 
     let acp_agent = TimelineEntry::tool_call(
         "c4",
@@ -159,6 +165,32 @@ fn tool_descriptor_maps_status_and_semantic_summary() {
         error_descriptor.status_visual,
         super::tooling::descriptor::StatusVisual::ErrorX
     );
+}
+
+#[test]
+fn tool_call_status_visual_uses_dot_for_running_and_success_x_for_error() {
+    let theme = crate::chat::theme::build_theme();
+
+    let (marker, style) = super::tooling::renderer::status_marker(
+        super::tooling::descriptor::StatusVisual::RunningDot,
+        &theme,
+    );
+    assert_eq!(marker, "●");
+    assert_eq!(style, theme.spinner);
+
+    let (marker, style) = super::tooling::renderer::status_marker(
+        super::tooling::descriptor::StatusVisual::EndedDot,
+        &theme,
+    );
+    assert_eq!(marker, "●");
+    assert_eq!(style, theme.diff_add);
+
+    let (marker, style) = super::tooling::renderer::status_marker(
+        super::tooling::descriptor::StatusVisual::ErrorX,
+        &theme,
+    );
+    assert_eq!(marker, "x");
+    assert_eq!(style, theme.marker_warning);
 }
 
 #[test]

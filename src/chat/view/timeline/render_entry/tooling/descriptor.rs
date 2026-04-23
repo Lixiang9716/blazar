@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
-use crate::chat::model::{EntryKind, TimelineEntry, ToolCallStatus};
 use super::super::common::extract_tool_subtitle;
+use crate::chat::model::{EntryKind, TimelineEntry, ToolCallStatus};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum StatusVisual {
