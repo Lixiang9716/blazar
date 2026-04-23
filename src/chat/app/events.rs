@@ -152,6 +152,7 @@ impl ChatApp {
             AgentEvent::AcpAgentsRefreshed => {
                 self.timeline
                     .push(TimelineEntry::hint("ACP agent discovery complete."));
+                self.dispatch_next_queued();
                 self.scroll_offset = u16::MAX;
             }
             AgentEvent::AcpAgentsRefreshFailed { error } => {
@@ -159,6 +160,7 @@ impl ChatApp {
                 self.timeline.push(TimelineEntry::warning(format!(
                     "ACP agent discovery failed: {error}"
                 )));
+                self.dispatch_next_queued();
                 self.scroll_offset = u16::MAX;
             }
             AgentEvent::TurnComplete => {

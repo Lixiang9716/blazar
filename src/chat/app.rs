@@ -78,26 +78,6 @@ struct PendingTurn {
     timeline_inserted: bool,
 }
 
-impl PendingTurn {
-    fn runtime_prompt(&self) -> &str {
-        match &self.dispatch {
-            PendingDispatch::Runtime { runtime_prompt, .. } => runtime_prompt,
-            PendingDispatch::DiscoverAgents => {
-                unreachable!("discover-agents turns do not have a runtime prompt")
-            }
-        }
-    }
-
-    fn kind(&self) -> TurnKind {
-        match &self.dispatch {
-            PendingDispatch::Runtime { kind, .. } => *kind,
-            PendingDispatch::DiscoverAgents => {
-                unreachable!("discover-agents turns do not have a runtime kind")
-            }
-        }
-    }
-}
-
 impl ChatApp {
     pub fn new(repo_path: &str) -> Result<Self, AgentRuntimeError> {
         let display_path = shorten_home(repo_path);

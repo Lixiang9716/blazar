@@ -24,22 +24,7 @@ impl ChatApp {
             return;
         }
 
-        self.messages.push(ChatMessage {
-            author: Author::User,
-            body: turn.user_text.clone(),
-        });
-
         self.has_user_sent = true;
-
-        // Add user message to timeline
-        self.timeline
-            .push(TimelineEntry::user_message(turn.user_text.clone()));
-
-        // Handle local commands without dispatching a model turn.
-        if trimmed == "/discover-agents" {
-            self.refresh_acp_agents();
-            return;
-        }
 
         // Admission control: queue if agent is busy instead of dropping
         if self.agent_state.is_busy() {
@@ -51,19 +36,7 @@ impl ChatApp {
             return;
         }
 
-        // Dispatch to agent runtime — response arrives via events in tick()
-        self.active_turn_kind = Some(turn.kind());
-        self.active_turn_title = self.streaming_title_for_turn(turn.kind());
-        if let Err(e) = self.agent_runtime.submit_turn(turn.runtime_prompt()) {
-            warn!("send_message: submit_turn failed: {e}");
-            self.active_turn_kind = None;
-            self.active_turn_title = None;
-            self.timeline
-                .push(TimelineEntry::warning(format!("Runtime error: {e}")));
-        }
-
-        // Auto-scroll to bottom
-        self.scroll_offset = u16::MAX;
+        self.dispatch_turn(turn);
     }
 
     pub(super) fn refresh_acp_agents(&mut self) {
@@ -80,6 +53,38 @@ impl ChatApp {
         }
     }
 
+    pub(super) fn dispatch_turn(&mut self, mut turn: PendingTurn) {
+        if !turn.timeline_inserted {
+            self.messages.push(ChatMessage {
+                author: Author::User,
+                body: turn.user_text.clone(),
+            });
+            self.timeline
+                .push(TimelineEntry::user_message(turn.user_text.clone()));
+            turn.timeline_inserted = true;
+        }
+
+        match turn.dispatch {
+            PendingDispatch::Runtime {
+                runtime_prompt,
+                kind,
+            } => {
+                self.active_turn_kind = Some(kind);
+                self.active_turn_title = self.streaming_title_for_turn(kind);
+                if let Err(e) = self.agent_runtime.submit_turn(&runtime_prompt) {
+                    warn!("dispatch_turn: submit_turn failed: {e}");
+                    self.active_turn_kind = None;
+                    self.active_turn_title = None;
+                    self.timeline
+                        .push(TimelineEntry::warning(format!("Runtime error: {e}")));
+                }
+            }
+            PendingDispatch::DiscoverAgents => self.refresh_acp_agents(),
+        }
+
+        self.scroll_offset = u16::MAX;
+    }
+
     /// Dispatches the next queued message to the agent runtime (FIFO).
     /// Called after any terminal turn event (TurnComplete, TurnFailed).
     pub(super) fn dispatch_next_queued(&mut self) {
@@ -89,17 +94,7 @@ impl ChatApp {
                 turn.user_text.len(),
                 self.pending_messages.len()
             );
-            self.active_turn_kind = Some(turn.kind());
-            self.active_turn_title = self.streaming_title_for_turn(turn.kind());
-            if let Err(e) = self.agent_runtime.submit_turn(turn.runtime_prompt()) {
-                warn!("dispatch_next_queued: submit_turn failed: {e}");
-                self.active_turn_kind = None;
-                self.active_turn_title = None;
-                self.timeline
-                    .push(TimelineEntry::warning(format!("Runtime error: {e}")));
-                // Don't re-queue on channel error — runtime is dead
-            }
-            self.scroll_offset = u16::MAX;
+            self.dispatch_turn(turn);
         }
     }
 }

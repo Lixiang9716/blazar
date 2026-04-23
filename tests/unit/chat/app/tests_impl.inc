@@ -196,7 +196,7 @@ fn tick_handles_multibyte_tool_output_without_panicking() {
 }
 
 #[test]
-fn send_message_queues_when_agent_busy() {
+fn send_message_queues_when_agent_busy_without_immediate_timeline_insert() {
     let repo_path = env!("CARGO_MANIFEST_DIR");
     let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
 
@@ -216,16 +216,17 @@ fn send_message_queues_when_agent_busy() {
     assert_eq!(app.pending_messages.len(), 2);
     assert_eq!(app.pending_messages[0].user_text, "second message");
     assert_eq!(app.pending_messages[1].user_text, "third message");
+    assert_eq!(app.messages().len(), 2);
+    assert_eq!(app.messages()[1].body, "first message");
 
-    // Both still appear in timeline (UI not lost)
+    // Queued turns should not mutate the visible timeline until dispatch.
     let user_messages: Vec<&str> = app
         .timeline
         .iter()
         .filter(|e| e.actor == Actor::User)
         .map(|e| e.body.as_str())
         .collect();
-    assert!(user_messages.contains(&"second message"));
-    assert!(user_messages.contains(&"third message"));
+    assert_eq!(user_messages, vec!["first message"]);
 }
 
 #[test]
@@ -243,6 +244,46 @@ fn dispatch_next_queued_drains_fifo_on_turn_complete() {
     app.apply_agent_event_for_test(AgentEvent::TurnComplete);
     assert_eq!(app.pending_messages.len(), 1);
     assert_eq!(app.pending_messages[0].user_text, "queued-b");
+    assert_eq!(app.messages().len(), 2);
+    assert_eq!(app.messages()[1].body, "queued-a");
+    assert!(
+        app.timeline
+            .iter()
+            .any(|entry| entry.actor == Actor::User && entry.body == "queued-a")
+    );
+}
+
+#[test]
+fn discover_agents_queued_while_busy_and_runs_after_turn() {
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+
+    app.send_message("first message");
+    app.apply_agent_event_for_test(AgentEvent::TurnStarted {
+        turn_id: "t1".into(),
+    });
+    assert!(app.agent_state.is_busy());
+
+    app.send_message("/discover-agents");
+    app.send_message("after");
+    assert_eq!(app.pending_messages.len(), 2);
+    assert_eq!(app.messages().len(), 2);
+    assert_eq!(app.messages()[1].body, "first message");
+
+    app.apply_agent_event_for_test(AgentEvent::TurnComplete);
+    assert_eq!(app.pending_messages.len(), 1);
+    assert_eq!(app.pending_messages[0].user_text, "after");
+    assert!(app.messages().iter().any(|msg| msg.body == "/discover-agents"));
+    assert!(!app.messages().iter().any(|msg| msg.body == "after"));
+
+    app.apply_agent_event_for_test(AgentEvent::AcpAgentsRefreshed);
+    assert!(app.pending_messages.is_empty());
+    assert!(app.messages().iter().any(|msg| msg.body == "after"));
+    assert!(
+        app.timeline
+            .iter()
+            .any(|entry| entry.actor == Actor::User && entry.body == "after")
+    );
 }
 
 #[test]
