@@ -76,6 +76,11 @@ Key decisions:
 - Default `resource_claims` returns empty = freely parallelizable.
 - Existing tools (read_file, bash, etc.) require zero changes — defaults cover them.
 
+Implementation note (capability-kernel refactor): runtime compatibility bridges intentionally use
+`ToolKind::Agent { is_acp: bool }` instead of embedding ACP endpoint/id in `ToolKind`. ACP endpoint
+and agent identity remain on ACP tool metadata/registration surfaces so runtime scheduling and event
+paths stay protocol-agnostic.
+
 ### 2. Resource-Based Parallel Scheduler
 
 Conflict matrix for same-resource claims:
@@ -214,7 +219,10 @@ pub struct ToolResult {
 
 Existing `ToolResult::success("text")` still works — wraps into `ContentPart::Text`.
 
-Migration path: the current `output: String` field is replaced by `content: Vec<ContentPart>`. A helper method `ToolResult::text_output(&self) -> &str` provides backward-compatible access for code that only needs the text portion. All existing call sites that read `.output` are updated to use `.text_output()` or iterate `.content`.
+Migration path: the current `output: String` field is replaced by `content: Vec<ContentPart>`.
+`ToolResult::text_output(&self) -> String` provides backward-compatible access for call sites that
+need text projection, and mirrors `CapabilityResult::text_output` to keep projection parity between
+legacy tool paths and capability-kernel paths.
 
 ### 5. UI Surface — Agent-Tool Awareness
 
