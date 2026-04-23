@@ -375,4 +375,8 @@ fn install_tools_script_reports_missing_tools_in_check_mode() {
         stdout.contains("Check-only mode: no installation attempted."),
         "stdout should mention check-only behavior, got: {stdout}"
     );
+    assert!(
+        stdout.contains("Action: rerun with '--install' to attempt auto-install when supported."),
+        "stdout should provide explicit next-step for install mode, got: {stdout}"
+    );
 }
