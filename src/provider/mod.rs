@@ -104,6 +104,11 @@ pub fn load_provider(repo_root: &str) -> (Box<dyn LlmProvider>, String) {
 
 /// Return models available from the configured provider.
 pub fn available_models(repo_root: &str) -> Vec<ModelInfo> {
-    let (provider, _) = load_provider(repo_root);
-    provider.list_models().unwrap_or_default()
+    let repo_root = repo_root.to_owned();
+    std::thread::spawn(move || {
+        let (provider, _) = load_provider(&repo_root);
+        provider.list_models().unwrap_or_default()
+    })
+    .join()
+    .unwrap_or_default()
 }

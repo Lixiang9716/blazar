@@ -333,7 +333,19 @@ impl ChatApp {
         let exec_future = crate::chat::commands::orchestrator::execute_palette_command_from_command(
             command, self, args,
         );
-        futures::executor::block_on(exec_future)
+        if tokio::runtime::Handle::try_current().is_ok() {
+            return futures::executor::block_on(exec_future);
+        }
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|error| {
+                crate::chat::commands::CommandError::ExecutionFailed(format!(
+                    "failed to initialize tokio runtime: {error}"
+                ))
+            })?;
+        runtime.block_on(exec_future)
     }
 
     pub fn should_quit(&self) -> bool {
