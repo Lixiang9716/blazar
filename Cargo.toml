@@ -6,7 +6,7 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 crossterm = "0.29"
-image = "0.25"
+image = { version = "0.25", default-features = false, features = ["png"] }
 ratatui-core = "0.1"
 ratatui-macros = "0.7"
 ratatui-widgets = "0.3"

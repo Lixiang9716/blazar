@@ -6,7 +6,7 @@ use async_openai::Client;
 use async_openai::config::OpenAIConfig as AsyncOpenAiConfig;
 use futures::StreamExt;
 use log::{info, trace, warn};
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 
 use crate::agent::tools::ToolSpec;
 
@@ -282,14 +282,12 @@ impl OpenAiProvider {
         };
         let tool_choice = determine_tool_choice(&truncated_messages, request_tools.is_some());
 
-        let mut req = json!({
-            "model": model,
-            "messages": request_messages,
-            "stream": true,
-            "max_tokens": cfg.max_tokens,
-            "temperature": cfg.temperature,
-        });
-        let obj = req.as_object_mut().unwrap();
+        let mut obj = Map::new();
+        obj.insert("model".into(), json!(model));
+        obj.insert("messages".into(), json!(request_messages));
+        obj.insert("stream".into(), json!(true));
+        obj.insert("max_tokens".into(), json!(cfg.max_tokens));
+        obj.insert("temperature".into(), json!(cfg.temperature));
 
         if let Some(top_p) = cfg.top_p {
             obj.insert("top_p".into(), json!(top_p));
@@ -313,7 +311,7 @@ impl OpenAiProvider {
             obj.insert("tool_choice".into(), json!(tc));
         }
 
-        req
+        Value::Object(obj)
     }
 }
 

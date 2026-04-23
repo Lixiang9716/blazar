@@ -1,0 +1,7 @@
+[advisories]
+ignore = [
+  "RUSTSEC-2025-0052", # async-std (transitive via httpmock dev dependency)
+  "RUSTSEC-2025-0012", # backoff (transitive via async-openai)
+  "RUSTSEC-2024-0384", # instant (transitive via backoff)
+  "RUSTSEC-2024-0436", # paste (historically from image AVIF stack)
+]
