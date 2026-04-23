@@ -39,5 +39,9 @@ impl std::error::Error for CommandError {}
 pub trait PaletteCommand: Send + Sync {
     fn spec(&self) -> &CommandSpec;
 
-    fn execute(&self, args: Value) -> CommandExecFuture<'_>;
+    fn execute<'a>(
+        &'a self,
+        ctx: &'a mut crate::chat::commands::orchestrator::CommandContext<'a>,
+        args: Value,
+    ) -> CommandExecFuture<'a>;
 }

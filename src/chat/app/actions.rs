@@ -78,13 +78,14 @@ impl ChatApp {
                             return;
                         }
 
-                        if cmd == "/plan" {
-                            self.set_composer_text("/plan ");
-                            return;
-                        }
-
-                        if cmd == "/discover-agents" {
-                            self.send_message(&cmd);
+                        if self.command_registry.find(&cmd).is_some() {
+                            if let Err(err) =
+                                self.execute_palette_command_sync(&cmd, serde_json::json!({}))
+                            {
+                                self.timeline
+                                    .push(TimelineEntry::warning(format!("Command failed: {err}")));
+                                self.scroll_offset = u16::MAX;
+                            }
                             return;
                         }
 

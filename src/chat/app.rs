@@ -31,6 +31,7 @@ pub struct ChatApp {
     scroll_offset: u16,
     show_details: bool,
     pub picker: ModalPicker,
+    command_registry: crate::chat::commands::CommandRegistry,
     tick_count: u64,
     /// Remaining demo entries to play back.
     demo_queue: Vec<TimelineEntry>,
@@ -83,6 +84,14 @@ impl ChatApp {
         };
 
         let theme = crate::chat::theme::build_theme();
+        let mut command_registry = crate::chat::commands::CommandRegistry::new();
+        crate::chat::commands::builtins::register_builtin_commands(&mut command_registry).map_err(
+            |error| {
+                AgentRuntimeError::ToolInitialization(format!(
+                    "failed to register built-in commands: {error}"
+                ))
+            },
+        )?;
 
         let (provider, model_name) = crate::provider::load_provider(repo_path);
 
@@ -105,6 +114,7 @@ impl ChatApp {
             scroll_offset: u16::MAX, // auto-scroll sentinel
             show_details: false,
             picker: ModalPicker::command_palette(),
+            command_registry,
             tick_count: 0,
             demo_queue: Vec::new(),
             demo_last_add: None,
@@ -310,6 +320,21 @@ impl ChatApp {
         let text = self.composer_text();
         self.send_message(&text);
         self.composer = TextArea::default();
+    }
+
+    pub(crate) fn execute_palette_command_sync(
+        &mut self,
+        name: &str,
+        args: serde_json::Value,
+    ) -> Result<crate::chat::commands::CommandResult, crate::chat::commands::CommandError> {
+        let command = self.command_registry.find(name).cloned().ok_or_else(|| {
+            crate::chat::commands::CommandError::Unavailable(format!("unknown command: {name}"))
+        })?;
+        futures::executor::block_on(
+            crate::chat::commands::orchestrator::execute_palette_command_from_command(
+                command, self, args,
+            ),
+        )
     }
 
     pub fn should_quit(&self) -> bool {
