@@ -13,9 +13,7 @@ pub fn ranked_match_names<'a>(query: &str, specs: &'a [CommandSpec]) -> Vec<&'a 
     if needle.is_empty() || needle == "/" {
         return specs.iter().map(|spec| spec.name.as_str()).collect();
     }
-    if !needle.starts_with('/') {
-        return Vec::new();
-    }
+
     let mut scored: Vec<(MatchTier, usize, &'a str)> = specs
         .iter()
         .enumerate()
