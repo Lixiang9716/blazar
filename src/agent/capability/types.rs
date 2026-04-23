@@ -201,7 +201,9 @@ impl CapabilityResult {
                 }
             }
         }
-        if output.is_empty() && let Some(error) = &self.error {
+        if output.is_empty()
+            && let Some(error) = &self.error
+        {
             output.push_str(&error.message);
         }
         output
