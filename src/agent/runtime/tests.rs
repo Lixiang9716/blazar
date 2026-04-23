@@ -1,5 +1,6 @@
 use super::*;
 use crate::agent::tools::{ResourceAccess, ResourceClaim, Tool, ToolKind, ToolSpec};
+use httpmock::prelude::*;
 use serde_json::json;
 use std::error::Error;
 use std::sync::Arc;
@@ -119,6 +120,130 @@ fn refresh_acp_agents_reports_invalid_config_errors() {
 
     assert!(refreshed, "refresh failure event was not observed");
 
+    std::fs::remove_dir_all(&workspace_root).expect("cleanup scratch workspace");
+}
+
+#[test]
+fn refresh_acp_agents_emits_success_and_updates_runtime_tools() {
+    struct CapturingToolsProvider {
+        tool_snapshots: Arc<Mutex<Vec<Vec<String>>>>,
+    }
+
+    impl LlmProvider for CapturingToolsProvider {
+        fn stream_turn(
+            &self,
+            _model: &str,
+            _messages: &[ProviderMessage],
+            tools: &[ToolSpec],
+            tx: Sender<ProviderEvent>,
+        ) {
+            self.tool_snapshots
+                .lock()
+                .expect("tool snapshots lock should not be poisoned")
+                .push(tools.iter().map(|tool| tool.name.clone()).collect());
+            let _ = tx.send(ProviderEvent::TurnComplete);
+        }
+    }
+
+    let base = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target");
+    std::fs::create_dir_all(&base).expect("target dir should exist");
+    let unique = format!(
+        "runtime-refresh-acp-success-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock should be monotonic")
+            .as_nanos()
+    );
+    let workspace_root = base.join(unique);
+    std::fs::create_dir_all(workspace_root.join("config")).expect("create config dir");
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(GET).path("/agents/reviewer");
+        then.status(200).json_body(json!({
+            "id": "reviewer",
+            "name": "ACP reviewer",
+            "description": "Reviews changes",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "prompt": { "type": "string" }
+                }
+            }
+        }));
+    });
+
+    let snapshots = Arc::new(Mutex::new(Vec::<Vec<String>>::new()));
+    let runtime = AgentRuntime::new(
+        Box::new(CapturingToolsProvider {
+            tool_snapshots: Arc::clone(&snapshots),
+        }),
+        workspace_root.clone(),
+        "echo".to_owned(),
+    )
+    .expect("runtime should initialize");
+
+    runtime
+        .submit_turn("before ACP refresh")
+        .expect("initial turn should be queued");
+    let initial_turn_completed = wait_until(Duration::from_secs(2), || {
+        matches!(runtime.try_recv(), Some(AgentEvent::TurnComplete))
+    });
+    assert!(initial_turn_completed, "initial turn should complete");
+
+    std::fs::write(
+        workspace_root.join("config/agents.toml"),
+        format!(
+            r#"[[agents]]
+name = "configured_reviewer"
+endpoint = "{}"
+agent_id = "reviewer"
+enabled = true
+
+[discovery]
+endpoints = []
+"#,
+            server.base_url()
+        ),
+    )
+    .expect("write valid agents config");
+
+    runtime
+        .refresh_acp_agents()
+        .expect("refresh request should reach runtime");
+    let refresh_succeeded = wait_until(Duration::from_secs(2), || {
+        matches!(runtime.try_recv(), Some(AgentEvent::AcpAgentsRefreshed))
+    });
+    assert!(
+        refresh_succeeded,
+        "ACP refresh success event should be observed"
+    );
+
+    runtime
+        .submit_turn("after ACP refresh")
+        .expect("second turn should be queued");
+    let second_turn_completed = wait_until(Duration::from_secs(2), || {
+        matches!(runtime.try_recv(), Some(AgentEvent::TurnComplete))
+    });
+    assert!(second_turn_completed, "second turn should complete");
+
+    let snapshots = snapshots
+        .lock()
+        .expect("tool snapshots lock should not be poisoned");
+    assert!(
+        snapshots
+            .first()
+            .is_some_and(|tools| !tools.iter().any(|name| name == "configured_reviewer")),
+        "ACP tool should not exist before refresh"
+    );
+    assert!(
+        snapshots
+            .last()
+            .is_some_and(|tools| tools.iter().any(|name| name == "configured_reviewer")),
+        "ACP tool should be present after refresh"
+    );
+
+    drop(runtime);
     std::fs::remove_dir_all(&workspace_root).expect("cleanup scratch workspace");
 }
 

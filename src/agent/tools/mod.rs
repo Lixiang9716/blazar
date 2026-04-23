@@ -3,12 +3,17 @@ pub mod agent;
 pub mod bash;
 pub mod list_dir;
 pub mod read_file;
-pub mod scheduler;
 pub mod write_file;
 
 use serde_json::Value;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
+
+use crate::agent::capability::local::LocalToolCapability;
+use crate::agent::capability::{
+    CapabilityAccess, CapabilityClaim, CapabilityContentPart, CapabilityError, CapabilityInput,
+    CapabilityKind, CapabilityResult,
+};
 
 /// Declarative metadata advertised to the model for each callable tool.
 #[derive(Debug, Clone, PartialEq)]
@@ -24,6 +29,30 @@ pub enum ToolKind {
     Agent { is_acp: bool },
 }
 
+impl ToolKind {
+    pub fn into_capability_kind(self) -> CapabilityKind {
+        self.into()
+    }
+}
+
+impl From<ToolKind> for CapabilityKind {
+    fn from(value: ToolKind) -> Self {
+        match value {
+            ToolKind::Local => Self::Local,
+            ToolKind::Agent { is_acp } => Self::Agent { is_acp },
+        }
+    }
+}
+
+impl From<CapabilityKind> for ToolKind {
+    fn from(value: CapabilityKind) -> Self {
+        match value {
+            CapabilityKind::Local => Self::Local,
+            CapabilityKind::Agent { is_acp } => Self::Agent { is_acp },
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResourceAccess {
     ReadOnly,
@@ -31,10 +60,54 @@ pub enum ResourceAccess {
     Exclusive,
 }
 
+impl From<ResourceAccess> for CapabilityAccess {
+    fn from(value: ResourceAccess) -> Self {
+        match value {
+            ResourceAccess::ReadOnly => Self::ReadOnly,
+            ResourceAccess::ReadWrite => Self::ReadWrite,
+            ResourceAccess::Exclusive => Self::Exclusive,
+        }
+    }
+}
+
+impl From<CapabilityAccess> for ResourceAccess {
+    fn from(value: CapabilityAccess) -> Self {
+        match value {
+            CapabilityAccess::ReadOnly => Self::ReadOnly,
+            CapabilityAccess::ReadWrite => Self::ReadWrite,
+            CapabilityAccess::Exclusive => Self::Exclusive,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResourceClaim {
     pub resource: String,
     pub access: ResourceAccess,
+}
+
+impl ResourceClaim {
+    pub fn into_capability_claim(self) -> CapabilityClaim {
+        self.into()
+    }
+}
+
+impl From<ResourceClaim> for CapabilityClaim {
+    fn from(value: ResourceClaim) -> Self {
+        Self {
+            resource: value.resource,
+            access: value.access.into(),
+        }
+    }
+}
+
+impl From<CapabilityClaim> for ResourceClaim {
+    fn from(value: CapabilityClaim) -> Self {
+        Self {
+            resource: value.resource,
+            access: value.access.into(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -60,6 +133,24 @@ impl ContentPart {
                 Some(mime_type) => format!("[resource] {uri} ({mime_type})"),
                 None => format!("[resource] {uri}"),
             },
+        }
+    }
+}
+
+impl From<ContentPart> for CapabilityContentPart {
+    fn from(value: ContentPart) -> Self {
+        match value {
+            ContentPart::Text { text } => Self::Text { text },
+            ContentPart::Resource { uri, mime_type } => Self::Resource { uri, mime_type },
+        }
+    }
+}
+
+impl From<CapabilityContentPart> for ContentPart {
+    fn from(value: CapabilityContentPart) -> Self {
+        match value {
+            CapabilityContentPart::Text { text } => Self::Text { text },
+            CapabilityContentPart::Resource { uri, mime_type } => Self::Resource { uri, mime_type },
         }
     }
 }
@@ -95,6 +186,7 @@ impl ToolResult {
     }
 
     pub fn text_output(&self) -> String {
+        // Keep this projection behavior in lockstep with CapabilityResult::text_output.
         let mut output = String::new();
         let mut previous_was_resource = false;
         for part in &self.content {
@@ -116,6 +208,58 @@ impl ToolResult {
             }
         }
         output
+    }
+
+    pub fn into_capability_result(self) -> CapabilityResult {
+        self.into()
+    }
+
+    pub fn from_capability_result(result: CapabilityResult) -> Self {
+        result.into()
+    }
+}
+
+impl From<ToolResult> for CapabilityResult {
+    fn from(value: ToolResult) -> Self {
+        let error = if value.is_error {
+            Some(CapabilityError::new(value.text_output()))
+        } else {
+            None
+        };
+
+        Self {
+            content: value.content.into_iter().map(Into::into).collect(),
+            exit_code: value.exit_code,
+            is_error: value.is_error,
+            output_truncated: value.output_truncated,
+            error,
+        }
+    }
+}
+
+impl From<CapabilityResult> for ToolResult {
+    fn from(value: CapabilityResult) -> Self {
+        let CapabilityResult {
+            content,
+            exit_code,
+            is_error,
+            output_truncated,
+            error,
+        } = value;
+
+        let mut projected_content = content.into_iter().map(Into::into).collect::<Vec<_>>();
+        if projected_content.is_empty()
+            && let Some(error) = &error
+        {
+            projected_content.push(ContentPart::text(error.message.clone()));
+        }
+
+        Self {
+            content: projected_content,
+            exit_code,
+            is_error: is_error || error.is_some(),
+            output_truncated,
+        }
     }
 }
 
@@ -176,13 +320,41 @@ impl ToolRegistry {
         self.tools.iter().map(|tool| tool.spec()).collect()
     }
 
+    pub fn resource_claims(&self, name: &str, args: &Value) -> Vec<ResourceClaim> {
+        let Some(tool) = self.get(name) else {
+            return Vec::new();
+        };
+
+        if should_use_local_capability_wrapper(tool.kind()) {
+            let capability = LocalToolCapability::from_tool(tool);
+            capability.resource_claims(&CapabilityInput::new(args.clone()))
+        } else {
+            tool.resource_claims(args)
+        }
+    }
+
     /// Executes a named tool and returns an error when the tool is unknown.
     pub fn execute(&self, name: &str, args: Value) -> Result<ToolResult, String> {
         match self.get(name) {
-            Some(tool) => Ok(tool.execute(args)),
+            Some(tool) => {
+                if should_use_local_capability_wrapper(tool.kind()) {
+                    let capability = LocalToolCapability::from_tool(tool);
+                    let result = capability.execute(CapabilityInput::new(args));
+                    Ok(ToolResult::from_capability_result(result))
+                } else {
+                    Ok(tool.execute(args))
+                }
+            }
             None => Err(format!("unknown tool: {name}")),
         }
     }
+}
+
+fn should_use_local_capability_wrapper(kind: ToolKind) -> bool {
+    // Keep local capability wrappers on built-in local tooling (including
+    // delegated non-ACP agent turns), while ACP-backed agents stay on the
+    // protocol adapter path.
+    matches!(kind, ToolKind::Local | ToolKind::Agent { is_acp: false })
 }
 
 /// Validates a user-provided path is workspace-relative and traversal-safe.
@@ -323,6 +495,11 @@ pub fn resolve_workspace_write_path(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agent::capability::local::LocalToolCapability;
+    use crate::agent::capability::{
+        CapabilityAccess, CapabilityClaim, CapabilityError, CapabilityInput, CapabilityKind,
+        CapabilityResult, ConflictPolicy,
+    };
     use crate::provider::echo::EchoProvider;
     use serde_json::json;
     use std::sync::Arc;
@@ -376,6 +553,112 @@ mod tests {
         assert_eq!(err.text_output(), "nope");
         assert!(err.is_error);
         assert!(!err.output_truncated);
+    }
+
+    #[test]
+    fn tool_result_round_trips_through_capability_result() {
+        let original = ToolResult {
+            content: vec![
+                ContentPart::text("summary"),
+                ContentPart::Resource {
+                    uri: "file://workspace/out.txt".into(),
+                    mime_type: Some("text/plain".into()),
+                },
+                ContentPart::text("details"),
+            ],
+            exit_code: Some(0),
+            is_error: false,
+            output_truncated: true,
+        };
+
+        let converted = original.clone().into_capability_result();
+        let round_tripped = ToolResult::from_capability_result(converted);
+        assert_eq!(round_tripped, original);
+        assert_eq!(round_tripped.text_output(), original.text_output());
+    }
+
+    #[test]
+    fn capability_result_error_metadata_stays_behavior_compatible() {
+        let capability_result = CapabilityResult {
+            content: Vec::new(),
+            exit_code: None,
+            is_error: false,
+            output_truncated: false,
+            error: Some(CapabilityError::with_code("ACP_TIMEOUT", "timed out")),
+        };
+
+        let tool_result: ToolResult = capability_result.into();
+        assert!(tool_result.is_error);
+        assert_eq!(tool_result.text_output(), "timed out");
+    }
+
+    #[test]
+    fn tool_kind_and_claims_convert_to_capability_contracts() {
+        assert_eq!(
+            CapabilityKind::from(ToolKind::Agent { is_acp: true }),
+            CapabilityKind::Agent { is_acp: true }
+        );
+        assert_eq!(
+            ToolKind::from(CapabilityKind::Agent { is_acp: false }),
+            ToolKind::Agent { is_acp: false }
+        );
+
+        let claim = ResourceClaim {
+            resource: "fs:src/main.rs".into(),
+            access: ResourceAccess::ReadWrite,
+        };
+        let capability_claim: CapabilityClaim = claim.clone().into_capability_claim();
+        assert_eq!(
+            capability_claim,
+            CapabilityClaim {
+                resource: "fs:src/main.rs".into(),
+                access: CapabilityAccess::ReadWrite,
+            }
+        );
+        assert_eq!(ResourceClaim::from(capability_claim), claim);
+    }
+
+    #[test]
+    fn mixed_content_projection_stays_in_lockstep_across_tool_and_capability_results() {
+        let tool_result = ToolResult {
+            content: vec![
+                ContentPart::text("summary"),
+                ContentPart::Resource {
+                    uri: "file://workspace/out.txt".into(),
+                    mime_type: Some("text/plain".into()),
+                },
+                ContentPart::text("\ndetails"),
+            ],
+            exit_code: None,
+            is_error: false,
+            output_truncated: false,
+        };
+
+        let capability_result = tool_result.clone().into_capability_result();
+        assert_eq!(tool_result.text_output(), capability_result.text_output());
+
+        let round_tripped = ToolResult::from_capability_result(capability_result);
+        assert_eq!(tool_result.text_output(), round_tripped.text_output());
+    }
+
+    #[test]
+    fn error_metadata_projection_stays_in_lockstep_across_capability_and_tool_results() {
+        let capability_result = CapabilityResult {
+            content: Vec::new(),
+            exit_code: None,
+            is_error: false,
+            output_truncated: false,
+            error: Some(CapabilityError::with_code("ACP_TIMEOUT", "timed out")),
+        };
+
+        let tool_result = ToolResult::from_capability_result(capability_result.clone());
+        assert_eq!(capability_result.text_output(), tool_result.text_output());
+
+        let back_to_capability = tool_result.into_capability_result();
+        assert_eq!(
+            capability_result.text_output(),
+            back_to_capability.text_output()
+        );
     }
 
     #[test]
@@ -578,5 +861,124 @@ mod tests {
         let missing = unique_workspace("missing");
         let err = canonical_workspace_root(&missing).expect_err("missing dir should fail");
         assert!(err.contains("cannot resolve workspace root"));
+    }
+
+    #[test]
+    fn local_capability_wrapper_preserves_normalized_claims_and_conflict_semantics() {
+        let workspace = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let read_tool = read_file::ReadFileTool::new(workspace.clone());
+        let write_tool = write_file::WriteFileTool::new(workspace);
+
+        let read_capability = LocalToolCapability::from_tool(&read_tool);
+        let write_capability = LocalToolCapability::from_tool(&write_tool);
+
+        let normalized_read = read_capability.claims(&CapabilityInput::new(json!({
+            "path": "src/main.rs"
+        })));
+        let dot_prefixed_read = read_capability.claims(&CapabilityInput::new(json!({
+            "path": "./src/main.rs"
+        })));
+        let normalized_write = write_capability.claims(&CapabilityInput::new(json!({
+            "path": "src/main.rs"
+        })));
+
+        assert_eq!(normalized_read, dot_prefixed_read);
+        assert_eq!(
+            ConflictPolicy::from_claims(&normalized_read, &normalized_write),
+            ConflictPolicy::Conflicting
+        );
+    }
+
+    #[test]
+    fn local_capability_wrapper_preserves_local_tool_validation_behavior() {
+        let workspace = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let read_tool = read_file::ReadFileTool::new(workspace.clone());
+        let write_tool = write_file::WriteFileTool::new(workspace);
+
+        let read_capability = LocalToolCapability::from_tool(&read_tool);
+        let write_capability = LocalToolCapability::from_tool(&write_tool);
+
+        let read_args = json!({ "path": "../secret" });
+        let direct_read = read_tool.execute(read_args.clone());
+        let wrapped_read = read_capability.execute(CapabilityInput::new(read_args));
+        assert_eq!(wrapped_read.text_output(), direct_read.text_output());
+        assert_eq!(wrapped_read.is_error, direct_read.is_error);
+
+        let write_args = json!({ "path": "../secret", "content": "nope" });
+        let direct_write = write_tool.execute(write_args.clone());
+        let wrapped_write = write_capability.execute(CapabilityInput::new(write_args));
+        assert_eq!(wrapped_write.text_output(), direct_write.text_output());
+        assert_eq!(wrapped_write.is_error, direct_write.is_error);
+    }
+
+    #[test]
+    fn tool_registry_routes_wrapper_path_by_tool_kind_policy() {
+        struct RoutingProbeTool {
+            name: &'static str,
+            kind: ToolKind,
+        }
+
+        impl Tool for RoutingProbeTool {
+            fn spec(&self) -> ToolSpec {
+                ToolSpec {
+                    name: self.name.into(),
+                    description: "routing probe".into(),
+                    parameters: json!({
+                        "type": "object",
+                        "properties": {},
+                        "additionalProperties": false
+                    }),
+                }
+            }
+
+            fn kind(&self) -> ToolKind {
+                self.kind
+            }
+
+            fn execute(&self, _args: Value) -> ToolResult {
+                ToolResult {
+                    content: Vec::new(),
+                    exit_code: None,
+                    is_error: true,
+                    output_truncated: false,
+                }
+            }
+        }
+
+        let mut registry = ToolRegistry::new(PathBuf::from(env!("CARGO_MANIFEST_DIR")));
+        registry.register(Box::new(RoutingProbeTool {
+            name: "local-probe",
+            kind: ToolKind::Local,
+        }));
+        registry.register(Box::new(RoutingProbeTool {
+            name: "delegate-probe",
+            kind: ToolKind::Agent { is_acp: false },
+        }));
+        registry.register(Box::new(RoutingProbeTool {
+            name: "acp-probe",
+            kind: ToolKind::Agent { is_acp: true },
+        }));
+
+        let local = registry
+            .execute("local-probe", json!({}))
+            .expect("local probe should execute");
+        let delegated = registry
+            .execute("delegate-probe", json!({}))
+            .expect("delegate probe should execute");
+        let acp = registry
+            .execute("acp-probe", json!({}))
+            .expect("acp probe should execute");
+
+        let wrapped_projection = vec![ContentPart::Text {
+            text: String::new(),
+        }];
+        assert_eq!(local.content, wrapped_projection);
+        assert_eq!(
+            delegated.content,
+            vec![ContentPart::Text {
+                text: String::new(),
+            }]
+        );
+        assert!(acp.content.is_empty());
     }
 }
