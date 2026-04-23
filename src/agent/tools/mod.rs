@@ -9,10 +9,11 @@ use serde_json::Value;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
+use crate::agent::capability::acp::AcpToolCapability;
 use crate::agent::capability::local::LocalToolCapability;
 use crate::agent::capability::{
-    CapabilityAccess, CapabilityClaim, CapabilityContentPart, CapabilityError, CapabilityInput,
-    CapabilityKind, CapabilityResult,
+    CapabilityAccess, CapabilityClaim, CapabilityContentPart, CapabilityError, CapabilityHandle,
+    CapabilityInput, CapabilityKind, CapabilityResult,
 };
 
 /// Declarative metadata advertised to the model for each callable tool.
@@ -320,6 +321,17 @@ impl ToolRegistry {
         self.tools.iter().map(|tool| tool.spec()).collect()
     }
 
+    pub fn capability_handle(&self, name: &str) -> Option<CapabilityHandle> {
+        let tool = self.get(name)?;
+        if should_use_local_capability_wrapper(tool.kind()) {
+            Some(LocalToolCapability::from_tool(tool).handle())
+        } else if should_use_acp_capability_wrapper(tool.kind()) {
+            Some(AcpToolCapability::from_tool(tool).handle())
+        } else {
+            Some(CapabilityHandle::new(tool.spec().name, tool.kind().into()))
+        }
+    }
+
     pub fn resource_claims(&self, name: &str, args: &Value) -> Vec<ResourceClaim> {
         let Some(tool) = self.get(name) else {
             return Vec::new();
@@ -328,6 +340,13 @@ impl ToolRegistry {
         if should_use_local_capability_wrapper(tool.kind()) {
             let capability = LocalToolCapability::from_tool(tool);
             capability.resource_claims(&CapabilityInput::new(args.clone()))
+        } else if should_use_acp_capability_wrapper(tool.kind()) {
+            let capability = AcpToolCapability::from_tool(tool);
+            capability
+                .claims(&CapabilityInput::new(args.clone()))
+                .into_iter()
+                .map(Into::into)
+                .collect()
         } else {
             tool.resource_claims(args)
         }
@@ -341,6 +360,10 @@ impl ToolRegistry {
                     let capability = LocalToolCapability::from_tool(tool);
                     let result = capability.execute(CapabilityInput::new(args));
                     Ok(ToolResult::from_capability_result(result))
+                } else if should_use_acp_capability_wrapper(tool.kind()) {
+                    let capability = AcpToolCapability::from_tool(tool);
+                    let result = capability.execute(CapabilityInput::new(args));
+                    Ok(ToolResult::from_capability_result(result))
                 } else {
                     Ok(tool.execute(args))
                 }
@@ -351,10 +374,13 @@ impl ToolRegistry {
 }
 
 fn should_use_local_capability_wrapper(kind: ToolKind) -> bool {
-    // Keep local capability wrappers on built-in local tooling (including
-    // delegated non-ACP agent turns), while ACP-backed agents stay on the
-    // protocol adapter path.
+    // Keep local capability wrappers on built-in local tooling and delegated
+    // non-ACP agent turns.
     matches!(kind, ToolKind::Local | ToolKind::Agent { is_acp: false })
+}
+
+fn should_use_acp_capability_wrapper(kind: ToolKind) -> bool {
+    matches!(kind, ToolKind::Agent { is_acp: true })
 }
 
 /// Validates a user-provided path is workspace-relative and traversal-safe.
@@ -497,8 +523,8 @@ mod tests {
     use super::*;
     use crate::agent::capability::local::LocalToolCapability;
     use crate::agent::capability::{
-        CapabilityAccess, CapabilityClaim, CapabilityError, CapabilityInput, CapabilityKind,
-        CapabilityResult, ConflictPolicy,
+        CapabilityAccess, CapabilityClaim, CapabilityError, CapabilityHandle, CapabilityInput,
+        CapabilityKind, CapabilityResult, ConflictPolicy,
     };
     use crate::provider::echo::EchoProvider;
     use serde_json::json;
@@ -973,12 +999,23 @@ mod tests {
             text: String::new(),
         }];
         assert_eq!(local.content, wrapped_projection);
+        assert_eq!(delegated.content, wrapped_projection);
+        assert_eq!(acp.content, wrapped_projection);
+    }
+
+    #[test]
+    fn tool_registry_exposes_capability_handle_for_registered_tool() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let mut registry = ToolRegistry::new(root);
+        registry.register(Box::new(EchoTool));
+
         assert_eq!(
-            delegated.content,
-            vec![ContentPart::Text {
-                text: String::new(),
-            }]
+            registry.capability_handle("echo"),
+            Some(CapabilityHandle {
+                name: "echo".into(),
+                kind: CapabilityKind::Local,
+            })
         );
-        assert!(acp.content.is_empty());
+        assert!(registry.capability_handle("missing").is_none());
     }
 }

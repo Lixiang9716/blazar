@@ -1,5 +1,5 @@
 use crate::agent::capability::{
-    CapabilityClaim, CapabilityInput, CapabilityKind, CapabilityResult,
+    CapabilityClaim, CapabilityHandle, CapabilityInput, CapabilityKind, CapabilityResult,
 };
 use crate::agent::tools::{ResourceClaim, Tool};
 
@@ -14,6 +14,10 @@ impl<'a> LocalToolCapability<'a> {
 
     pub fn kind(&self) -> CapabilityKind {
         self.tool.kind().into()
+    }
+
+    pub fn handle(&self) -> CapabilityHandle {
+        CapabilityHandle::new(self.tool.spec().name, self.kind())
     }
 
     pub fn claims(&self, input: &CapabilityInput) -> Vec<CapabilityClaim> {
@@ -81,6 +85,14 @@ mod tests {
     fn local_wrapper_projects_claims_and_results_to_capability_contracts() {
         let wrapper = LocalToolCapability::from_tool(&FakeLocalTool);
         let input = CapabilityInput::new(json!({"path":"src/main.rs", "text":"done"}));
+
+        assert_eq!(
+            wrapper.handle(),
+            CapabilityHandle {
+                name: "fake".into(),
+                kind: CapabilityKind::Local,
+            }
+        );
 
         assert_eq!(wrapper.kind(), CapabilityKind::Local);
         assert_eq!(

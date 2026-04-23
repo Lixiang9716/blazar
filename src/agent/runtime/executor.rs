@@ -4,7 +4,9 @@ use std::sync::mpsc;
 
 use log::warn;
 
-use crate::agent::capability::{CapabilityContentPart, CapabilityInput, CapabilityResult};
+use crate::agent::capability::{
+    CapabilityContentPart, CapabilityInput, CapabilityKind, CapabilityResult,
+};
 use crate::agent::tools::{ToolKind, ToolRegistry};
 
 use super::JSON_REPAIR_NOTE;
@@ -119,8 +121,11 @@ fn execute_capability_call(
 }
 
 fn tool_kind_for_name(tools: &ToolRegistry, tool_name: &str) -> ToolKind {
-    match tools.get(tool_name) {
-        Some(tool) => tool.kind(),
+    match tools.capability_handle(tool_name) {
+        Some(handle) => match handle.kind {
+            CapabilityKind::Local => ToolKind::Local,
+            CapabilityKind::Agent { is_acp } => ToolKind::Agent { is_acp },
+        },
         None => {
             warn!("runtime: missing tool metadata for {tool_name}; defaulting ToolKind::Local");
             ToolKind::Local

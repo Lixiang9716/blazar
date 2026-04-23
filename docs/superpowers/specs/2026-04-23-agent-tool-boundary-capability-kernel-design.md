@@ -48,7 +48,7 @@ Defines shared execution contracts:
 - `CapabilityInput`
 - `CapabilityResult`
 - `CapabilityError`
-- `ResourceClaim`
+- `CapabilityClaim` (tool-facade compatibility keeps `ResourceClaim`)
 - `ConflictPolicy`
 
 Both local tools and ACP-backed agent tools implement capability semantics through this layer.
@@ -89,6 +89,10 @@ No runtime state ownership belongs here.
 ### Migration rule
 
 Each step must remain buildable and testable. Introduce forwarding layers first, then move implementations behind them.
+
+Alignment status (2026-04-23):
+- `CapabilityHandle` is implemented in capability contracts.
+- `src/agent/capability/acp/` is implemented for ACP capability bridging.
 
 ## Data Flow and Parallel Safety
 
@@ -171,4 +175,3 @@ Downstream text paths must preserve resource summaries (not drop them), so non-t
 - No big-bang UI rewrite in this sub-project.
 - No replacement of Blazar-owned state with widget/adaptor-owned state.
 - No protocol-generalization that delays ACP-first deliverability.
-

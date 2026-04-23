@@ -13,10 +13,25 @@ impl CapabilityInput {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CapabilityKind {
     Local,
     Agent { is_acp: bool },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct CapabilityHandle {
+    pub name: String,
+    pub kind: CapabilityKind,
+}
+
+impl CapabilityHandle {
+    pub fn new(name: impl Into<String>, kind: CapabilityKind) -> Self {
+        Self {
+            name: name.into(),
+            kind,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -310,6 +325,18 @@ mod tests {
 
         let coded = CapabilityError::with_code("ACP_TIMEOUT", "timed out");
         assert_eq!(coded.to_string(), "ACP_TIMEOUT: timed out");
+    }
+
+    #[test]
+    fn capability_handle_captures_identity_and_kind() {
+        let handle = CapabilityHandle::new("read_file", CapabilityKind::Local);
+        assert_eq!(
+            handle,
+            CapabilityHandle {
+                name: "read_file".into(),
+                kind: CapabilityKind::Local,
+            }
+        );
     }
 
     #[test]
