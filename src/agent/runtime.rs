@@ -386,7 +386,7 @@ fn run_turn_with_retry(
                 }
             }
             TurnOutcome::FatalError { kind, error } => {
-                let message = format!("runtime: turn {turn_id} fatal error: {error}");
+                let message = format!("runtime: turn {turn_id} fatal error (details redacted)");
                 warn!("{message} ({kind:?})");
                 let error_kind = format!("{kind:?}");
                 emit_structured_event(

@@ -938,6 +938,63 @@ fn tool_events_log_include_turn_and_tool_name() {
 }
 
 #[test]
+fn tool_call_completed_logs_include_turn_and_resolved_tool_name() {
+    crate::observability::logging::clear_captured_structured_events_for_test();
+    let mut app = new_test_app();
+
+    app.apply_agent_event_for_test(AgentEvent::TurnStarted {
+        turn_id: "turn-tool-complete".into(),
+    });
+    app.apply_agent_event_for_test(AgentEvent::ToolCallStarted {
+        call_id: "call-complete-log".into(),
+        tool_name: "bash".into(),
+        kind: crate::agent::tools::ToolKind::Local,
+        arguments: r#"{"command":"echo hi"}"#.into(),
+        batch_id: 0,
+        replay_index: 0,
+        normalized_claims: Vec::new(),
+    });
+    app.apply_agent_event_for_test(AgentEvent::ToolCallCompleted {
+        call_id: "call-complete-log".into(),
+        output: "ok".into(),
+        is_error: false,
+    });
+
+    let tool_completed =
+        crate::observability::logging::take_captured_structured_events_for_test()
+            .into_iter()
+            .filter_map(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+            .find(|event| {
+                event
+                    .get("event")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("tool_call_completed")
+                    && event
+                        .get("turn_id")
+                        .and_then(serde_json::Value::as_str)
+                        == Some("turn-tool-complete")
+                    && event
+                        .get("tool_name")
+                        .and_then(serde_json::Value::as_str)
+                        == Some("bash")
+            })
+            .expect("expected structured tool_call_completed event with turn_id+tool_name");
+
+    assert_eq!(
+        tool_completed
+            .get("turn_id")
+            .and_then(serde_json::Value::as_str),
+        Some("turn-tool-complete"),
+    );
+    assert_eq!(
+        tool_completed
+            .get("tool_name")
+            .and_then(serde_json::Value::as_str),
+        Some("bash"),
+    );
+}
+
+#[test]
 fn picker_commands_context_supports_non_slash_labels() {
     use crate::chat::picker::{ModalPicker, PickerContext, PickerItem};
 

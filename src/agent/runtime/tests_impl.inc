@@ -1002,8 +1002,15 @@ fn runtime_failure_logs_include_turn_and_error_kind_fields() {
         structured_failure
             .get("message")
             .and_then(serde_json::Value::as_str)
-            .is_some_and(|message| message.contains("invalid API key")),
-        "runtime failure log message should include provider error detail for auditability"
+            .is_some_and(|message| message.contains("details redacted")),
+        "runtime failure log message should use redacted wording"
+    );
+    assert!(
+        structured_failure
+            .get("message")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|message| !message.contains("invalid API key")),
+        "runtime failure structured message should not expose raw provider error text"
     );
     assert!(
         structured_failure
