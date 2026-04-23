@@ -1,5 +1,8 @@
 use super::run_adapter_conformance_suite;
+use super::AgentAdapterContractProbe;
 use crate::agent::adapters::acp_client::AcpAdapterContractProbe;
+use std::cell::Cell;
+use std::rc::Rc;
 
 #[test]
 fn acp_adapter_satisfies_generic_agent_adapter_contract() {
@@ -7,5 +10,55 @@ fn acp_adapter_satisfies_generic_agent_adapter_contract() {
     assert!(
         report.all_passed(),
         "ACP adapter must satisfy generic contract"
+    );
+}
+
+#[derive(Clone)]
+struct FetchFailureProbe {
+    create_run_calls: Rc<Cell<usize>>,
+    poll_terminal_calls: Rc<Cell<usize>>,
+}
+
+impl AgentAdapterContractProbe for FetchFailureProbe {
+    fn fetch_agent(&self) -> Result<(), String> {
+        Err("agent metadata endpoint unavailable".into())
+    }
+
+    fn create_run(&self) -> Result<(), String> {
+        self.create_run_calls.set(self.create_run_calls.get() + 1);
+        Ok(())
+    }
+
+    fn poll_terminal(&self) -> Result<(), String> {
+        self.poll_terminal_calls
+            .set(self.poll_terminal_calls.get() + 1);
+        Ok(())
+    }
+}
+
+#[test]
+fn conformance_suite_skips_dependent_checks_when_fetch_fails() {
+    let create_run_calls = Rc::new(Cell::new(0));
+    let poll_terminal_calls = Rc::new(Cell::new(0));
+    let probe = FetchFailureProbe {
+        create_run_calls: Rc::clone(&create_run_calls),
+        poll_terminal_calls: Rc::clone(&poll_terminal_calls),
+    };
+
+    let report = run_adapter_conformance_suite(probe);
+
+    assert_eq!(
+        report.failures,
+        vec!["fetch_agent: agent metadata endpoint unavailable".to_string()]
+    );
+    assert_eq!(
+        create_run_calls.get(),
+        0,
+        "create_run should be skipped after fetch_agent failure"
+    );
+    assert_eq!(
+        poll_terminal_calls.get(),
+        0,
+        "poll_terminal should be skipped after fetch_agent failure"
     );
 }
