@@ -13,7 +13,7 @@ async fn execute_plan_command_sets_composer_prefill() {
         .await
         .expect("plan command should execute");
 
-    assert_eq!(app.composer_text(), "/plan");
+    assert_eq!(app.composer_text(), "/plan ");
 }
 
 #[tokio::test]
