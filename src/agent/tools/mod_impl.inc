@@ -2,9 +2,12 @@ pub mod acp;
 pub mod agent;
 pub mod bash;
 pub mod list_dir;
+pub mod policy;
 pub mod read_file;
 pub mod vet;
 pub mod write_file;
+
+pub use policy::ToolCompatibilityTier;
 
 use serde_json::Value;
 use std::fs;
@@ -274,6 +277,9 @@ pub trait Tool: Send + Sync {
     fn kind(&self) -> ToolKind {
         ToolKind::Local
     }
+    fn compatibility_tier(&self) -> ToolCompatibilityTier {
+        ToolCompatibilityTier::KernelNative
+    }
     fn resource_claims(&self, _args: &Value) -> Vec<ResourceClaim> {
         Vec::new()
     }
@@ -315,6 +321,12 @@ impl ToolRegistry {
 
     pub fn contains_name(&self, name: &str) -> bool {
         self.get(name).is_some()
+    }
+
+    pub fn compatibility_tier(&self, name: &str) -> Option<ToolCompatibilityTier> {
+        self.get(name)
+            .map(|tool| tool.compatibility_tier())
+            .or_else(|| policy::compatibility_tier_for_name(name))
     }
 
     /// Returns the public specs for all registered tools.

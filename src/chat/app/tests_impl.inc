@@ -1,4 +1,5 @@
 use super::*;
+use crate::agent::tools::{ToolCompatibilityTier, ToolRegistry};
 use crate::chat::view::render_to_lines_for_test;
 use crate::provider::{LlmProvider, ProviderEvent, ProviderMessage};
 use std::path::PathBuf;
@@ -98,6 +99,15 @@ const TEST_WAIT_TIMEOUT: Duration = Duration::from_secs(2);
 
 fn new_test_app() -> ChatApp {
     ChatApp::new_for_test(env!("CARGO_MANIFEST_DIR")).expect("test app should initialize")
+}
+
+#[test]
+fn chat_runtime_tool_registry_reports_bridge_compatibility_tier_for_bash() {
+    let registry = ToolRegistry::new(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")));
+    assert_eq!(
+        registry.compatibility_tier("bash"),
+        Some(ToolCompatibilityTier::CompatibilityBridge)
+    );
 }
 
 fn wait_until(timeout: Duration, mut condition: impl FnMut() -> bool) -> bool {

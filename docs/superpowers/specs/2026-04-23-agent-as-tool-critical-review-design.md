@@ -130,3 +130,13 @@ before major new capability expansion.
 - Replacing the current architecture direction.
 - Immediate implementation planning details.
 - UI redesign beyond observability needs.
+
+---
+
+## 7. Implementation Status (2026-04-23)
+
+- ✅ Task 4 complete: Tool facade governance now includes compatibility-tier metadata.
+- Added `ToolCompatibilityTier` with `KernelNative` and `CompatibilityBridge`.
+- `Tool` trait now defaults to `KernelNative` via `compatibility_tier()`.
+- `ToolRegistry` now exposes `compatibility_tier(name)` for governance introspection.
+- `bash` is explicitly tagged `CompatibilityBridge` under current architecture.

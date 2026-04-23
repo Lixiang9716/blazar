@@ -1,5 +1,7 @@
 use super::*;
-use crate::agent::tools::{ResourceAccess, ResourceClaim, Tool, ToolKind, ToolSpec};
+use crate::agent::tools::{
+    ResourceAccess, ResourceClaim, Tool, ToolCompatibilityTier, ToolKind, ToolSpec,
+};
 use httpmock::prelude::*;
 use serde_json::json;
 use std::error::Error;
@@ -10,6 +12,13 @@ use std::time::{Duration, Instant};
 
 fn empty_registry() -> ToolRegistry {
     ToolRegistry::new(PathBuf::from(env!("CARGO_MANIFEST_DIR")))
+}
+
+#[test]
+fn tool_registry_exposes_compatibility_tier_for_each_tool() {
+    let registry = ToolRegistry::new(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")));
+    let tier = registry.compatibility_tier("bash");
+    assert_eq!(tier, Some(ToolCompatibilityTier::CompatibilityBridge));
 }
 
 fn wait_until(timeout: Duration, mut condition: impl FnMut() -> bool) -> bool {

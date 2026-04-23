@@ -1,4 +1,6 @@
-use super::{ContentPart, ResourceAccess, ResourceClaim, Tool, ToolResult, ToolSpec};
+use super::{
+    ContentPart, ResourceAccess, ResourceClaim, Tool, ToolCompatibilityTier, ToolResult, ToolSpec,
+};
 use nix::errno::Errno;
 use nix::libc;
 use nix::sys::signal::{Signal, killpg};
@@ -141,6 +143,10 @@ where
             resource: "process:bash".into(),
             access: ResourceAccess::Exclusive,
         }]
+    }
+
+    fn compatibility_tier(&self) -> ToolCompatibilityTier {
+        ToolCompatibilityTier::CompatibilityBridge
     }
 
     fn execute(&self, args: Value) -> ToolResult {
