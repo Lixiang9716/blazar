@@ -18,9 +18,13 @@ pub(super) fn marker_style_for(entry: &TimelineEntry, theme: &ChatTheme) -> Styl
 /// Extract a short subtitle from tool-call arguments (stored in `details`).
 /// Shows the most useful field — file path for read/write, command for bash.
 pub(super) fn extract_tool_subtitle(tool_name: &str, details: &str) -> String {
+    if details.trim().is_empty() {
+        return String::new();
+    }
+
     let val: serde_json::Value = match serde_json::from_str(details) {
         Ok(v) => v,
-        Err(_) => return String::new(),
+        Err(_) => return "invalid args".to_owned(),
     };
 
     let key = match tool_name {

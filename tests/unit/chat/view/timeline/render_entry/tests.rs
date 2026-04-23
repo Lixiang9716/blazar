@@ -385,10 +385,95 @@ fn extract_tool_subtitle_handles_known_keys_fallbacks_and_truncation() {
         extract_tool_subtitle("unknown", r#"{"file":"src/lib.rs"}"#),
         "src/lib.rs"
     );
-    assert_eq!(extract_tool_subtitle("unknown", "{bad json"), "");
+    assert_eq!(
+        extract_tool_subtitle("unknown", "{bad json"),
+        "invalid args"
+    );
 
     let long = "x".repeat(90);
     let subtitle = extract_tool_subtitle("read_file", &format!(r#"{{"path":"{long}"}}"#));
     assert!(subtitle.ends_with('…'));
     assert_eq!(subtitle.chars().count(), 78);
+}
+
+#[test]
+fn tool_descriptor_uses_full_details_for_two_line_preview() {
+    let entry = TimelineEntry::tool_call(
+        "c-preview-details",
+        "bash",
+        ToolKind::Local,
+        "summary only",
+        "line-1\nline-2\nline-3\n\nbatch_id=1 replay_index=0 normalized_claims=<none>",
+        ToolCallStatus::Success,
+    );
+
+    let descriptor = super::tooling::tool_descriptor(&entry).unwrap();
+
+    assert_eq!(
+        descriptor.preview_lines,
+        vec!["line-1".to_string(), "line-2".to_string()]
+    );
+}
+
+#[test]
+fn tool_descriptor_infers_mode_from_full_details_when_summary_is_plain() {
+    use super::tooling::descriptor::ResultMode;
+
+    let diff_entry = TimelineEntry::tool_call(
+        "c-diff-details",
+        "bash",
+        ToolKind::Local,
+        "summary only",
+        "diff --git a/src/main.rs b/src/main.rs\n@@ -1 +1 @@\n-old\n+new\n\nbatch_id=1 replay_index=0 normalized_claims=<none>",
+        ToolCallStatus::Success,
+    );
+    let markdown_entry = TimelineEntry::tool_call(
+        "c-md-details",
+        "bash",
+        ToolKind::Local,
+        "summary only",
+        "# Title\n- item\n\nbatch_id=1 replay_index=0 normalized_claims=<none>",
+        ToolCallStatus::Success,
+    );
+    let code_entry = TimelineEntry::tool_call(
+        "c-code-details",
+        "bash",
+        ToolKind::Local,
+        "summary only",
+        "```rust\nfn main() {}\n```\n\nbatch_id=1 replay_index=0 normalized_claims=<none>",
+        ToolCallStatus::Success,
+    );
+    let plain_entry = TimelineEntry::tool_call(
+        "c-plain-details",
+        "bash",
+        ToolKind::Local,
+        "summary only",
+        "plain result text\nnext line\n\nbatch_id=1 replay_index=0 normalized_claims=<none>",
+        ToolCallStatus::Success,
+    );
+
+    assert_eq!(
+        super::tooling::tool_descriptor(&diff_entry)
+            .unwrap()
+            .result_mode,
+        ResultMode::Diff
+    );
+    assert_eq!(
+        super::tooling::tool_descriptor(&markdown_entry)
+            .unwrap()
+            .result_mode,
+        ResultMode::Markdown
+    );
+    assert_eq!(
+        super::tooling::tool_descriptor(&code_entry)
+            .unwrap()
+            .result_mode,
+        ResultMode::Code
+    );
+    assert_eq!(
+        super::tooling::tool_descriptor(&plain_entry)
+            .unwrap()
+            .result_mode,
+        ResultMode::Plain
+    );
 }

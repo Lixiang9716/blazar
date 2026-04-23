@@ -2,6 +2,7 @@
 
 use super::super::common::extract_tool_subtitle;
 use crate::chat::model::{EntryKind, TimelineEntry, ToolCallStatus};
+use std::borrow::Cow;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum StatusVisual {
@@ -53,16 +54,44 @@ pub(crate) fn tool_descriptor(entry: &TimelineEntry) -> Option<EntryDescriptor> 
         ToolCallStatus::Error => StatusVisual::ErrorX,
     };
 
+    let preview_source = preview_source_text(status, entry);
     let subtitle = extract_tool_subtitle(tool_name, &entry.details);
 
     Some(EntryDescriptor {
         status_visual,
         title: tool_name.clone(),
         subtitle: (!subtitle.is_empty()).then_some(subtitle),
-        preview_lines: build_preview_lines(&entry.body),
-        result_mode: infer_result_mode(tool_name, &entry.body),
+        preview_lines: build_preview_lines(preview_source.as_ref()),
+        result_mode: infer_result_mode(tool_name, preview_source.as_ref()),
         call_identity: Some(call_id.clone()),
     })
+}
+
+fn preview_source_text<'a>(status: &ToolCallStatus, entry: &'a TimelineEntry) -> Cow<'a, str> {
+    if !matches!(status, ToolCallStatus::Running)
+        && let Some(full_output) = completed_output_text(&entry.details)
+    {
+        return Cow::Owned(full_output);
+    }
+
+    Cow::Borrowed(&entry.body)
+}
+
+fn completed_output_text(details: &str) -> Option<String> {
+    let mut lines: Vec<&str> = details.lines().collect();
+    if !matches!(lines.last(), Some(line) if is_tool_metadata_line(line)) {
+        return None;
+    }
+
+    lines.pop();
+    let content = lines.join("\n").trim().to_owned();
+    (!content.is_empty()).then_some(content)
+}
+
+fn is_tool_metadata_line(line: &str) -> bool {
+    line.starts_with("batch_id=")
+        && line.contains(" replay_index=")
+        && line.contains(" normalized_claims=")
 }
 
 fn build_preview_lines(text: &str) -> Vec<String> {
