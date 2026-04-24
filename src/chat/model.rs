@@ -26,6 +26,7 @@ pub enum EntryKind {
     Message,
     Warning,
     Hint,
+    Banner,
     ToolUse {
         tool: String,
         target: String,

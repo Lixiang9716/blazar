@@ -1,6 +1,27 @@
 use super::*;
 
 #[test]
+fn timeline_renders_banner_and_thinking_entries() {
+    let mut app = crate::chat::app::ChatApp::new_for_test(env!("CARGO_MANIFEST_DIR"))
+        .expect("app should initialize");
+    app.send_message("hello");
+    app.apply_agent_event_for_test(crate::agent::protocol::AgentEvent::ThinkingDelta {
+        text: "reasoning".into(),
+    });
+
+    let lines = crate::chat::view::render_to_lines_for_test(&mut app, 100, 28);
+    let text = lines.join("\n");
+    assert!(
+        text.contains("Describe a task to get started."),
+        "banner text should render as a timeline entry"
+    );
+    assert!(
+        text.contains("reasoning"),
+        "thinking text should render as a timeline entry"
+    );
+}
+
+#[test]
 fn split_code_fences_no_code() {
     let segments = split_code_fences("Hello world\nSecond line");
     assert_eq!(segments.len(), 1);

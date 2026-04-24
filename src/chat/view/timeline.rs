@@ -45,7 +45,10 @@ pub(super) fn render_timeline(frame: &mut Frame, area: Rect, app: &ChatApp, them
     let mut assistant_turn = 0u16;
 
     for entry in app.timeline() {
-        if entry.kind == EntryKind::Thinking {
+        if entry.kind == EntryKind::Banner && !app.has_user_sent() {
+            continue;
+        }
+        if entry.kind == EntryKind::Thinking && !app.has_user_sent() {
             continue;
         }
 
@@ -80,7 +83,11 @@ pub(super) fn render_timeline(frame: &mut Frame, area: Rect, app: &ChatApp, them
         }
         // Tool/thinking/etc entries stay within the current assistant turn
 
-        let entry_lines = render_entry(entry, theme, content_width);
+        let entry_lines = if entry.kind == EntryKind::Thinking {
+            render_thinking_entry(entry, theme, content_width)
+        } else {
+            render_entry(entry, theme, content_width)
+        };
         lines.extend(entry_lines);
 
         // Show expanded details when Ctrl+O is toggled
@@ -149,4 +156,26 @@ pub(super) fn render_timeline(frame: &mut Frame, area: Rect, app: &ChatApp, them
     let paragraph = paragraph.scroll((scroll_offset, 0));
 
     frame.render_widget(paragraph, area);
+}
+
+fn render_thinking_entry<'a>(
+    entry: &TimelineEntry,
+    theme: &ChatTheme,
+    width: u16,
+) -> Vec<Line<'a>> {
+    let mut lines = Vec::new();
+    if entry.body.trim().is_empty() {
+        return lines;
+    }
+
+    for (i, body_line) in entry.body.lines().enumerate() {
+        let prefix = if i == 0 {
+            vec![Span::raw(MARGIN), Span::styled("… ", theme.marker_thinking)]
+        } else {
+            vec![Span::raw(INDENT)]
+        };
+        push_wrapped_lines(&mut lines, body_line, theme.dim_text, prefix, width);
+    }
+
+    lines
 }

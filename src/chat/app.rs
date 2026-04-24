@@ -95,9 +95,16 @@ impl ChatApp {
         let timeline = if std::env::var("BLAZAR_DEMO").is_ok() {
             crate::chat::demo::demo_timeline()
         } else {
-            vec![TimelineEntry::response(
-                "Tell me what you'd like to explore.",
-            )]
+            vec![
+                TimelineEntry {
+                    actor: Actor::System,
+                    kind: EntryKind::Banner,
+                    title: Some("Welcome".to_owned()),
+                    body: "Describe a task to get started.".to_owned(),
+                    details: String::new(),
+                },
+                TimelineEntry::response("Tell me what you'd like to explore."),
+            ]
         };
 
         let theme = crate::chat::theme::build_theme();

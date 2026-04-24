@@ -30,6 +30,7 @@ pub(super) fn render_entry<'a>(
 
     match &entry.kind {
         EntryKind::Message => message::render_message_entry(entry, theme, width, marker_style),
+        EntryKind::Banner => message::render_message_entry(entry, theme, width, marker_style),
         EntryKind::ToolUse { .. } => tooling::render_tool_use_entry(entry, theme, marker_style),
         EntryKind::ToolCall { .. } => tooling::render_tool_call_entry(entry, theme, marker_style),
         EntryKind::Bash { .. } => tooling::render_bash_entry(entry, theme, width, marker_style),
