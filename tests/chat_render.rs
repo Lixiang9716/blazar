@@ -54,7 +54,6 @@ fn chat_view_renders_status_input_mode_rows_in_users_region() {
     );
 }
 
-
 #[test]
 fn chat_view_keeps_mode_row_render_path_in_tight_heights() {
     let mut app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
