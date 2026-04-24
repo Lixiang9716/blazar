@@ -6,7 +6,7 @@ use ratatui_core::{
     text::{Line, Span},
 };
 use ratatui_widgets::paragraph::Paragraph;
-use unicode_width::UnicodeWidthStr;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::chat::users_state::UserMode;
 
@@ -55,11 +55,7 @@ pub(super) fn render_users_status_row(
 
     // Truncate left side if total exceeds available width
     let max_left = available.saturating_sub(right_len + 1);
-    let left_display = if left.width() > max_left {
-        format!("{}…", &left[..max_left.saturating_sub(1)])
-    } else {
-        left
-    };
+    let left_display = truncate_left_status_text(&left, max_left);
 
     let gap = available.saturating_sub(left_display.width() + right_len);
 
@@ -71,6 +67,31 @@ pub(super) fn render_users_status_row(
 
     let bar = Paragraph::new(line).style(theme.status_bar);
     frame.render_widget(bar, area);
+}
+
+fn truncate_left_status_text(text: &str, max_width: usize) -> String {
+    if max_width == 0 {
+        return String::new();
+    }
+    if text.width() <= max_width {
+        return text.to_owned();
+    }
+    if max_width == 1 {
+        return "…".to_owned();
+    }
+
+    let mut out = String::new();
+    let mut used = 0usize;
+    for ch in text.chars() {
+        let width = ch.width().unwrap_or(0);
+        if used + width > max_width.saturating_sub(1) {
+            break;
+        }
+        out.push(ch);
+        used += width;
+    }
+    out.push('…');
+    out
 }
 
 pub(super) fn render_mode_config_row(
@@ -109,4 +130,24 @@ pub(super) fn render_mode_config_row(
 
     let bar = Paragraph::new(line).style(theme.status_bar);
     frame.render_widget(bar, area);
+}
+
+#[cfg(test)]
+mod tests {
+    use unicode_width::UnicodeWidthStr;
+
+    #[test]
+    fn truncate_status_text_handles_multibyte_chars_without_panicking() {
+        let original = "状态状态状态";
+        let truncated = super::truncate_left_status_text(original, 5);
+        assert_eq!(truncated, "状态…");
+        assert_eq!(truncated.width(), 5);
+    }
+
+    #[test]
+    fn truncate_status_text_returns_original_when_it_fits() {
+        let original = "blazar";
+        let truncated = super::truncate_left_status_text(original, 10);
+        assert_eq!(truncated, "blazar");
+    }
 }
