@@ -1166,6 +1166,11 @@ fn status_label_transitions_across_action_states() {
     });
     assert_eq!(app.status_label(), "thinking");
 
+    app.apply_agent_event_for_test(AgentEvent::ThinkingDelta {
+        text: "next_step_name: explore\nI will inspect the parser flow.".into(),
+    });
+    assert_eq!(app.status_label(), "explore");
+
     app.apply_agent_event_for_test(AgentEvent::ToolCallStarted {
         call_id: "call-1".into(),
         tool_name: "bash".into(),
@@ -1182,7 +1187,7 @@ fn status_label_transitions_across_action_states() {
         output: "done".into(),
         is_error: false,
     });
-    assert_eq!(app.status_label(), "thinking");
+    assert_eq!(app.status_label(), "explore");
 
     app.apply_agent_event_for_test(AgentEvent::TurnFailed {
         kind: crate::agent::runtime::RuntimeErrorKind::ProviderTransient,
