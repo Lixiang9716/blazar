@@ -45,6 +45,11 @@ pub(super) struct ScheduledCall<T> {
     pub(super) claims: Vec<CapabilityClaim>,
 }
 
+struct ToolArgsFailureDetail {
+    category: &'static str,
+    detail: String,
+}
+
 pub(super) fn plan_tool_call<F>(
     tools: &ToolRegistry,
     pending: PendingToolCall,
@@ -71,6 +76,7 @@ where
         }
         Err(error) => {
             let primary_error_category = parse_error_category(&error);
+            let mut correction_failure: Option<ToolArgsFailureDetail> = None;
 
             if pending.name == "bash"
                 && let Some((repaired, repair_kind)) = repair_bash_arguments(&cleaned_args)
@@ -103,28 +109,35 @@ where
                 {
                     match parse_json_strict(&corrected) {
                         Ok(value) => {
-                            if validate_fim_corrected_args(tools, &pending.name, &value).is_ok() {
-                                emit_tool_args_fim_correction_succeeded(
-                                    &pending.call_id,
-                                    &pending.name,
-                                    primary_error_category,
-                                );
-                                consecutive_failures.remove(&fail_key);
-                                return schedule_parsed_call(
-                                    tools,
-                                    pending,
-                                    value,
-                                    true,
-                                    &corrected,
-                                    previous_pass_successes,
-                                );
+                            match validate_fim_corrected_args(tools, &pending.name, &value) {
+                                Ok(()) => {
+                                    emit_tool_args_fim_correction_succeeded(
+                                        &pending.call_id,
+                                        &pending.name,
+                                        primary_error_category,
+                                    );
+                                    consecutive_failures.remove(&fail_key);
+                                    return schedule_parsed_call(
+                                        tools,
+                                        pending,
+                                        value,
+                                        true,
+                                        &corrected,
+                                        previous_pass_successes,
+                                    );
+                                }
+                                Err(schema_error) => {
+                                    emit_tool_args_fim_correction_failed(
+                                        &pending.call_id,
+                                        &pending.name,
+                                        "schema_validation",
+                                    );
+                                    correction_failure = Some(ToolArgsFailureDetail {
+                                        category: "schema_validation",
+                                        detail: schema_error,
+                                    });
+                                }
                             }
-
-                            emit_tool_args_fim_correction_failed(
-                                &pending.call_id,
-                                &pending.name,
-                                primary_error_category,
-                            );
                         }
                         Err(corrected_error) => {
                             emit_tool_args_fim_correction_failed(
@@ -132,6 +145,10 @@ where
                                 &pending.name,
                                 parse_error_category(&corrected_error),
                             );
+                            correction_failure = Some(ToolArgsFailureDetail {
+                                category: parse_error_category(&corrected_error),
+                                detail: corrected_error.to_string(),
+                            });
                         }
                     }
                 } else {
@@ -161,6 +178,22 @@ where
                      You MUST fix the JSON and retry now."
                         .to_string(),
                 )
+            } else if let Some(correction_failure) = correction_failure {
+                match correction_failure.category {
+                    "schema_validation" => CapabilityResult::failure(format!(
+                        "JSON SCHEMA VALIDATION ERROR in corrected tool arguments: {}\n\
+                         Fix: ensure the corrected JSON satisfies the tool schema exactly, \
+                         including numeric/string constraints, enums, array item rules, and \
+                         required fields. Then retry this tool call.",
+                        correction_failure.detail
+                    )),
+                    _ => CapabilityResult::failure(format!(
+                        "JSON PARSE ERROR in corrected tool arguments: {}\n\
+                         Fix: ensure the corrected output is exactly one valid JSON object with \
+                         no markdown fences or trailing text. Then retry this tool call.",
+                        correction_failure.detail
+                    )),
+                }
             } else {
                 CapabilityResult::failure(format!(
                     "JSON PARSE ERROR in tool arguments: {error}\n\

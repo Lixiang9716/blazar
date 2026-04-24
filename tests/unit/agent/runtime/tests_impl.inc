@@ -2109,7 +2109,9 @@ fn run_turn_rejects_fim_correction_that_violates_schema_constraints() {
     assert_eq!(counter.load(Ordering::SeqCst), 0);
     assert!(messages.iter().any(|message| {
         matches!(message, ProviderMessage::ToolResult { output, is_error, .. }
-                if *is_error && output.contains("JSON PARSE ERROR"))
+                if *is_error
+                    && output.contains("JSON SCHEMA VALIDATION ERROR")
+                    && output.contains("minimum"))
     }));
 
     let captured = captured
@@ -2123,6 +2125,8 @@ fn run_turn_rejects_fim_correction_that_violates_schema_constraints() {
     let failed = captured.iter().any(|event| {
         event.get("event").and_then(Value::as_str) == Some("tool_args_fim_correction_failed")
             && event.get("call_id").and_then(Value::as_str) == Some("call-fim-schema")
+            && event.get("parse_error_category").and_then(Value::as_str)
+                == Some("schema_validation")
     });
 
     assert!(!success, "schema-invalid corrected args must not emit success");
