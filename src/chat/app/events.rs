@@ -1,5 +1,6 @@
 use super::turns::{
-    extract_plan_title_and_body, extract_tool_call_metadata_line, format_tool_call_details,
+    extract_plan_action_names, extract_plan_title_and_body, extract_tool_call_metadata_line,
+    format_tool_call_details, parse_next_step_name_line, short_action_name_from_text,
 };
 use super::*;
 use crate::agent::runtime::RuntimeErrorKind;
@@ -47,6 +48,8 @@ impl ChatApp {
             }
             AgentEvent::ThinkingDelta { text } => {
                 trace!("tick: ThinkingDelta len={}", text.len());
+                self.thinking_action_name =
+                    parse_next_step_name_line(&text).or_else(|| short_action_name_from_text(&text));
                 let needs_new = self
                     .timeline
                     .last()
@@ -58,6 +61,7 @@ impl ChatApp {
                     last.body.push_str(&text);
                     last.details.push_str(&text);
                 }
+                self.refresh_active_turn_status_label();
                 self.scroll_offset = u16::MAX;
             }
             AgentEvent::TextDelta { text } => {
@@ -278,6 +282,7 @@ impl ChatApp {
             return;
         };
 
+        self.thinking_action_name = extract_plan_action_names(&body).first().cloned();
         entry.title = Some(title);
         entry.body = body;
     }

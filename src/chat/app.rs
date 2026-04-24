@@ -63,6 +63,7 @@ pub struct ChatApp {
     has_user_sent: bool,
     active_turn_kind: Option<TurnKind>,
     active_turn_title: Option<String>,
+    thinking_action_name: Option<String>,
     debug_recorder: DebugRecorder,
 }
 
@@ -163,6 +164,7 @@ impl ChatApp {
             has_user_sent: false,
             active_turn_kind: None,
             active_turn_title: None,
+            thinking_action_name: None,
             debug_recorder,
         })
     }
@@ -239,7 +241,10 @@ impl ChatApp {
 
         match self.active_turn_kind {
             Some(TurnKind::Plan) => "planning".to_owned(),
-            _ => "thinking".to_owned(),
+            _ => self
+                .thinking_action_name
+                .clone()
+                .unwrap_or_else(|| "thinking".to_owned()),
         }
     }
 

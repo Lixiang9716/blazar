@@ -1056,6 +1056,45 @@ fn slash_query_matching_normalizes_crlf_and_whitespace() {
 }
 
 #[test]
+fn status_label_uses_action_name_only_for_thinking() {
+    let mut app = ChatApp::new_for_test(env!("CARGO_MANIFEST_DIR")).expect("init");
+
+    app.active_turn_kind = Some(TurnKind::Chat);
+    app.apply_agent_event_for_test(AgentEvent::TurnStarted {
+        turn_id: "t1".into(),
+    });
+    app.apply_agent_event_for_test(AgentEvent::ThinkingDelta {
+        text: "Next: explore runtime flow".into(),
+    });
+
+    assert_eq!(app.status_label(), "explore");
+}
+
+#[test]
+fn status_label_keeps_executing_label_unchanged() {
+    let mut app = ChatApp::new_for_test(env!("CARGO_MANIFEST_DIR")).expect("init");
+
+    app.active_turn_kind = Some(TurnKind::Chat);
+    app.apply_agent_event_for_test(AgentEvent::TurnStarted {
+        turn_id: "t2".into(),
+    });
+    app.apply_agent_event_for_test(AgentEvent::ThinkingDelta {
+        text: "Next: explore runtime flow".into(),
+    });
+    app.apply_agent_event_for_test(AgentEvent::ToolCallStarted {
+        call_id: "call-1".into(),
+        tool_name: "bash".into(),
+        kind: crate::agent::tools::ToolKind::Local,
+        arguments: r#"{"command":"echo hi"}"#.into(),
+        batch_id: 0,
+        replay_index: 0,
+        normalized_claims: Vec::new(),
+    });
+
+    assert_eq!(app.status_label(), "executing bash");
+}
+
+#[test]
 fn status_label_transitions_across_action_states() {
     let repo_path = env!("CARGO_MANIFEST_DIR");
     let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
