@@ -4,6 +4,8 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 pub enum InputAction {
     Quit,
     Submit,
+    InsertNewline,
+    ToggleMode,
     ToggleDetails,
     ScrollUp,
     ScrollDown,
@@ -21,6 +23,8 @@ impl InputAction {
             (KeyCode::Esc, _) => InputAction::Quit,
             (KeyCode::Char('c'), KeyModifiers::CONTROL) => InputAction::Quit,
             (KeyCode::Char('o'), KeyModifiers::CONTROL) => InputAction::ToggleDetails,
+            (KeyCode::Enter, KeyModifiers::SHIFT) => InputAction::InsertNewline,
+            (KeyCode::BackTab, _) => InputAction::ToggleMode,
             (KeyCode::Enter, _) => InputAction::Submit,
             (KeyCode::Up, _) => InputAction::PickerUp,
             (KeyCode::Down, _) => InputAction::PickerDown,

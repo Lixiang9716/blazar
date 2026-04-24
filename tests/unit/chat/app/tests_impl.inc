@@ -853,6 +853,46 @@ fn slash_when_composer_not_empty_does_not_open_picker() {
 }
 
 #[test]
+fn shift_enter_inserts_newline_without_submit() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+
+    app.handle_action(InputAction::Key(KeyEvent::new(
+        KeyCode::Char('a'),
+        KeyModifiers::NONE,
+    )));
+    app.handle_action(InputAction::InsertNewline);
+    app.handle_action(InputAction::Key(KeyEvent::new(
+        KeyCode::Char('b'),
+        KeyModifiers::NONE,
+    )));
+
+    assert_eq!(app.composer_text(), "a\nb");
+    assert!(
+        !app.timeline.iter().any(|entry| {
+            entry.actor == Actor::User && entry.body.contains("a\nb")
+        }),
+        "inserting a newline should not submit composer text"
+    );
+}
+
+#[test]
+fn shift_tab_toggles_user_mode() {
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+
+    assert_eq!(app.users_status_snapshot().mode, UserMode::Auto);
+
+    app.handle_action(InputAction::ToggleMode);
+    assert_eq!(app.users_status_snapshot().mode, UserMode::Plan);
+
+    app.handle_action(InputAction::ToggleMode);
+    assert_eq!(app.users_status_snapshot().mode, UserMode::Auto);
+}
+
+#[test]
 fn status_label_transitions_across_streaming_failure_and_recovery() {
     let repo_path = env!("CARGO_MANIFEST_DIR");
     let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");

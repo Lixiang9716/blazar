@@ -20,6 +20,14 @@ fn from_key_event_maps_control_and_navigation_shortcuts() {
         InputAction::Submit
     );
     assert_eq!(
+        InputAction::from_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT)),
+        InputAction::InsertNewline
+    );
+    assert_eq!(
+        InputAction::from_key_event(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT)),
+        InputAction::ToggleMode
+    );
+    assert_eq!(
         InputAction::from_key_event(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE)),
         InputAction::PickerUp
     );

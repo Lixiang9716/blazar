@@ -109,6 +109,16 @@ impl ChatApp {
                 }
             }
             InputAction::Submit => self.submit_composer(),
+            InputAction::InsertNewline => {
+                self.composer.insert_newline();
+                self.sync_users_status_from_composer();
+            }
+            InputAction::ToggleMode => {
+                self.user_mode = match self.user_mode {
+                    UserMode::Auto => UserMode::Plan,
+                    UserMode::Plan => UserMode::Auto,
+                };
+            }
             InputAction::ToggleDetails => self.show_details = !self.show_details,
             InputAction::ScrollUp => {
                 self.resolve_scroll_sentinel();

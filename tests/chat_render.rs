@@ -99,6 +99,20 @@ fn slash_renders_inline_command_matches_in_status_row() {
 }
 
 #[test]
+fn slash_status_row_normalizes_multiline_query_text() {
+    let mut app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
+    app.set_composer_text("/help\nnext\r\nfinal");
+
+    let lines = render_to_lines_for_test(&mut app, 120, 22);
+    let users_rows = &lines[lines.len().saturating_sub(3)..];
+
+    assert!(
+        users_rows[0].contains("/help next  final"),
+        "status row should normalize slash query CR/LF into spaces"
+    );
+}
+
+#[test]
 fn picker_navigation_reaches_later_commands() {
     use blazar::chat::input::InputAction;
 

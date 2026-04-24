@@ -31,9 +31,13 @@ pub(super) fn render_input(frame: &mut Frame, area: Rect, app: &ChatApp, theme: 
 
     // Place the terminal cursor at the composer position so that IME
     // popups (e.g. Chinese/Japanese input) appear in the right place.
-    let sc = app.composer().screen_cursor();
-    frame.set_cursor_position(Position::new(
-        composer_area.x + sc.col as u16,
-        composer_area.y + sc.row as u16,
-    ));
+    if composer_area.width > 0 && composer_area.height > 0 {
+        let sc = app.composer().screen_cursor();
+        let max_col = composer_area.width.saturating_sub(1) as usize;
+        let max_row = composer_area.height.saturating_sub(1) as usize;
+        frame.set_cursor_position(Position::new(
+            composer_area.x + sc.col.min(max_col) as u16,
+            composer_area.y + sc.row.min(max_row) as u16,
+        ));
+    }
 }

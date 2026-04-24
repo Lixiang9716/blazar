@@ -28,6 +28,20 @@ fn enter_maps_to_submit() {
 }
 
 #[test]
+fn shift_enter_maps_to_insert_newline() {
+    let action = InputAction::from_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT));
+
+    assert_eq!(action, InputAction::InsertNewline);
+}
+
+#[test]
+fn backtab_maps_to_toggle_mode() {
+    let action = InputAction::from_key_event(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT));
+
+    assert_eq!(action, InputAction::ToggleMode);
+}
+
+#[test]
 fn tab_maps_to_regular_key_input() {
     let action = InputAction::from_key_event(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
 
