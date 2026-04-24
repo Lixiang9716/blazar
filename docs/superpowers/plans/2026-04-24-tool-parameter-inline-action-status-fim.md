@@ -398,7 +398,7 @@ git commit -m "feat: add bounded FIM fallback for tool-arg repair"
 - Modify (if needed for test fixes): files changed in Tasks 1-4 only
 - Test: repository quality gates
 
-- [ ] **Step 1: Run targeted suites first**
+- [x] **Step 1: Run targeted suites first**
 
 Run: `cargo test --test unit tool_call_renders_parameter_inline_on_header_row -- --exact`
 Expected: PASS.
@@ -412,7 +412,7 @@ Expected: PASS.
 Run: `cargo test --test unit run_turn_uses_fim_correction_only_after_deterministic_repair_fails -- --exact`
 Expected: PASS.
 
-- [ ] **Step 2: Run repository gates**
+- [x] **Step 2: Run repository gates**
 
 Run: `just fmt-check`
 Expected: PASS.
@@ -423,7 +423,7 @@ Expected: PASS.
 Run: `just test`
 Expected: PASS.
 
-- [ ] **Step 3: Commit final polish (if any)**
+- [x] **Step 3: Commit final polish (if any)**
 
 ```bash
 git add src/chat/view/timeline/render_entry/tooling/descriptor.rs \
@@ -443,7 +443,7 @@ git add src/chat/view/timeline/render_entry/tooling/descriptor.rs \
 git commit -m "chore: finalize inline tool params action status and fim repair"
 ```
 
-- [ ] **Step 4: Prepare merge handoff notes**
+- [x] **Step 4: Prepare merge handoff notes**
 
 ```text
 Summarize:
