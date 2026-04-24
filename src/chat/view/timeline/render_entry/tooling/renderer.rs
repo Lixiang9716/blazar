@@ -36,10 +36,6 @@ pub(super) fn render_tool_descriptor<'a>(
         header.push(Span::raw(" "));
         header.push(Span::styled(badge, theme.dim_text));
     }
-    if let Some(call_identity) = descriptor.call_identity_suffix() {
-        header.push(Span::raw(" "));
-        header.push(Span::styled(format!("[{call_identity}]"), theme.dim_text));
-    }
     header.extend([Span::raw(" "), Span::styled(status_marker, status_style)]);
     lines.push(Line::from(header));
 

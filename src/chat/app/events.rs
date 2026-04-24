@@ -92,6 +92,7 @@ impl ChatApp {
                     call_id,
                     tool_name,
                     kind,
+                    arguments.clone(),
                     summarize_tool_arguments(&arguments),
                     append_tool_debug_details(
                         format_tool_call_details(

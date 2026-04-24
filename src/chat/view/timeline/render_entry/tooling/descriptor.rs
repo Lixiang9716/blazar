@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use super::super::common::extract_tool_subtitle_from_details;
+use super::super::common::{extract_tool_subtitle, extract_tool_subtitle_from_details};
 use crate::chat::app::turns::{tool_call_details_payload, tool_call_metadata_line};
 use crate::chat::model::{EntryKind, TimelineEntry, ToolCallStatus};
 use std::borrow::Cow;
@@ -27,21 +27,14 @@ pub(crate) struct EntryDescriptor {
     pub subtitle: Option<String>,
     pub preview_lines: Vec<String>,
     pub result_mode: ResultMode,
-    pub call_identity: Option<String>,
-}
-
-impl EntryDescriptor {
-    pub(super) fn call_identity_suffix(&self) -> Option<&str> {
-        self.call_identity.as_deref()
-    }
 }
 
 const MAX_PREVIEW_LINES: usize = 2;
 
 pub(crate) fn tool_descriptor(entry: &TimelineEntry) -> Option<EntryDescriptor> {
     let EntryKind::ToolCall {
-        call_id,
         tool_name,
+        arguments,
         status,
         ..
     } = &entry.kind
@@ -56,7 +49,16 @@ pub(crate) fn tool_descriptor(entry: &TimelineEntry) -> Option<EntryDescriptor> 
     };
 
     let preview_source = preview_source_text(status, entry);
-    let subtitle = extract_tool_subtitle_from_details(tool_name, &entry.details);
+    let subtitle = if arguments.trim().is_empty() {
+        extract_tool_subtitle_from_details(tool_name, &entry.details)
+    } else {
+        let extracted = extract_tool_subtitle(tool_name, arguments);
+        if extracted.is_empty() {
+            arguments.clone()
+        } else {
+            extracted
+        }
+    };
 
     Some(EntryDescriptor {
         status_visual,
@@ -64,7 +66,6 @@ pub(crate) fn tool_descriptor(entry: &TimelineEntry) -> Option<EntryDescriptor> 
         subtitle: (!subtitle.is_empty()).then_some(subtitle),
         preview_lines: build_preview_lines(preview_source.as_ref()),
         result_mode: infer_result_mode(tool_name, preview_source.as_ref()),
-        call_identity: Some(call_id.clone()),
     })
 }
 

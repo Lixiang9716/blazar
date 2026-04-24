@@ -45,6 +45,10 @@ pub(super) fn render_timeline(frame: &mut Frame, area: Rect, app: &ChatApp, them
     let mut assistant_turn = 0u16;
 
     for entry in app.timeline() {
+        if entry.kind == EntryKind::Thinking {
+            continue;
+        }
+
         // Insert turn header when actor changes between User and Assistant
         let is_user = entry.actor == Actor::User && entry.kind == EntryKind::Message;
         let is_assistant = entry.actor == Actor::Assistant && entry.kind == EntryKind::Message;
@@ -52,15 +56,6 @@ pub(super) fn render_timeline(frame: &mut Frame, area: Rect, app: &ChatApp, them
         if is_user {
             if last_actor != Some(Actor::User) {
                 user_turn += 1;
-                if !lines.is_empty() {
-                    // Subtle separator between turns
-                    let sep = "─".repeat(content_width.saturating_sub(4) as usize);
-                    lines.push(Line::from(vec![
-                        Span::raw(MARGIN),
-                        Span::styled(sep, theme.dim_text),
-                    ]));
-                    lines.push(Line::from(""));
-                }
                 lines.push(Line::from(vec![
                     Span::raw(MARGIN),
                     Span::styled(format!("You #{user_turn}"), theme.bold_text),
@@ -70,14 +65,6 @@ pub(super) fn render_timeline(frame: &mut Frame, area: Rect, app: &ChatApp, them
         } else if is_assistant {
             if last_actor != Some(Actor::Assistant) {
                 assistant_turn += 1;
-                if !lines.is_empty() {
-                    let sep = "─".repeat(content_width.saturating_sub(4) as usize);
-                    lines.push(Line::from(vec![
-                        Span::raw(MARGIN),
-                        Span::styled(sep, theme.dim_text),
-                    ]));
-                    lines.push(Line::from(""));
-                }
                 lines.push(Line::from(vec![
                     Span::raw(MARGIN),
                     Span::styled(

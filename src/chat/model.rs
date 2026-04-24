@@ -36,6 +36,7 @@ pub enum EntryKind {
         call_id: String,
         tool_name: String,
         kind: ToolKind,
+        arguments: String,
         status: ToolCallStatus,
     },
     Bash {
@@ -121,6 +122,7 @@ impl TimelineEntry {
         call_id: impl Into<String>,
         tool_name: impl Into<String>,
         kind: ToolKind,
+        arguments: impl Into<String>,
         body: impl Into<String>,
         details: impl Into<String>,
         status: ToolCallStatus,
@@ -131,6 +133,7 @@ impl TimelineEntry {
                 call_id: call_id.into(),
                 tool_name: tool_name.into(),
                 kind,
+                arguments: arguments.into(),
                 status,
             },
             title: None,

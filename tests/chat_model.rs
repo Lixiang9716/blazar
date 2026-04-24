@@ -29,6 +29,7 @@ fn timeline_entry_constructors_assign_expected_fields() {
         "call-1",
         "read_file",
         ToolKind::Local,
+        r#"{"path":"Cargo.toml"}"#,
         "body",
         r#"{"path":"Cargo.toml"}"#,
         ToolCallStatus::Running,

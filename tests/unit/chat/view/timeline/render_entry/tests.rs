@@ -63,6 +63,7 @@ fn render_entry_renders_tool_use_and_tool_call_statuses() {
         "c1",
         "read_file",
         ToolKind::Local,
+        r#"{"path":"Cargo.toml"}"#,
         "reading",
         r#"{"path":"Cargo.toml"}"#,
         ToolCallStatus::Running,
@@ -77,6 +78,7 @@ fn render_entry_renders_tool_use_and_tool_call_statuses() {
         "c2",
         "bash",
         ToolKind::Local,
+        r#"{"command":"cargo test"}"#,
         "done",
         r#"{"command":"cargo test"}"#,
         ToolCallStatus::Success,
@@ -94,6 +96,7 @@ fn render_entry_renders_tool_use_and_tool_call_statuses() {
         "c3",
         "grep",
         ToolKind::Local,
+        r#"{"pattern":"TODO"}"#,
         "failed",
         r#"{"pattern":"TODO"}"#,
         ToolCallStatus::Error,
@@ -111,6 +114,7 @@ fn render_entry_renders_tool_use_and_tool_call_statuses() {
         "c4",
         "configured_reviewer",
         ToolKind::Agent { is_acp: true },
+        r#"{"prompt":"check this diff"}"#,
         "reviewing",
         r#"{"prompt":"check this diff"}"#,
         ToolCallStatus::Running,
@@ -126,6 +130,7 @@ fn tool_descriptor_maps_status_and_semantic_summary() {
         "call-1",
         "read_file",
         ToolKind::Local,
+        r#"{"path":"src/main.rs"}"#,
         "reading",
         r#"{"path":"src/main.rs"}"#,
         ToolCallStatus::Running,
@@ -142,6 +147,7 @@ fn tool_descriptor_maps_status_and_semantic_summary() {
         "call-2",
         "bash",
         ToolKind::Local,
+        r#"{"command":"cargo test"}"#,
         "done",
         r#"{"command":"cargo test"}"#,
         ToolCallStatus::Success,
@@ -156,6 +162,7 @@ fn tool_descriptor_maps_status_and_semantic_summary() {
         "call-3",
         "grep",
         ToolKind::Local,
+        r#"{"pattern":"TODO"}"#,
         "failed",
         r#"{"pattern":"TODO"}"#,
         ToolCallStatus::Error,
@@ -168,12 +175,13 @@ fn tool_descriptor_maps_status_and_semantic_summary() {
 }
 
 #[test]
-fn parallel_tool_calls_with_same_name_keep_distinct_identity() {
+fn tool_call_render_hides_call_id_and_keeps_parameter_context() {
     let theme = crate::chat::theme::build_theme();
     let first = TimelineEntry::tool_call(
         "call-a",
         "bash",
         ToolKind::Local,
+        r#"{"command":"echo a"}"#,
         "done",
         r#"{"command":"echo a"}"#,
         ToolCallStatus::Success,
@@ -182,6 +190,7 @@ fn parallel_tool_calls_with_same_name_keep_distinct_identity() {
         "call-b",
         "bash",
         ToolKind::Local,
+        r#"{"command":"echo a"}"#,
         "done",
         r#"{"command":"echo a"}"#,
         ToolCallStatus::Success,
@@ -190,9 +199,14 @@ fn parallel_tool_calls_with_same_name_keep_distinct_identity() {
     let first_text = lines_text(&render_entry(&first, &theme, 70)).join("\n");
     let second_text = lines_text(&render_entry(&second, &theme, 70)).join("\n");
 
-    assert!(first_text.contains("call-a"));
-    assert!(second_text.contains("call-b"));
-    assert_ne!(first_text, second_text);
+    assert!(
+        !first_text.contains("call-a") && !second_text.contains("call-b"),
+        "tool call id should not be rendered in timeline rows"
+    );
+    assert!(
+        first_text.contains("echo a") && second_text.contains("echo a"),
+        "tool call rows should keep argument context"
+    );
 }
 
 #[test]
@@ -201,6 +215,7 @@ fn tool_result_preview_is_capped_to_two_lines() {
         "c-preview",
         "bash",
         ToolKind::Local,
+        r#"{"command":"cargo test"}"#,
         "line-1\nline-2\nline-3\nline-4",
         r#"{"command":"cargo test"}"#,
         ToolCallStatus::Success,
@@ -222,6 +237,7 @@ fn tool_result_mode_detects_diff_markdown_code_plain() {
         "c-diff",
         "edit_file",
         ToolKind::Local,
+        r#"{"path":"src/main.rs"}"#,
         "diff --git a/src/main.rs b/src/main.rs\n@@ -1 +1 @@\n-old\n+new",
         r#"{"path":"src/main.rs"}"#,
         ToolCallStatus::Success,
@@ -230,6 +246,7 @@ fn tool_result_mode_detects_diff_markdown_code_plain() {
         "c-md",
         "notes",
         ToolKind::Local,
+        r#"{"path":"notes.md"}"#,
         "# Title\n- item",
         r#"{"path":"notes.md"}"#,
         ToolCallStatus::Success,
@@ -238,6 +255,7 @@ fn tool_result_mode_detects_diff_markdown_code_plain() {
         "c-code",
         "bash",
         ToolKind::Local,
+        r#"{"command":"cargo fmt"}"#,
         "```rust\nfn main() {}\n```",
         r#"{"command":"cargo fmt"}"#,
         ToolCallStatus::Success,
@@ -246,6 +264,7 @@ fn tool_result_mode_detects_diff_markdown_code_plain() {
         "c-plain",
         "read_file",
         ToolKind::Local,
+        r#"{"path":"Cargo.toml"}"#,
         "just plain text",
         r#"{"path":"Cargo.toml"}"#,
         ToolCallStatus::Success,
@@ -285,6 +304,7 @@ fn tool_result_mode_does_not_treat_edit_substring_as_diff() {
         "c-non-diff",
         "credit_lookup",
         ToolKind::Local,
+        r#"{"query":"credit"}"#,
         "plain result text",
         r#"{"query":"credit"}"#,
         ToolCallStatus::Success,
@@ -359,11 +379,13 @@ fn render_entry_renders_bash_warning_hint_thinking_and_code_block() {
     let thinking = TimelineEntry::thinking(
         "this is a long thinking paragraph that should wrap into many lines for collapse testing. \
              it keeps describing alternative approaches and safety checks so the rendered block \
-             must be truncated in compact timeline mode.",
+              must be truncated in compact timeline mode.",
     );
     let thinking_text = lines_text(&render_entry(&thinking, &theme, 18)).join("\n");
-    assert!(thinking_text.contains("🧠 Thinking"));
-    assert!(thinking_text.contains("Ctrl+O"));
+    assert!(
+        thinking_text.is_empty(),
+        "thinking entries should not render in timeline"
+    );
 
     let code = TimelineEntry::code_block("rust", "fn main() {}".to_string());
     let code_text = lines_text(&render_entry(&code, &theme, 50)).join("\n");
@@ -423,6 +445,7 @@ fn tool_descriptor_uses_full_details_for_two_line_preview() {
         "c-preview-details",
         "bash",
         ToolKind::Local,
+        r#"{"command":"bash preview"}"#,
         "summary only",
         "line-1\nline-2\nline-3\n\nbatch_id=1 replay_index=0 normalized_claims=<none>",
         ToolCallStatus::Success,
@@ -444,6 +467,7 @@ fn tool_descriptor_infers_mode_from_full_details_when_summary_is_plain() {
         "c-diff-details",
         "bash",
         ToolKind::Local,
+        r#"{"command":"diff"}"#,
         "summary only",
         "diff --git a/src/main.rs b/src/main.rs\n@@ -1 +1 @@\n-old\n+new\n\nbatch_id=1 replay_index=0 normalized_claims=<none>",
         ToolCallStatus::Success,
@@ -452,6 +476,7 @@ fn tool_descriptor_infers_mode_from_full_details_when_summary_is_plain() {
         "c-md-details",
         "bash",
         ToolKind::Local,
+        r#"{"command":"markdown"}"#,
         "summary only",
         "# Title\n- item\n\nbatch_id=1 replay_index=0 normalized_claims=<none>",
         ToolCallStatus::Success,
@@ -460,6 +485,7 @@ fn tool_descriptor_infers_mode_from_full_details_when_summary_is_plain() {
         "c-code-details",
         "bash",
         ToolKind::Local,
+        r#"{"command":"code"}"#,
         "summary only",
         "```rust\nfn main() {}\n```\n\nbatch_id=1 replay_index=0 normalized_claims=<none>",
         ToolCallStatus::Success,
@@ -468,6 +494,7 @@ fn tool_descriptor_infers_mode_from_full_details_when_summary_is_plain() {
         "c-plain-details",
         "bash",
         ToolKind::Local,
+        r#"{"command":"plain"}"#,
         "summary only",
         "plain result text\nnext line\n\nbatch_id=1 replay_index=0 normalized_claims=<none>",
         ToolCallStatus::Success,
