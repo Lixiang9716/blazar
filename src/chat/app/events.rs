@@ -20,6 +20,16 @@ impl ChatApp {
         });
     }
 
+    #[doc(hidden)]
+    pub fn set_pr_label_for_test(&mut self, pr_label: Option<String>) {
+        self.git_pr_label = pr_label;
+    }
+
+    #[doc(hidden)]
+    pub fn set_referenced_files_for_test(&mut self, referenced_files: Vec<String>) {
+        self.referenced_files = referenced_files;
+    }
+
     pub(super) fn apply_agent_event(&mut self, event: AgentEvent) {
         let turn_id_context = self.current_turn_id().map(str::to_owned);
         let _ = self.agent_state.apply_event(&event);
@@ -71,6 +81,7 @@ impl ChatApp {
                 replay_index,
                 normalized_claims,
             } => {
+                self.ingest_referenced_files_from_claims(&normalized_claims);
                 debug!(
                     "tick: ToolCallStarted call_id={} tool={} arguments_len={}",
                     call_id,

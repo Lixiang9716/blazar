@@ -32,6 +32,28 @@ fn chat_view_renders_status_bar() {
         lines.iter().any(|line| line.contains("commands")),
         "status bar should show '/ commands'"
     );
+    assert!(
+        lines.iter().any(|line| line.contains("refs:-")),
+        "status bar should render refs:- fallback when no file references are known"
+    );
+}
+
+#[test]
+fn status_row_renders_path_branch_pr_and_references() {
+    let mut app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
+    app.set_pr_label_for_test(Some("PR#42 improve timeline".to_owned()));
+    app.set_referenced_files_for_test(vec!["src/chat/view/mod.rs".to_owned()]);
+
+    let lines = render_to_lines_for_test(&mut app, 130, 24);
+
+    assert!(lines.iter().any(|line| line.contains("~/blazar")));
+    assert!(lines.iter().any(|line| line.contains("main")));
+    assert!(lines.iter().any(|line| line.contains("PR#42")));
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.contains("src/chat/view/mod.rs"))
+    );
 }
 
 #[test]

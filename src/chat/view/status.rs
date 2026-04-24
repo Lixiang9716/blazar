@@ -8,7 +8,7 @@ use ratatui_core::{
 use ratatui_widgets::paragraph::Paragraph;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-use crate::chat::users_state::{StatusMode, UserMode};
+use crate::chat::users_state::{StatusMode, UserMode, UsersStatusSnapshot};
 
 pub(super) fn render_users_status_row(
     frame: &mut Frame,
@@ -34,16 +34,8 @@ pub(super) fn render_users_status_row(
         return;
     }
 
-    let ws_name = snapshot
-        .current_path
-        .rsplit('/')
-        .next()
-        .unwrap_or(snapshot.current_path.as_str());
-    let left = if snapshot.branch.is_empty() {
-        format!("{ws_name} · / commands")
-    } else {
-        format!("{ws_name} ({}) · / commands", snapshot.branch)
-    };
+    let left = format_status_left(&snapshot);
+    let refs_summary = format_references_summary(&snapshot.referenced_files);
 
     let status = app.status_label();
     let status_style = if app.is_streaming() {
@@ -54,17 +46,11 @@ pub(super) fn render_users_status_row(
         theme.status_right
     };
 
-    // Show short model name (last path segment) for brevity.
-    let model_short = snapshot
-        .model_name
-        .rsplit('/')
-        .next()
-        .unwrap_or(snapshot.model_name.as_str());
     let debug = app.debug_status_label();
     let right = if debug.is_empty() {
-        format!("{model_short} · {status}")
+        format!("{refs_summary} · {status}")
     } else {
-        format!("{model_short} · {status} · {debug}")
+        format!("{refs_summary} · {status} · {debug}")
     };
 
     let available = area.width as usize;
@@ -84,6 +70,44 @@ pub(super) fn render_users_status_row(
 
     let bar = Paragraph::new(line).style(theme.status_bar);
     frame.render_widget(bar, area);
+}
+
+fn format_status_left(snapshot: &UsersStatusSnapshot) -> String {
+    let mut left = snapshot.current_path.clone();
+    if !snapshot.branch.is_empty() {
+        left.push_str(&format!(" ({})", snapshot.branch));
+    }
+    if let Some(pr_label) = snapshot
+        .pr_label
+        .as_deref()
+        .filter(|label| !label.is_empty())
+    {
+        left.push_str(&format!(" [{pr_label}]"));
+    }
+    left.push_str(" · / commands");
+    left
+}
+
+fn format_references_summary(referenced_files: &[String]) -> String {
+    let refs = referenced_files
+        .iter()
+        .filter_map(|entry| {
+            let trimmed = entry.trim();
+            (!trimmed.is_empty()).then_some(trimmed)
+        })
+        .collect::<Vec<_>>();
+
+    if refs.is_empty() {
+        return "refs:-".to_owned();
+    }
+
+    let shown = refs.iter().take(2).copied().collect::<Vec<_>>();
+    let hidden_count = refs.len().saturating_sub(shown.len());
+    if hidden_count == 0 {
+        format!("refs: {}", shown.join(", "))
+    } else {
+        format!("refs: {} +{hidden_count}", shown.join(", "))
+    }
 }
 
 fn truncate_left_status_text(text: &str, max_width: usize) -> String {

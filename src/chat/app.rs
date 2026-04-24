@@ -92,6 +92,7 @@ impl ChatApp {
     pub fn new(repo_path: &str) -> Result<Self, AgentRuntimeError> {
         let display_path = shorten_home(repo_path);
         let branch = detect_branch(repo_path);
+        let git_pr_label = infer_pr_label_from_branch(&branch);
 
         let timeline = if std::env::var("BLAZAR_DEMO").is_ok() {
             crate::chat::demo::demo_timeline()
@@ -156,7 +157,7 @@ impl ChatApp {
             user_mode: UserMode::Auto,
             users_status_mode: StatusMode::Normal,
             inline_command_matches: Vec::new(),
-            git_pr_label: None,
+            git_pr_label,
             referenced_files: Vec::new(),
             context_usage: None,
             has_user_sent: false,
@@ -172,6 +173,7 @@ impl ChatApp {
         app.display_path = "~/blazar".to_owned();
         // Stable branch for tests.
         app.branch = "main".to_owned();
+        app.git_pr_label = infer_pr_label_from_branch(&app.branch);
         // Stable model name for tests.
         app.model_name = "echo".to_owned();
         // Always use EchoProvider in tests — no network calls.
@@ -288,6 +290,29 @@ impl ChatApp {
 
     pub(crate) fn inline_command_matches(&self) -> &[String] {
         &self.inline_command_matches
+    }
+
+    pub(crate) fn ingest_referenced_files_from_claims(&mut self, normalized_claims: &[String]) {
+        const MAX_REFERENCED_FILES: usize = 8;
+
+        for claim in normalized_claims {
+            let Some(path) = parse_workspace_claim_path(claim) else {
+                continue;
+            };
+            if self
+                .referenced_files
+                .iter()
+                .any(|existing| existing == path)
+            {
+                continue;
+            }
+            self.referenced_files.push(path.to_owned());
+        }
+
+        if self.referenced_files.len() > MAX_REFERENCED_FILES {
+            let overflow = self.referenced_files.len() - MAX_REFERENCED_FILES;
+            self.referenced_files.drain(..overflow);
+        }
     }
 
     /// Whether the user has sent at least one message this session.
@@ -476,6 +501,40 @@ pub(crate) fn normalize_slash_query(query: &str) -> String {
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+fn infer_pr_label_from_branch(branch: &str) -> Option<String> {
+    let branch = branch.trim();
+    if branch.is_empty() {
+        return None;
+    }
+
+    for marker in ["pr/", "pr-", "pr_", "pull/"] {
+        let Some((_, suffix)) = branch.rsplit_once(marker) else {
+            continue;
+        };
+        if let Some(number) = leading_digits(suffix) {
+            return Some(format!("PR#{number}"));
+        }
+    }
+
+    let hash_suffix = branch.rsplit_once('#').map(|(_, suffix)| suffix)?;
+    let number = leading_digits(hash_suffix)?;
+    Some(format!("PR#{number}"))
+}
+
+fn leading_digits(value: &str) -> Option<&str> {
+    let end = value
+        .char_indices()
+        .find_map(|(index, ch)| (!ch.is_ascii_digit()).then_some(index))
+        .unwrap_or(value.len());
+    (end > 0).then_some(&value[..end])
+}
+
+fn parse_workspace_claim_path(claim: &str) -> Option<&str> {
+    let (resource, _) = claim.split_once('#')?;
+    let path = resource.strip_prefix("fs:")?;
+    (!path.is_empty()).then_some(path)
 }
 
 fn preview_text(text: &str, max_chars: usize) -> &str {

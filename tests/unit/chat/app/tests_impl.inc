@@ -167,6 +167,47 @@ fn users_region_defaults_to_auto_and_normal_status() {
     assert!(snapshot.context_usage.is_none());
 }
 
+#[test]
+fn metadata_test_helpers_update_users_status_snapshot() {
+    let mut app = new_test_app();
+    app.set_pr_label_for_test(Some("PR#42 improve timeline".to_owned()));
+    app.set_referenced_files_for_test(vec!["src/chat/view/mod.rs".to_owned()]);
+
+    let snapshot = app.users_status_snapshot();
+    assert_eq!(snapshot.pr_label.as_deref(), Some("PR#42 improve timeline"));
+    assert_eq!(
+        snapshot.referenced_files,
+        vec!["src/chat/view/mod.rs".to_owned()]
+    );
+}
+
+#[test]
+fn tool_call_started_updates_referenced_files_from_normalized_claims() {
+    let mut app = new_test_app();
+    app.apply_agent_event_for_test(AgentEvent::ToolCallStarted {
+        call_id: "call-refs".into(),
+        tool_name: "write_file".into(),
+        kind: crate::agent::tools::ToolKind::Local,
+        arguments: r#"{"path":"src/chat/view/status.rs"}"#.into(),
+        batch_id: 0,
+        replay_index: 0,
+        normalized_claims: vec![
+            "process:bash#exclusive".into(),
+            "fs:src/chat/view/status.rs#read-only".into(),
+            "fs:src/chat/app.rs#read-write".into(),
+        ],
+    });
+
+    let snapshot = app.users_status_snapshot();
+    assert_eq!(
+        snapshot.referenced_files,
+        vec![
+            "src/chat/view/status.rs".to_owned(),
+            "src/chat/app.rs".to_owned()
+        ]
+    );
+}
+
 fn wait_until(timeout: Duration, mut condition: impl FnMut() -> bool) -> bool {
     let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
