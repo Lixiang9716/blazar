@@ -1,7 +1,20 @@
 use super::*;
 
 #[test]
-fn timeline_renders_banner_and_thinking_entries() {
+fn timeline_initial_render_includes_banner_entry() {
+    let mut app = crate::chat::app::ChatApp::new_for_test(env!("CARGO_MANIFEST_DIR"))
+        .expect("app should initialize");
+
+    let lines = crate::chat::view::render_to_lines_for_test(&mut app, 100, 28);
+    let text = lines.join("\n");
+    assert!(
+        text.contains("● Describe a task to get started."),
+        "initial timeline should include the banner entry"
+    );
+}
+
+#[test]
+fn timeline_hides_banner_after_first_user_message_and_renders_thinking() {
     let mut app = crate::chat::app::ChatApp::new_for_test(env!("CARGO_MANIFEST_DIR"))
         .expect("app should initialize");
     app.send_message("hello");
@@ -12,8 +25,8 @@ fn timeline_renders_banner_and_thinking_entries() {
     let lines = crate::chat::view::render_to_lines_for_test(&mut app, 100, 28);
     let text = lines.join("\n");
     assert!(
-        text.contains("Describe a task to get started."),
-        "banner text should render as a timeline entry"
+        !text.contains("Describe a task to get started."),
+        "banner entry should collapse after the first user message"
     );
     assert!(
         text.contains("reasoning"),

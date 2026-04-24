@@ -1,24 +1,25 @@
 ---
 source: tests/chat_render_snapshot.rs
+assertion_line: 11
 expression: "lines.join(\"\\n\")"
 ---
-╭──────────────────────────────────────────────────────────╮
-│                                                          │
-│            ▄▄▄▄▄▄▄                                       │
-│         ▄██▀▀▀▀▀▀▀                                       │
-│       ▄█▀█████████Blazar v0.1.0                          │
-│      ▄█▀██████████Describe a task to get started.        │
-│      █████████▀███                                       │
-│      █████████████Tip: /help for commands. Blazar uses AI│
-│      ▀██▀▀▀▀▀▀▀▀▀▀                                       │
-│         ▀▀▀▀▀▀▀▀▀▀                                       │
-│                                                          │
-╰──────────────────────────────────────────────────────────╯
+  ● Describe a task to get started.                         
+                                                            
   Blazar #1                                                 
   ● Tell me what you'd like to explore.                     
                                                             
                                                             
-────────────────────────────────────────────────────────────
-› Describe a task or ask a question…                        
-────────────────────────────────────────────────────────────
-blazar (main) · / commands                    echo · ready
+                                                            
+                                                            
+                                                            
+                                                            
+                                                            
+                                                            
+                                                            
+                                                            
+                                                            
+                                                            
+                                                            
+blazar (main) · / commands                      echo · ready
+> Describe a task or ask a question…                        
+AUTO                                          echo · ctx n/a

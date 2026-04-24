@@ -45,10 +45,9 @@ pub(super) fn render_timeline(frame: &mut Frame, area: Rect, app: &ChatApp, them
     let mut assistant_turn = 0u16;
 
     for entry in app.timeline() {
-        if entry.kind == EntryKind::Banner && !app.has_user_sent() {
-            continue;
-        }
-        if entry.kind == EntryKind::Thinking && !app.has_user_sent() {
+        let hide_banner = entry.kind == EntryKind::Banner && app.has_user_sent();
+        let hide_empty_thinking = entry.kind == EntryKind::Thinking && entry.body.trim().is_empty();
+        if hide_banner || hide_empty_thinking {
             continue;
         }
 

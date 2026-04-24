@@ -1,6 +1,5 @@
 //! Chat rendering — each sub-module handles one visual region.
 
-mod banner;
 mod input;
 mod picker;
 mod status;
@@ -60,18 +59,8 @@ pub fn render_frame(frame: &mut Frame, app: &mut ChatApp, tick_ms: u64) {
     let users_height = users_height(area.height);
     let [timeline_zone, users_area] = vertical![>=1, ==(users_height)].areas(area);
     let streaming_height: u16 = if streaming { 1 } else { 0 };
-    let banner_height = if app.has_user_sent() {
-        0
-    } else {
-        12.min(timeline_zone.height.saturating_sub(1 + streaming_height))
-    };
 
-    let [banner_area, timeline_area, streaming_area] =
-        vertical![==(banner_height), >=1, ==(streaming_height)].areas(timeline_zone);
-
-    if banner_height > 0 {
-        banner::render_welcome_banner(frame, banner_area, app, tick_ms, &theme);
-    }
+    let [timeline_area, streaming_area] = vertical![>=1, ==(streaming_height)].areas(timeline_zone);
     timeline::render_timeline(frame, timeline_area, app, &theme);
 
     if streaming {

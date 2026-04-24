@@ -356,19 +356,19 @@ fn pending_row_disappears_after_queue_dispatch() {
 }
 
 #[test]
-fn chat_view_hides_thinking_entries() {
+fn chat_view_renders_thinking_entries() {
     use blazar::agent::protocol::AgentEvent;
 
     let mut app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
     app.apply_agent_event_for_test(AgentEvent::ThinkingDelta {
-        text: "internal reasoning should stay hidden".into(),
+        text: "internal reasoning should render".into(),
     });
 
     let lines = render_to_lines_for_test(&mut app, 100, 35);
     let text = lines.join("\n");
     assert!(
-        !text.contains("Thinking") && !text.contains("internal reasoning should stay hidden"),
-        "thinking rows should be hidden from the timeline surface"
+        text.contains("internal reasoning should render"),
+        "thinking rows should render in the timeline surface"
     );
 }
 
