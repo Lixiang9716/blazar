@@ -50,11 +50,19 @@ impl ChatApp {
             }
             AgentEvent::ThinkingDelta { text } => {
                 trace!("tick: ThinkingDelta len={}", text.len());
-                let needs_new = !self.current_turn_has_thinking_entry
-                    || self
-                        .timeline
-                        .last()
-                        .is_none_or(|entry| entry.kind != EntryKind::Thinking);
+                let tail_is_thinking = self
+                    .timeline
+                    .last()
+                    .is_some_and(|entry| entry.kind == EntryKind::Thinking);
+                let in_streaming_turn = matches!(
+                    self.agent_state.turn_state,
+                    crate::agent::state::TurnState::Streaming { .. }
+                );
+                let needs_new = if in_streaming_turn && !self.current_turn_has_thinking_entry {
+                    true
+                } else {
+                    !tail_is_thinking
+                };
                 if needs_new {
                     self.timeline.push(TimelineEntry::thinking(""));
                 }

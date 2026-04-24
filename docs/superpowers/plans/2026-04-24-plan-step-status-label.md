@@ -278,8 +278,15 @@ git commit -m "test: align status transitions with thinking action names"
 
 - [x] **Step 1: Run targeted tests**
 
-Run: `cargo test --lib short_action_name_from_text_extracts_first_action_word extract_plan_action_names_reads_numbered_plan_body parse_next_step_name_line_extracts_explicit_name short_action_name_is_kept_concise status_label_uses_action_name_only_for_thinking status_label_keeps_executing_label_unchanged status_label_transitions_across_action_states`
-Expected: PASS.
+Run:
+`cargo test --lib short_action_name_from_text_extracts_first_action_word`
+`cargo test --lib extract_plan_action_names_reads_numbered_plan_body`
+`cargo test --lib parse_next_step_name_line_extracts_explicit_name`
+`cargo test --lib short_action_name_is_kept_concise`
+`cargo test --lib status_label_uses_action_name_only_for_thinking`
+`cargo test --lib status_label_keeps_executing_label_unchanged`
+`cargo test --lib status_label_transitions_across_action_states`
+Expected: PASS for each command.
 
 - [x] **Step 2: Run repository gates**
 
