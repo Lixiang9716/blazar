@@ -208,6 +208,41 @@ fn tool_call_started_updates_referenced_files_from_normalized_claims() {
     );
 }
 
+#[test]
+fn infer_pr_label_from_branch_accepts_expected_patterns() {
+    let cases = [
+        ("pr-42", Some("PR#42")),
+        ("feature/pr-42-fix", Some("PR#42")),
+        ("pr_42", Some("PR#42")),
+        ("feature/pr_42_fix", Some("PR#42")),
+        ("pull/108", Some("PR#108")),
+        ("feature/pr/77-improve", Some("PR#77")),
+        ("release#91", Some("PR#91")),
+    ];
+
+    for (branch, expected) in cases {
+        assert_eq!(super::infer_pr_label_from_branch(branch).as_deref(), expected);
+    }
+}
+
+#[test]
+fn infer_pr_label_from_branch_rejects_non_pr_segments() {
+    let cases = [
+        "feature/spr-123-ui",
+        "feature/apr_55_cleanup",
+        "feature/pr42-without-delimiter",
+        "feature/improve-pr-42",
+    ];
+
+    for branch in cases {
+        assert_eq!(
+            super::infer_pr_label_from_branch(branch),
+            None,
+            "branch {branch} should not infer a PR label"
+        );
+    }
+}
+
 fn wait_until(timeout: Duration, mut condition: impl FnMut() -> bool) -> bool {
     let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {

@@ -509,11 +509,23 @@ fn infer_pr_label_from_branch(branch: &str) -> Option<String> {
         return None;
     }
 
-    for marker in ["pr/", "pr-", "pr_", "pull/"] {
-        let Some((_, suffix)) = branch.rsplit_once(marker) else {
-            continue;
-        };
-        if let Some(number) = leading_digits(suffix) {
+    let segments = branch
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .collect::<Vec<_>>();
+
+    for (index, segment) in segments.iter().enumerate() {
+        if let Some(number) = segment.strip_prefix("pr-").and_then(leading_digits) {
+            return Some(format!("PR#{number}"));
+        }
+        if let Some(number) = segment.strip_prefix("pr_").and_then(leading_digits) {
+            return Some(format!("PR#{number}"));
+        }
+        if matches!(*segment, "pr" | "pull")
+            && let Some(number) = segments
+                .get(index + 1)
+                .and_then(|next| leading_digits(next))
+        {
             return Some(format!("PR#{number}"));
         }
     }
