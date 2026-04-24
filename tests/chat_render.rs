@@ -287,3 +287,39 @@ fn chat_view_renders_pending_user_rows_while_busy() {
         "queued user text should render as a pending timeline row while the agent is busy"
     );
 }
+
+#[test]
+fn pending_row_disappears_after_queue_dispatch() {
+    use blazar::agent::protocol::AgentEvent;
+
+    let mut app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
+    app.apply_agent_event_for_test(AgentEvent::TurnStarted {
+        turn_id: "busy-turn".into(),
+    });
+    app.send_message("queued while busy");
+
+    let busy_lines = render_to_lines_for_test(&mut app, 100, 35);
+    assert!(
+        busy_lines
+            .iter()
+            .any(|line| line.contains("queued while busy (pending)")),
+        "pending row should be visible before dispatch"
+    );
+
+    app.apply_agent_event_for_test(AgentEvent::TurnComplete);
+    app.tick();
+
+    let after_lines = render_to_lines_for_test(&mut app, 100, 35);
+    assert!(
+        after_lines
+            .iter()
+            .all(|line| !line.contains("queued while busy (pending)")),
+        "pending row should disappear after the queued turn is dispatched"
+    );
+    assert!(
+        after_lines
+            .iter()
+            .any(|line| line.contains("queued while busy")),
+        "dispatched queued message should remain in the timeline"
+    );
+}
