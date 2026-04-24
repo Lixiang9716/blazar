@@ -1,6 +1,12 @@
 use super::*;
 
 #[test]
+fn timeline_renders_banner_and_thinking_entries() {
+    timeline_initial_render_includes_banner_entry();
+    timeline_hides_banner_after_first_user_message_and_renders_thinking();
+}
+
+#[test]
 fn timeline_initial_render_includes_banner_entry() {
     let mut app = crate::chat::app::ChatApp::new_for_test(env!("CARGO_MANIFEST_DIR"))
         .expect("app should initialize");
