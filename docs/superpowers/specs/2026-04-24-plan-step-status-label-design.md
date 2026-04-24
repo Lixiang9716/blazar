@@ -2,12 +2,13 @@
 
 ## Problem
 
-Users do not want status labels like `planning` / `executing`.
-They want the users status row to show the **model plan step item** (for example `explore`).
+For the **thinking state specifically**, users want an **AI-named short action** (for example `explore`)
+instead of the generic `thinking` label.
 
 ## Goal
 
-Show a concise, action-like label sourced from the latest model plan step, instead of lifecycle words.
+Show a concise action-like label only during thinking, sourced from a name explicitly provided by the model during output.
+The name must stay short.
 
 ## Non-Goals
 
@@ -42,18 +43,19 @@ Show a concise, action-like label sourced from the latest model plan step, inste
 
 ## Chosen Design
 
-Use **Approach A**.
+Use **Approach A** in **thinking-only scope**.
 
 1. Extract normalized step labels from plan responses.
 2. Store the latest plan steps in `ChatApp` state.
-3. `status_label()` returns the first pending/latest relevant step label.
-4. If no plan step exists, fallback to `ready` (or existing error label on failed state).
+3. `status_label()` returns the short step name **only when current label would be `thinking`**.
+4. Keep `executing <tool>`, `planning`, `ready`, and `error: ...` behavior unchanged.
 
 ## Architecture and Data Flow
 
-1. **Plan parsing layer** (`chat/app/events.rs` or existing plan-finalization seam):
-   - Reuse current plan title/body extraction.
-   - Add step-label extraction helper with conservative parsing rules.
+1. **Output parsing layer** (`chat/app/events.rs`):
+   - Parse a dedicated naming line from thinking/output text.
+   - Protocol (v1): `next_step_name: <short-name>`.
+   - Reuse conservative fallback extraction when protocol line is absent.
 
 2. **State layer** (`chat/app.rs`):
    - Add field for latest parsed plan step labels.
@@ -65,19 +67,17 @@ Use **Approach A**.
 
 ## Parsing Rules (v1)
 
-1. Accept common numbered/bulleted lines:
-   - `1. explore repo`
-   - `- explore repo`
-   - `- [ ] explore repo`
-2. Normalize to short lower-case label by taking first action token or short phrase.
-3. Keep max display width/truncation behavior consistent with status row rendering.
-4. If parsing fails, preserve safe fallback behavior.
+1. Preferred protocol line in output: `next_step_name: explore`.
+2. Normalize to short lower-case label and trim whitespace.
+3. Keep name short: max 12 visible characters (truncate with ellipsis when needed).
+4. If protocol line is absent, fallback to conservative first-action extraction from text.
+5. If parsing fails, preserve safe fallback behavior (`thinking` stays as-is).
 
 ## Error Handling
 
-1. Never panic on malformed plan text.
-2. If no valid steps extracted, status falls back safely (`ready` or failure label).
-3. Do not silently alter non-plan turn behavior beyond status text selection.
+1. Never panic on malformed naming lines.
+2. If no valid name extracted, status falls back safely to `thinking`.
+3. Do not silently alter non-thinking turn behavior beyond status text selection.
 
 ## Testing
 
@@ -86,9 +86,9 @@ Use **Approach A**.
    - mixed markdown noise
    - unicode labels
 2. `ChatApp` tests for status priority:
-   - plan step available → step label shown
-   - no plan step + idle/done → `ready`
-   - failed turn → `error: ...`
+   - thinking state + parsed step available → short step label shown
+   - thinking state + no parsed step → `thinking`
+   - non-thinking states remain unchanged (`planning`, `executing <tool>`, `ready`, `error: ...`)
 3. Status row rendering test:
    - step label appears in right status segment without layout regressions.
 
