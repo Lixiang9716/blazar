@@ -1,6 +1,7 @@
 use crate::agent::protocol::AgentEvent;
 use crate::agent::runtime::{AgentRuntime, AgentRuntimeError};
 use crate::agent::state::{AgentRuntimeState, TurnState};
+use crate::observability::debug::DebugRecorder;
 
 use crate::chat::input::InputAction;
 use crate::chat::model::{Actor, Author, ChatMessage, EntryKind, TimelineEntry, ToolCallStatus};
@@ -55,6 +56,7 @@ pub struct ChatApp {
     has_user_sent: bool,
     active_turn_kind: Option<TurnKind>,
     active_turn_title: Option<String>,
+    debug_recorder: DebugRecorder,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -105,6 +107,7 @@ impl ChatApp {
         let (provider, model_name) = crate::provider::load_provider(repo_path);
 
         let workspace_root = PathBuf::from(repo_path);
+        let debug_recorder = DebugRecorder::new(&workspace_root);
 
         Ok(Self {
             messages: vec![ChatMessage {
@@ -139,6 +142,7 @@ impl ChatApp {
             has_user_sent: false,
             active_turn_kind: None,
             active_turn_title: None,
+            debug_recorder,
         })
     }
 
@@ -244,6 +248,11 @@ impl ChatApp {
         &self.model_name
     }
 
+    pub fn debug_status_label(&self) -> String {
+        self.debug_recorder
+            .status_summary(self.pending_messages.len())
+    }
+
     /// Whether the user has sent at least one message this session.
     pub fn has_user_sent(&self) -> bool {
         self.has_user_sent
@@ -336,6 +345,14 @@ impl ChatApp {
         let text = self.composer_text();
         self.send_message(&text);
         self.composer = TextArea::default();
+    }
+
+    fn active_turn_kind_label(&self) -> Option<&'static str> {
+        match self.active_turn_kind {
+            Some(TurnKind::Chat) => Some("chat"),
+            Some(TurnKind::Plan) => Some("plan"),
+            None => None,
+        }
     }
 
     pub(crate) fn execute_palette_command_sync(

@@ -29,6 +29,12 @@ fn structured_log_contains_required_stable_keys() {
         "tool_name",
         "agent_id",
         "error_kind",
+        "call_id",
+        "session_id",
+        "workspace_path",
+        "queue_depth",
+        "event_seq",
+        "turn_kind",
     ] {
         assert!(value.get(key).is_some(), "missing key: {key}");
     }

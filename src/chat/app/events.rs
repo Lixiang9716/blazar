@@ -3,7 +3,8 @@ use super::turns::{
 };
 use super::*;
 use crate::agent::runtime::RuntimeErrorKind;
-use crate::observability::logging::emit_structured_event;
+use crate::observability::debug::DebugEventSnapshot;
+use crate::observability::logging::{StructuredEventContext, emit_structured_event_with_context};
 
 impl ChatApp {
     #[doc(hidden)]
@@ -16,8 +17,13 @@ impl ChatApp {
         let _ = self.agent_state.apply_event(&event);
 
         match event {
-            AgentEvent::TurnStarted { .. } => {
+            AgentEvent::TurnStarted { turn_id } => {
                 debug!("tick: TurnStarted");
+                self.debug_recorder.start_turn(
+                    &turn_id,
+                    self.active_turn_kind_label(),
+                    self.pending_messages.len(),
+                );
                 self.scroll_offset = u16::MAX;
             }
             AgentEvent::ThinkingDelta { text } => {
@@ -67,27 +73,34 @@ impl ChatApp {
                     "chat tool call started call_id={call_id} tool={tool_name} arguments_len={}",
                     arguments.len()
                 );
-                emit_structured_event(
+                let debug_event = self.debug_recorder.record_event(
+                    "tool_call_started",
+                    Some(&tool_name),
+                    Some(&call_id),
+                    None,
+                    self.pending_messages.len(),
+                    &message,
+                );
+                emit_structured_event_with_context(
                     log::Level::Debug,
                     module_path!(),
                     "tool_call_started",
                     &message,
-                    None,
-                    self.current_turn_id(),
-                    Some(&tool_name),
-                    None,
-                    None,
+                    structured_debug_context(&debug_event),
                 );
                 self.timeline.push(TimelineEntry::tool_call(
                     call_id,
                     tool_name,
                     kind,
                     summarize_tool_arguments(&arguments),
-                    format_tool_call_details(
-                        &arguments,
-                        batch_id,
-                        replay_index,
-                        &normalized_claims,
+                    append_tool_debug_details(
+                        format_tool_call_details(
+                            &arguments,
+                            batch_id,
+                            replay_index,
+                            &normalized_claims,
+                        ),
+                        &debug_event,
                     ),
                     ToolCallStatus::Running,
                 ));
@@ -116,16 +129,20 @@ impl ChatApp {
                 );
                 let message =
                     format!("chat tool call completed call_id={call_id} is_error={is_error}");
-                emit_structured_event(
+                let debug_event = self.debug_recorder.record_event(
+                    "tool_call_completed",
+                    completed_tool_name.as_deref(),
+                    Some(&call_id),
+                    None,
+                    self.pending_messages.len(),
+                    &message,
+                );
+                emit_structured_event_with_context(
                     log::Level::Debug,
                     module_path!(),
                     "tool_call_completed",
                     &message,
-                    None,
-                    self.current_turn_id(),
-                    completed_tool_name.as_deref(),
-                    None,
-                    None,
+                    structured_debug_context(&debug_event),
                 );
                 if let Some(entry) = self.timeline.iter_mut().rev().find(|entry| {
                     matches!(
@@ -134,11 +151,12 @@ impl ChatApp {
                     )
                 }) {
                     entry.body = summarize_tool_output(&output);
-                    entry.details = match extract_tool_call_metadata_line(&entry.details) {
+                    let details = match extract_tool_call_metadata_line(&entry.details) {
                         Some(metadata_line) if output.is_empty() => metadata_line,
                         Some(metadata_line) => format!("{output}\n\n{metadata_line}"),
                         None => output,
                     };
+                    entry.details = append_tool_debug_details(details, &debug_event);
                     if let EntryKind::ToolCall { status, .. } = &mut entry.kind {
                         *status = if is_error {
                             ToolCallStatus::Error
@@ -165,6 +183,15 @@ impl ChatApp {
             }
             AgentEvent::TurnComplete => {
                 debug!("tick: TurnComplete");
+                self.debug_recorder.record_event(
+                    "turn_complete",
+                    None,
+                    None,
+                    None,
+                    self.pending_messages.len(),
+                    "chat turn complete",
+                );
+                self.debug_recorder.finish_turn("completed", None, None);
                 if self.active_turn_kind == Some(TurnKind::Plan) {
                     self.finalize_plan_response();
                 }
@@ -180,19 +207,31 @@ impl ChatApp {
                     let safe_log_message =
                         turn_failed_app_log_message(kind, turn_id_context.as_deref());
                     warn!("{safe_log_message}");
-                    emit_structured_event(
+                    let debug_event = self.debug_recorder.record_event(
+                        "turn_failed",
+                        None,
+                        None,
+                        Some(runtime_error_kind_label(kind)),
+                        self.pending_messages.len(),
+                        &safe_log_message,
+                    );
+                    emit_structured_event_with_context(
                         log::Level::Warn,
                         module_path!(),
                         "turn_failed",
                         &safe_log_message,
-                        None,
-                        turn_id_context.as_deref(),
-                        None,
-                        None,
-                        Some(runtime_error_kind_label(kind)),
+                        structured_debug_context(&debug_event),
                     );
-                    self.timeline
-                        .push(TimelineEntry::warning(format!("Agent error: {error}")));
+                    let details = self.debug_recorder.latest_turn_bundle().unwrap_or_default();
+                    self.timeline.push(
+                        TimelineEntry::warning(format!("Agent error: {error}"))
+                            .with_details(details),
+                    );
+                    self.debug_recorder.finish_turn(
+                        "failed",
+                        Some(runtime_error_kind_label(kind)),
+                        Some(&error),
+                    );
                 }
                 self.active_turn_kind = None;
                 self.active_turn_title = None;
@@ -264,4 +303,36 @@ fn runtime_error_kind_label(kind: RuntimeErrorKind) -> &'static str {
         RuntimeErrorKind::ToolExecution => "ToolExecution",
         RuntimeErrorKind::Cancelled => "Cancelled",
     }
+}
+
+fn structured_debug_context<'a>(event: &'a DebugEventSnapshot) -> StructuredEventContext<'a> {
+    StructuredEventContext {
+        turn_id: event.turn_id.as_deref(),
+        tool_name: event.tool_name.as_deref(),
+        error_kind: event.error_kind.as_deref(),
+        call_id: event.call_id.as_deref(),
+        session_id: Some(event.session_id.as_str()),
+        workspace_path: Some(event.workspace_path.as_str()),
+        queue_depth: Some(event.queue_depth),
+        event_seq: event.event_seq,
+        turn_kind: event.turn_kind.as_deref(),
+        ..StructuredEventContext::default()
+    }
+}
+
+fn append_tool_debug_details(details: String, event: &DebugEventSnapshot) -> String {
+    let mut lines = Vec::new();
+    if !details.is_empty() {
+        lines.push(details);
+    }
+    if let Some(turn_id) = event.turn_id.as_deref() {
+        lines.push(format!("debug.turn_id={turn_id}"));
+    }
+    if let Some(call_id) = event.call_id.as_deref() {
+        lines.push(format!("debug.call_id={call_id}"));
+    }
+    if let Some(event_seq) = event.event_seq {
+        lines.push(format!("debug.event_seq={event_seq}"));
+    }
+    lines.join("\n")
 }
