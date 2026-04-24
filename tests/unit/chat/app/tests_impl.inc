@@ -276,6 +276,25 @@ fn send_message_queues_when_agent_busy_without_immediate_timeline_insert() {
 }
 
 #[test]
+fn queued_user_texts_for_render_reflects_pending_queue_fifo() {
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+
+    app.send_message("first");
+    app.apply_agent_event_for_test(AgentEvent::TurnStarted {
+        turn_id: "busy-turn".into(),
+    });
+
+    app.send_message("second");
+    app.send_message("third");
+
+    assert_eq!(
+        app.queued_user_texts_for_render(),
+        vec!["second".to_string(), "third".to_string()]
+    );
+}
+
+#[test]
 fn dispatch_next_queued_drains_fifo_on_turn_complete() {
     let repo_path = env!("CARGO_MANIFEST_DIR");
     let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");

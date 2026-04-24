@@ -249,6 +249,13 @@ impl ChatApp {
         self.has_user_sent
     }
 
+    pub(crate) fn queued_user_texts_for_render(&self) -> Vec<String> {
+        self.pending_messages
+            .iter()
+            .map(|turn| turn.user_text.clone())
+            .collect()
+    }
+
     /// Switch the active LLM model by rebuilding the provider and agent runtime.
     ///
     /// Cancels any in-flight turn, reloads config from disk with the new model
