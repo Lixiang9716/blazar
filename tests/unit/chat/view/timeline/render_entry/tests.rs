@@ -74,8 +74,17 @@ fn render_entry_renders_tool_use_and_tool_call_statuses() {
     let running_text = lines_text(&running_lines).join("\n");
     assert!(running_text.contains("read_file"));
     assert!(running_text.contains("Cargo.toml"));
+    assert!(
+        running_lines[0]
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<String>()
+            .contains("Cargo.toml")
+    );
     assert_eq!(running_text.matches('●').count(), 1);
     assert_eq!(first_line_marker_style(&running_lines), Some(theme.spinner));
+    assert_eq!(running_lines.len(), 2);
 
     let success = TimelineEntry::tool_call(
         "c2",
@@ -149,7 +158,7 @@ fn tool_descriptor_maps_status_and_semantic_summary() {
         descriptor.status_visual,
         super::tooling::descriptor::StatusVisual::RunningDot
     );
-    assert_eq!(descriptor.subtitle.as_deref(), Some("src/main.rs"));
+    assert_eq!(descriptor.inline_parameter.as_deref(), Some("src/main.rs"));
 
     let success = TimelineEntry::tool_call(
         "call-2",
@@ -180,6 +189,60 @@ fn tool_descriptor_maps_status_and_semantic_summary() {
         error_descriptor.status_visual,
         super::tooling::descriptor::StatusVisual::ErrorX
     );
+}
+
+#[test]
+fn tool_descriptor_renders_inline_parameter_in_right_aligned_slot() {
+    let theme = crate::chat::theme::build_theme();
+    let entry = TimelineEntry::tool_call(
+        "call-align",
+        "bash",
+        ToolKind::Local,
+        r#"{"command":"cargo test"}"#,
+        "running",
+        r#"{"command":"cargo test"}"#,
+        ToolCallStatus::Running,
+    );
+
+    let rendered = render_entry(&entry, &theme, 48);
+    let header = rendered
+        .first()
+        .map(|line| {
+            line.spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect::<String>()
+        })
+        .unwrap_or_default();
+
+    assert!(header.contains("bash"));
+    assert!(header.ends_with("cargo test"));
+    let title_end = header.find("bash").unwrap() + "bash".len();
+    let param_start = header.find("cargo test").unwrap();
+    assert!(
+        param_start > title_end + 1,
+        "parameter should be padded into a right-aligned slot"
+    );
+    assert_eq!(rendered.len(), 2);
+}
+
+#[test]
+fn tool_descriptor_handles_non_ascii_parameter_truncation_safely() {
+    let entry = TimelineEntry::tool_call(
+        "call-unicode",
+        "bash",
+        ToolKind::Local,
+        r#"{"command":"界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界"}"#,
+        "running",
+        r#"{"command":"界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界"}"#,
+        ToolCallStatus::Running,
+    );
+
+    let descriptor = super::tooling::tool_descriptor(&entry).unwrap();
+    let inline_parameter = descriptor.inline_parameter.as_deref().unwrap();
+
+    assert!(inline_parameter.ends_with('…'));
+    assert!(inline_parameter.chars().all(|ch| ch != '\u{FFFD}'));
 }
 
 #[test]

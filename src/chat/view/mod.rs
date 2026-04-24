@@ -3,7 +3,6 @@
 mod input;
 mod picker;
 mod status;
-mod streaming;
 mod timeline;
 
 use crate::chat::app::ChatApp;
@@ -48,24 +47,16 @@ pub fn render_to_lines_for_test(app: &mut ChatApp, width: u16, height: u16) -> V
         .collect()
 }
 
-pub fn render_frame(frame: &mut Frame, app: &mut ChatApp, tick_ms: u64) {
+pub fn render_frame(frame: &mut Frame, app: &mut ChatApp, _tick_ms: u64) {
     let theme = app.theme().clone();
     let area = frame.area();
 
     let bg_block = Block::default().style(theme.timeline_bg);
     frame.render_widget(bg_block, area);
 
-    let streaming = app.is_streaming();
     let users_height = users_height(area.height);
     let [timeline_zone, users_area] = vertical![>=1, ==(users_height)].areas(area);
-    let streaming_height: u16 = if streaming { 1 } else { 0 };
-
-    let [timeline_area, streaming_area] = vertical![>=1, ==(streaming_height)].areas(timeline_zone);
-    timeline::render_timeline(frame, timeline_area, app, &theme);
-
-    if streaming {
-        streaming::render_streaming_indicator(frame, streaming_area, tick_ms, app, &theme);
-    }
+    timeline::render_timeline(frame, timeline_zone, app, &theme);
 
     let [status_area, users_tail] = vertical![==1, >=0].areas(users_area);
     let [input_area, mode_area] = vertical![>=0, ==1].areas(users_tail);
