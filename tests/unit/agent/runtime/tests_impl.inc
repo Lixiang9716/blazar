@@ -1624,6 +1624,84 @@ fn run_turn_repairs_unescaped_quotes_for_bash_tool_calls() {
 }
 
 #[test]
+fn run_turn_repairs_truncated_payload_for_bash_tool_calls() {
+    struct TruncatedBashArgsProvider;
+
+    impl LlmProvider for TruncatedBashArgsProvider {
+        fn stream_turn(
+            &self,
+            _model: &str,
+            messages: &[ProviderMessage],
+            _tools: &[ToolSpec],
+            tx: Sender<ProviderEvent>,
+        ) {
+            let has_tool_result = messages
+                .iter()
+                .any(|message| matches!(message, ProviderMessage::ToolResult { .. }));
+            if has_tool_result {
+                let _ = tx.send(ProviderEvent::TextDelta("done".into()));
+                let _ = tx.send(ProviderEvent::TurnComplete);
+            } else {
+                let _ = tx.send(ProviderEvent::ToolCall {
+                    call_id: "call-1".into(),
+                    name: "bash".into(),
+                    arguments: r#"{"command":"echo repaired"#.into(),
+                });
+                let _ = tx.send(ProviderEvent::TurnComplete);
+            }
+        }
+    }
+
+    struct BashCountingTool {
+        calls: Arc<AtomicU32>,
+    }
+
+    impl Tool for BashCountingTool {
+        fn spec(&self) -> ToolSpec {
+            ToolSpec {
+                name: "bash".into(),
+                description: "count bash-style executions".into(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": true
+                }),
+            }
+        }
+
+        fn execute(&self, _args: serde_json::Value) -> crate::agent::tools::ToolResult {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            crate::agent::tools::ToolResult::success("bash counted")
+        }
+    }
+
+    let counter = Arc::new(AtomicU32::new(0));
+    let mut registry = empty_registry();
+    registry.register(Box::new(BashCountingTool {
+        calls: Arc::clone(&counter),
+    }));
+
+    let (event_tx, _event_rx) = mpsc::channel();
+    let cancel = Arc::new(AtomicBool::new(false));
+    let mut messages = user_messages("test bash truncated args");
+
+    let outcome = execute_turn(
+        &mut messages,
+        &TruncatedBashArgsProvider,
+        "echo",
+        &registry,
+        &ChannelObserver { tx: &event_tx },
+        &cancel,
+    );
+    assert!(matches!(outcome, TurnOutcome::Complete));
+    assert_eq!(counter.load(Ordering::SeqCst), 1);
+    assert!(messages.iter().any(|message| {
+        matches!(message, ProviderMessage::ToolResult { output, is_error, .. }
+                if !*is_error && output.contains(JSON_REPAIR_NOTE))
+    }));
+}
+
+#[test]
 fn run_turn_repairs_control_chars_and_executes_tool() {
     struct ControlCharArgsProvider;
 
@@ -2506,6 +2584,12 @@ fn parse_or_repair_returns_error_for_garbage() {
     assert!(result.is_err());
 }
 
+#[test]
+fn parse_or_repair_returns_error_for_multiple_payloads() {
+    let result = parse_or_repair_json(r#"{"a":1}{"b":2}"#);
+    assert!(result.is_err());
+}
+
 // ---- extract_json_payload tests ----
 
 #[test]
@@ -2552,6 +2636,12 @@ fn extract_json_handles_array() {
 }
 
 #[test]
+fn extract_json_rejects_multiple_top_level_payloads() {
+    let raw = r#"{"a":1}{"b":2}"#;
+    assert!(extract_json_payload(raw).is_none());
+}
+
+#[test]
 fn parse_or_repair_recovers_from_control_chars() {
     let raw = "{\"path\": \"fib.py\", \"content\": \"line1\nline2\"}";
     let parsed = parse_or_repair_json(raw).expect("should recover");
@@ -2564,6 +2654,20 @@ fn parse_or_repair_recovers_trailing_tool_call_tag() {
     let parsed = parse_or_repair_json(raw).expect("should recover via extraction");
     assert!(parsed.was_repaired);
     assert_eq!(parsed.value["command"], "ls -la");
+}
+
+#[test]
+fn repair_truncated_json_closure_completes_missing_terminators() {
+    let raw = r#"{"command":"echo hi""#;
+    let repaired = repair_truncated_json_closure(raw).expect("should repair");
+    let value: Value = serde_json::from_str(&repaired).expect("valid repaired JSON");
+    assert_eq!(value["command"], "echo hi");
+}
+
+#[test]
+fn repair_truncated_json_closure_rejects_mismatched_closers() {
+    let raw = r#"{"command":"echo hi"]"#;
+    assert!(repair_truncated_json_closure(raw).is_none());
 }
 
 // ---- repair_control_chars tests ----

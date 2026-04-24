@@ -42,7 +42,7 @@ use crate::provider::ProviderEvent;
 #[cfg(test)]
 use json_repair::{
     extract_json_payload, parse_or_repair_json, preview_text, repair_control_chars,
-    strip_thinking_tags,
+    repair_truncated_json_closure, strip_thinking_tags,
 };
 #[cfg(test)]
 use serde_json::Value;

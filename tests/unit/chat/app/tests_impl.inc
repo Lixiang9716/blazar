@@ -1333,7 +1333,7 @@ fn turn_failure_warning_details_include_debug_evidence_bundle() {
         kind: crate::agent::tools::ToolKind::Local,
         arguments: r#"{"command":"cargo test"}"#.into(),
         batch_id: 0,
-        replay_index: 0,
+        replay_index: 2,
         normalized_claims: Vec::new(),
     });
     app.apply_agent_event_for_test(AgentEvent::ToolCallCompleted {
@@ -1444,7 +1444,7 @@ fn agent_tool_calls_render_acp_badge() {
         kind: crate::agent::tools::ToolKind::Agent { is_acp: true },
         arguments: r#"{"prompt":"review the patch"}"#.into(),
         batch_id: 0,
-        replay_index: 0,
+        replay_index: 2,
         normalized_claims: Vec::new(),
     });
 
