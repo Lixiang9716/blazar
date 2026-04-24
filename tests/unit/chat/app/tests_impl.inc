@@ -1095,6 +1095,66 @@ fn status_label_keeps_executing_label_unchanged() {
 }
 
 #[test]
+fn status_label_clears_thinking_action_name_between_turns() {
+    let mut app = ChatApp::new_for_test(env!("CARGO_MANIFEST_DIR")).expect("init");
+
+    app.active_turn_kind = Some(TurnKind::Chat);
+    app.apply_agent_event_for_test(AgentEvent::TurnStarted {
+        turn_id: "t-stale-1".into(),
+    });
+    app.apply_agent_event_for_test(AgentEvent::ThinkingDelta {
+        text: "Next: explore runtime flow".into(),
+    });
+    assert_eq!(app.status_label(), "explore");
+
+    app.apply_agent_event_for_test(AgentEvent::TurnComplete);
+
+    app.active_turn_kind = Some(TurnKind::Chat);
+    app.apply_agent_event_for_test(AgentEvent::TurnStarted {
+        turn_id: "t-stale-2".into(),
+    });
+
+    assert_eq!(app.status_label(), "thinking");
+
+    app.apply_agent_event_for_test(AgentEvent::ThinkingDelta {
+        text: "Next: inspect failure path".into(),
+    });
+    assert_eq!(app.status_label(), "inspect");
+
+    app.apply_agent_event_for_test(AgentEvent::TurnFailed {
+        kind: crate::agent::runtime::RuntimeErrorKind::ProviderTransient,
+        error: "network".into(),
+    });
+
+    app.active_turn_kind = Some(TurnKind::Chat);
+    app.apply_agent_event_for_test(AgentEvent::TurnStarted {
+        turn_id: "t-stale-3".into(),
+    });
+
+    assert_eq!(app.status_label(), "thinking");
+}
+
+#[test]
+fn thinking_delta_keeps_explicit_name_precedence_across_chunks() {
+    let mut app = ChatApp::new_for_test(env!("CARGO_MANIFEST_DIR")).expect("init");
+
+    app.active_turn_kind = Some(TurnKind::Chat);
+    app.apply_agent_event_for_test(AgentEvent::TurnStarted {
+        turn_id: "t-explicit".into(),
+    });
+    app.apply_agent_event_for_test(AgentEvent::ThinkingDelta {
+        text: "next_step_name: inspect\nI will ".into(),
+    });
+    assert_eq!(app.status_label(), "inspect");
+
+    app.apply_agent_event_for_test(AgentEvent::ThinkingDelta {
+        text: "explore runtime flow".into(),
+    });
+
+    assert_eq!(app.status_label(), "inspect");
+}
+
+#[test]
 fn status_label_transitions_across_action_states() {
     let repo_path = env!("CARGO_MANIFEST_DIR");
     let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");

@@ -38,6 +38,8 @@ impl ChatApp {
         match event {
             AgentEvent::TurnStarted { turn_id } => {
                 debug!("tick: TurnStarted");
+                self.thinking_action_name = None;
+                self.current_turn_has_thinking_entry = false;
                 self.debug_recorder.start_turn(
                     &turn_id,
                     self.active_turn_kind_label(),
@@ -48,18 +50,23 @@ impl ChatApp {
             }
             AgentEvent::ThinkingDelta { text } => {
                 trace!("tick: ThinkingDelta len={}", text.len());
-                self.thinking_action_name =
-                    parse_next_step_name_line(&text).or_else(|| short_action_name_from_text(&text));
-                let needs_new = self
-                    .timeline
-                    .last()
-                    .is_none_or(|entry| entry.kind != EntryKind::Thinking);
+                let needs_new = !self.current_turn_has_thinking_entry
+                    || self
+                        .timeline
+                        .last()
+                        .is_none_or(|entry| entry.kind != EntryKind::Thinking);
                 if needs_new {
                     self.timeline.push(TimelineEntry::thinking(""));
                 }
                 if let Some(last) = self.timeline.last_mut() {
                     last.body.push_str(&text);
                     last.details.push_str(&text);
+                    self.current_turn_has_thinking_entry = true;
+                    if let Some(action_name) = parse_next_step_name_line(&last.body)
+                        .or_else(|| stable_fallback_action_name(&last.body))
+                    {
+                        self.thinking_action_name = Some(action_name);
+                    }
                 }
                 self.refresh_active_turn_status_label();
                 self.scroll_offset = u16::MAX;
@@ -222,6 +229,8 @@ impl ChatApp {
                 if self.active_turn_kind == Some(TurnKind::Plan) {
                     self.finalize_plan_response();
                 }
+                self.thinking_action_name = None;
+                self.current_turn_has_thinking_entry = false;
                 self.active_turn_kind = None;
                 self.active_turn_title = None;
                 self.dispatch_next_queued();
@@ -260,6 +269,8 @@ impl ChatApp {
                         Some(&error),
                     );
                 }
+                self.thinking_action_name = None;
+                self.current_turn_has_thinking_entry = false;
                 self.active_turn_kind = None;
                 self.active_turn_title = None;
                 self.dispatch_next_queued();
@@ -300,6 +311,56 @@ impl ChatApp {
             _ => None,
         }
     }
+}
+
+fn stable_fallback_action_name(text: &str) -> Option<String> {
+    const FILLER: &[&str] = &[
+        "next", "step", "then", "will", "would", "should", "i", "we", "to", "the", "a", "an",
+        "and", "now",
+    ];
+
+    let tokens = text.split_whitespace().collect::<Vec<_>>();
+    for (index, raw_token) in tokens.iter().enumerate() {
+        let trimmed = raw_token
+            .trim_matches(|c: char| {
+                matches!(
+                    c,
+                    ',' | '.'
+                        | '!'
+                        | '?'
+                        | ';'
+                        | ':'
+                        | '('
+                        | ')'
+                        | '['
+                        | ']'
+                        | '"'
+                        | '\''
+                        | '`'
+                        | '*'
+                        | '-'
+                )
+            })
+            .trim();
+
+        if trimmed.is_empty() || trimmed.chars().all(|c| c.is_ascii_digit()) {
+            continue;
+        }
+
+        let lowered = trimmed.to_ascii_lowercase();
+        if FILLER.iter().any(|filler| *filler == lowered) {
+            continue;
+        }
+
+        let has_boundary_after_token = index + 1 < tokens.len() || trimmed.len() != raw_token.len();
+        if has_boundary_after_token {
+            return short_action_name_from_text(trimmed);
+        }
+
+        return None;
+    }
+
+    None
 }
 
 pub(super) fn turn_failed_app_log_message(kind: RuntimeErrorKind, turn_id: Option<&str>) -> String {

@@ -64,6 +64,7 @@ pub struct ChatApp {
     active_turn_kind: Option<TurnKind>,
     active_turn_title: Option<String>,
     thinking_action_name: Option<String>,
+    current_turn_has_thinking_entry: bool,
     debug_recorder: DebugRecorder,
 }
 
@@ -165,6 +166,7 @@ impl ChatApp {
             active_turn_kind: None,
             active_turn_title: None,
             thinking_action_name: None,
+            current_turn_has_thinking_entry: false,
             debug_recorder,
         })
     }
