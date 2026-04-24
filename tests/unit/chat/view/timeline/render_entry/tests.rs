@@ -192,19 +192,19 @@ fn tool_descriptor_maps_status_and_semantic_summary() {
 }
 
 #[test]
-fn tool_descriptor_renders_inline_parameter_with_width_safe_truncation() {
+fn tool_descriptor_renders_inline_parameter_in_right_aligned_slot() {
     let theme = crate::chat::theme::build_theme();
     let entry = TimelineEntry::tool_call(
-        "call-width",
+        "call-align",
         "bash",
         ToolKind::Local,
-        r#"{"command":"cargo test --package very-long-package-name --all-features"}"#,
+        r#"{"command":"cargo test"}"#,
         "running",
-        r#"{"command":"cargo test --package very-long-package-name --all-features"}"#,
+        r#"{"command":"cargo test"}"#,
         ToolCallStatus::Running,
     );
 
-    let rendered = render_entry(&entry, &theme, 24);
+    let rendered = render_entry(&entry, &theme, 48);
     let header = rendered
         .first()
         .map(|line| {
@@ -216,7 +216,13 @@ fn tool_descriptor_renders_inline_parameter_with_width_safe_truncation() {
         .unwrap_or_default();
 
     assert!(header.contains("bash"));
-    assert!(header.contains("…"));
+    assert!(header.ends_with("cargo test"));
+    let title_end = header.find("bash").unwrap() + "bash".len();
+    let param_start = header.find("cargo test").unwrap();
+    assert!(
+        param_start > title_end + 1,
+        "parameter should be padded into a right-aligned slot"
+    );
     assert_eq!(rendered.len(), 2);
 }
 

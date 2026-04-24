@@ -29,27 +29,34 @@ pub(super) fn render_tool_descriptor<'a>(
 
     let (status_marker, status_style) = status_marker(descriptor.status_visual, theme);
 
+    let badge = tool_badge(*kind);
+
     let mut header = vec![
         Span::raw(MARGIN),
         Span::styled(format!("{status_marker} "), status_style),
         Span::styled(descriptor.title.clone(), theme.tool_label),
     ];
-    if let Some(badge) = tool_badge(*kind) {
+    if let Some(badge) = badge {
         header.push(Span::raw(" "));
         header.push(Span::styled(badge, theme.dim_text));
     }
 
-    let mut header_width = MARGIN.width() + status_marker.width() + 1 + descriptor.title.width();
-    if let Some(badge) = tool_badge(*kind) {
-        header_width += 1 + badge.width();
-    }
+    let left_width = MARGIN.width()
+        + status_marker.width()
+        + 1
+        + descriptor.title.width()
+        + badge.map_or(0, UnicodeWidthStr::width)
+        + badge.map_or(0, |_| 1);
 
     if let Some(inline_parameter) = descriptor.inline_parameter.as_deref() {
-        let available = (width as usize).saturating_sub(header_width + 1);
+        let slot_width = (width as usize).saturating_sub(left_width);
         let fitted_parameter =
-            super::super::common::truncate_display_width(inline_parameter, available);
+            super::super::common::truncate_display_width(inline_parameter, slot_width);
         if !fitted_parameter.is_empty() {
-            header.push(Span::raw(" "));
+            let gap = slot_width.saturating_sub(fitted_parameter.width());
+            if gap > 0 {
+                header.push(Span::raw(" ".repeat(gap)));
+            }
             header.push(Span::styled(fitted_parameter, theme.tool_target));
         }
     }
