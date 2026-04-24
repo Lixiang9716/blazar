@@ -83,6 +83,7 @@ impl ChatApp {
                     tool_name,
                     kind,
                     summarize_tool_arguments(&arguments),
+                    summarize_tool_arguments(&arguments),
                     format_tool_call_details(
                         &arguments,
                         batch_id,

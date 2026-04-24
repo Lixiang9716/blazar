@@ -323,3 +323,53 @@ fn pending_row_disappears_after_queue_dispatch() {
         "dispatched queued message should remain in the timeline"
     );
 }
+
+#[test]
+fn chat_view_hides_thinking_entries() {
+    use blazar::agent::protocol::AgentEvent;
+
+    let mut app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
+    app.apply_agent_event_for_test(AgentEvent::ThinkingDelta {
+        text: "internal reasoning should stay hidden".into(),
+    });
+
+    let lines = render_to_lines_for_test(&mut app, 100, 35);
+    let text = lines.join("\n");
+    assert!(
+        !text.contains("Thinking") && !text.contains("internal reasoning should stay hidden"),
+        "thinking rows should be hidden from the timeline surface"
+    );
+}
+
+#[test]
+fn chat_view_does_not_render_turn_separator_lines() {
+    fn is_turn_separator(line: &str) -> bool {
+        let trimmed = line.trim();
+        line.starts_with("  ") && !trimmed.is_empty() && trimmed.chars().all(|ch| ch == '─')
+    }
+
+    let mut app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
+    app.send_message("separator check");
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    app.tick();
+
+    let lines = render_to_lines_for_test(&mut app, 100, 35);
+    for (index, line) in lines.iter().enumerate() {
+        if !line.contains("Blazar #") && !line.contains("You #") {
+            continue;
+        }
+        let has_separator_before = lines[..index]
+            .iter()
+            .rev()
+            .find(|candidate| !candidate.trim().is_empty())
+            .is_some_and(|candidate| is_turn_separator(candidate));
+        assert!(
+            !has_separator_before,
+            "timeline should not insert turn separator rows before headers"
+        );
+    }
+    assert!(
+        lines.iter().all(|line| !is_turn_separator(line)),
+        "timeline should not insert horizontal separator rows between entries"
+    );
+}
