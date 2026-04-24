@@ -771,6 +771,43 @@ fn turn_helpers_ignore_blank_input_and_validate_plan_title() {
 }
 
 #[test]
+fn short_action_name_from_text_extracts_first_action_word() {
+    assert_eq!(
+        super::turns::short_action_name_from_text("Next step: explore scheduler flow"),
+        Some("explore".to_owned())
+    );
+}
+
+#[test]
+fn extract_plan_action_names_reads_numbered_plan_body() {
+    let body = "1. Explore codebase\n2. Patch status derivation\n3. Add tests";
+    assert_eq!(
+        super::turns::extract_plan_action_names(body),
+        vec![
+            "explore".to_owned(),
+            "patch".to_owned(),
+            "add".to_owned()
+        ]
+    );
+}
+
+#[test]
+fn parse_next_step_name_line_extracts_explicit_name() {
+    assert_eq!(
+        super::turns::parse_next_step_name_line("next_step_name: explore\nthen continue"),
+        Some("explore".to_owned())
+    );
+}
+
+#[test]
+fn short_action_name_is_kept_concise() {
+    assert_eq!(
+        super::turns::short_action_name_from_text("Next step: investigate-super-long-name"),
+        Some("investigat…".to_owned())
+    );
+}
+
+#[test]
 fn turn_failed_events_use_error_kind_for_cancel_hint() {
     let repo_path = env!("CARGO_MANIFEST_DIR");
     let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
