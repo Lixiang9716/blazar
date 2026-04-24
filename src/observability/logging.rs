@@ -7,6 +7,21 @@ use std::{fmt::Display, io::Write};
 
 const STRUCTURED_EVENT_PREFIX: &str = "__blazar_structured_event__:";
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct StructuredEventContext<'a> {
+    pub trace_id: Option<&'a str>,
+    pub turn_id: Option<&'a str>,
+    pub tool_name: Option<&'a str>,
+    pub agent_id: Option<&'a str>,
+    pub error_kind: Option<&'a str>,
+    pub call_id: Option<&'a str>,
+    pub session_id: Option<&'a str>,
+    pub workspace_path: Option<&'a str>,
+    pub queue_depth: Option<u64>,
+    pub event_seq: Option<u64>,
+    pub turn_kind: Option<&'a str>,
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn format_event_json(
     level: &str,
@@ -19,17 +34,46 @@ pub fn format_event_json(
     agent_id: Option<&str>,
     error_kind: Option<&str>,
 ) -> String {
+    format_event_json_with_context(
+        level,
+        target,
+        event,
+        message,
+        StructuredEventContext {
+            trace_id,
+            turn_id,
+            tool_name,
+            agent_id,
+            error_kind,
+            ..StructuredEventContext::default()
+        },
+    )
+}
+
+pub fn format_event_json_with_context(
+    level: &str,
+    target: &str,
+    event: &str,
+    message: &str,
+    context: StructuredEventContext<'_>,
+) -> String {
     json!({
         "ts": timestamp_seconds(),
         "level": level,
         "target": target,
         "event": event,
         "message": message,
-        "trace_id": trace_id,
-        "turn_id": turn_id,
-        "tool_name": tool_name,
-        "agent_id": agent_id,
-        "error_kind": error_kind,
+        "trace_id": context.trace_id,
+        "turn_id": context.turn_id,
+        "tool_name": context.tool_name,
+        "agent_id": context.agent_id,
+        "error_kind": context.error_kind,
+        "call_id": context.call_id,
+        "session_id": context.session_id,
+        "workspace_path": context.workspace_path,
+        "queue_depth": context.queue_depth,
+        "event_seq": context.event_seq,
+        "turn_kind": context.turn_kind,
     })
     .to_string()
 }
@@ -46,17 +90,31 @@ pub fn emit_structured_event(
     agent_id: Option<&str>,
     error_kind: Option<&str>,
 ) {
-    let line = format_event_json(
-        &display_to_string(level),
+    emit_structured_event_with_context(
+        level,
         target,
         event,
         message,
-        trace_id,
-        turn_id,
-        tool_name,
-        agent_id,
-        error_kind,
+        StructuredEventContext {
+            trace_id,
+            turn_id,
+            tool_name,
+            agent_id,
+            error_kind,
+            ..StructuredEventContext::default()
+        },
     );
+}
+
+pub fn emit_structured_event_with_context(
+    level: Level,
+    target: &str,
+    event: &str,
+    message: &str,
+    context: StructuredEventContext<'_>,
+) {
+    let line =
+        format_event_json_with_context(&display_to_string(level), target, event, message, context);
     #[cfg(test)]
     capture_structured_event_for_test(line.clone());
     log::log!(target: target, level, "{STRUCTURED_EVENT_PREFIX}{line}");

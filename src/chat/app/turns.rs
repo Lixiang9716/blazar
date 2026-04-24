@@ -229,13 +229,14 @@ pub(super) fn format_tool_call_details(
 }
 
 pub(crate) fn tool_call_details_payload(details: &str) -> &str {
-    match tool_call_metadata_line(details)
-        .and_then(|metadata| details.strip_suffix(metadata))
-        .map(|prefix| prefix.trim_end_matches('\n'))
-    {
-        Some(payload) => payload,
-        None => details,
+    let mut cutoff = details.len();
+    for marker in ["\ndebug.", "\nbatch_id="] {
+        if let Some(index) = details.find(marker) {
+            cutoff = cutoff.min(index);
+        }
     }
+
+    details[..cutoff].trim_end_matches('\n')
 }
 
 pub(super) fn extract_tool_call_metadata_line(details: &str) -> Option<String> {

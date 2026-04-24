@@ -333,6 +333,7 @@ fn run_app_with_io<R: BufRead, W: Write>(input: &mut R, output: &mut W) -> AppRe
 }
 
 pub fn run() -> AppResult<()> {
+    init_tokio_console();
     init_logger();
     log::info!("Blazar starting");
     let schema = build_schema()?;
@@ -369,6 +370,13 @@ fn init_logger() {
             .start()
     }) {
         eprintln!("Failed to init logger: {e}");
+    }
+}
+
+fn init_tokio_console() {
+    #[cfg(feature = "tokio-console")]
+    if std::env::var_os("BLAZAR_ENABLE_TOKIO_CONSOLE").is_some() {
+        console_subscriber::init();
     }
 }
 

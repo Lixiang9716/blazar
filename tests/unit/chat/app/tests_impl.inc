@@ -1231,6 +1231,24 @@ fn tool_events_log_include_turn_and_tool_name() {
             == Some("bash"),
         "tool event logs should include turn_id and tool_name fields"
     );
+    assert_eq!(
+        tool_started
+            .get("call_id")
+            .and_then(serde_json::Value::as_str),
+        Some("call-log")
+    );
+    assert_eq!(
+        tool_started
+            .get("event_seq")
+            .and_then(serde_json::Value::as_u64),
+        Some(1)
+    );
+    assert_eq!(
+        tool_started
+            .get("queue_depth")
+            .and_then(serde_json::Value::as_u64),
+        Some(0)
+    );
 }
 
 #[test]
@@ -1288,6 +1306,78 @@ fn tool_call_completed_logs_include_turn_and_resolved_tool_name() {
             .and_then(serde_json::Value::as_str),
         Some("bash"),
     );
+    assert_eq!(
+        tool_completed
+            .get("call_id")
+            .and_then(serde_json::Value::as_str),
+        Some("call-complete-log")
+    );
+    assert_eq!(
+        tool_completed
+            .get("event_seq")
+            .and_then(serde_json::Value::as_u64),
+        Some(2)
+    );
+}
+
+#[test]
+fn turn_failure_warning_details_include_debug_evidence_bundle() {
+    let mut app = new_test_app();
+
+    app.apply_agent_event_for_test(AgentEvent::TurnStarted {
+        turn_id: "turn-debug-bundle".into(),
+    });
+    app.apply_agent_event_for_test(AgentEvent::ToolCallStarted {
+        call_id: "call-debug-bundle".into(),
+        tool_name: "bash".into(),
+        kind: crate::agent::tools::ToolKind::Local,
+        arguments: r#"{"command":"cargo test"}"#.into(),
+        batch_id: 0,
+        replay_index: 0,
+        normalized_claims: Vec::new(),
+    });
+    app.apply_agent_event_for_test(AgentEvent::ToolCallCompleted {
+        call_id: "call-debug-bundle".into(),
+        output: "failed".into(),
+        is_error: true,
+    });
+    app.apply_agent_event_for_test(AgentEvent::TurnFailed {
+        kind: crate::agent::runtime::RuntimeErrorKind::ProviderTransient,
+        error: "network timeout".into(),
+    });
+
+    let warning = app.timeline.last().expect("warning entry should exist");
+    assert!(matches!(warning.kind, EntryKind::Warning));
+    assert!(warning.details.contains("debug evidence"));
+    assert!(warning.details.contains("turn_id=turn-debug-bundle"));
+    assert!(warning.details.contains("tool_call_started"));
+    assert!(warning.details.contains("tool_call_completed"));
+    assert!(warning.details.contains("turn_failed"));
+}
+
+#[test]
+fn render_status_bar_includes_compact_debug_summary() {
+    let mut app = new_test_app();
+
+    app.apply_agent_event_for_test(AgentEvent::TurnStarted {
+        turn_id: "turn-debug-status".into(),
+    });
+    app.apply_agent_event_for_test(AgentEvent::ToolCallStarted {
+        call_id: "call-debug-status".into(),
+        tool_name: "bash".into(),
+        kind: crate::agent::tools::ToolKind::Local,
+        arguments: r#"{"command":"cargo test"}"#.into(),
+        batch_id: 0,
+        replay_index: 0,
+        normalized_claims: Vec::new(),
+    });
+
+    let rendered = render_to_lines_for_test(&mut app, 120, 30).join("\n");
+
+    assert!(rendered.contains("dbg"));
+    assert!(rendered.contains("turn-debug-status"));
+    assert!(rendered.contains("call-debug-status"));
+    assert!(rendered.contains("q0"));
 }
 
 #[test]

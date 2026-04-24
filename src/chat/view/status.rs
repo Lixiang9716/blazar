@@ -45,7 +45,12 @@ pub(super) fn render_status_bar(frame: &mut Frame, area: Rect, app: &ChatApp, th
         .rsplit('/')
         .next()
         .unwrap_or(app.model_name());
-    let right = format!("{model_short} · {status}");
+    let debug = app.debug_status_label();
+    let right = if debug.is_empty() {
+        format!("{model_short} · {status}")
+    } else {
+        format!("{model_short} · {status} · {debug}")
+    };
 
     let available = area.width as usize;
     let right_len = right.len();
