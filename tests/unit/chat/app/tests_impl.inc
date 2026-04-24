@@ -242,7 +242,7 @@ fn tick_handles_multibyte_tool_output_without_panicking() {
 }
 
 #[test]
-fn send_message_queues_when_agent_busy() {
+fn send_message_queues_when_agent_busy_without_immediate_timeline_insert() {
     let repo_path = env!("CARGO_MANIFEST_DIR");
     let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
 
@@ -262,16 +262,17 @@ fn send_message_queues_when_agent_busy() {
     assert_eq!(app.pending_messages.len(), 2);
     assert_eq!(app.pending_messages[0].user_text, "second message");
     assert_eq!(app.pending_messages[1].user_text, "third message");
+    assert_eq!(app.messages().len(), 2);
+    assert_eq!(app.messages()[1].body, "first message");
 
-    // Both still appear in timeline (UI not lost)
+    // Queued turns should not mutate the visible timeline until dispatch.
     let user_messages: Vec<&str> = app
         .timeline
         .iter()
         .filter(|e| e.actor == Actor::User)
         .map(|e| e.body.as_str())
         .collect();
-    assert!(user_messages.contains(&"second message"));
-    assert!(user_messages.contains(&"third message"));
+    assert_eq!(user_messages, vec!["first message"]);
 }
 
 #[test]
@@ -289,6 +290,111 @@ fn dispatch_next_queued_drains_fifo_on_turn_complete() {
     app.apply_agent_event_for_test(AgentEvent::TurnComplete);
     assert_eq!(app.pending_messages.len(), 1);
     assert_eq!(app.pending_messages[0].user_text, "queued-b");
+    assert_eq!(app.messages().len(), 2);
+    assert_eq!(app.messages()[1].body, "queued-a");
+    assert!(
+        app.timeline
+            .iter()
+            .any(|entry| entry.actor == Actor::User && entry.body == "queued-a")
+    );
+}
+
+#[test]
+fn discover_agents_queued_while_busy_and_runs_after_turn() {
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+
+    app.send_message("first message");
+    app.apply_agent_event_for_test(AgentEvent::TurnStarted {
+        turn_id: "t1".into(),
+    });
+    assert!(app.agent_state.is_busy());
+
+    app.send_message("/discover-agents");
+    app.send_message("after");
+    assert_eq!(app.pending_messages.len(), 2);
+    assert_eq!(app.messages().len(), 2);
+    assert_eq!(app.messages()[1].body, "first message");
+
+    app.apply_agent_event_for_test(AgentEvent::TurnComplete);
+    assert_eq!(app.pending_messages.len(), 1);
+    assert_eq!(app.pending_messages[0].user_text, "after");
+    assert!(app.messages().iter().any(|msg| msg.body == "/discover-agents"));
+    assert!(!app.messages().iter().any(|msg| msg.body == "after"));
+
+    app.apply_agent_event_for_test(AgentEvent::AcpAgentsRefreshed);
+    assert!(app.pending_messages.is_empty());
+    assert!(app.messages().iter().any(|msg| msg.body == "after"));
+    assert!(
+        app.timeline
+            .iter()
+            .any(|entry| entry.actor == Actor::User && entry.body == "after")
+    );
+}
+
+#[test]
+fn discover_agents_refresh_failure_continues_queue() {
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+
+    app.send_message("first message");
+    app.apply_agent_event_for_test(AgentEvent::TurnStarted {
+        turn_id: "t1".into(),
+    });
+    assert!(app.agent_state.is_busy());
+
+    app.send_message("/discover-agents");
+    app.send_message("after");
+    assert_eq!(app.pending_messages.len(), 2);
+    assert_eq!(app.messages().len(), 2);
+    assert_eq!(app.messages()[1].body, "first message");
+
+    app.apply_agent_event_for_test(AgentEvent::TurnComplete);
+    assert_eq!(app.pending_messages.len(), 1);
+    assert_eq!(app.pending_messages[0].user_text, "after");
+    assert!(app.messages().iter().any(|msg| msg.body == "/discover-agents"));
+    assert!(!app.messages().iter().any(|msg| msg.body == "after"));
+
+    app.apply_agent_event_for_test(AgentEvent::AcpAgentsRefreshFailed {
+        error: "x".into(),
+    });
+    assert!(app.pending_messages.is_empty());
+    assert!(app.messages().iter().any(|msg| msg.body == "after"));
+    assert!(
+        app.timeline
+            .iter()
+            .any(|entry| entry.actor == Actor::User && entry.body == "after")
+    );
+}
+
+#[test]
+fn streaming_text_not_split_by_queued_user_input() {
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+
+    app.send_message("streaming request");
+    app.apply_agent_event_for_test(AgentEvent::TurnStarted {
+        turn_id: "stream-1".into(),
+    });
+    app.apply_agent_event_for_test(AgentEvent::TextDelta { text: "A".into() });
+
+    app.send_message("queued while busy");
+    assert_eq!(app.pending_messages.len(), 1);
+    assert!(!app.messages().iter().any(|msg| msg.body == "queued while busy"));
+
+    app.apply_agent_event_for_test(AgentEvent::TextDelta { text: "B".into() });
+
+    let streamed_responses: Vec<&TimelineEntry> = app
+        .timeline
+        .iter()
+        .filter(|entry| {
+            entry.actor == Actor::Assistant
+                && entry.kind == EntryKind::Message
+                && entry.body.contains('A')
+        })
+        .collect();
+    assert_eq!(streamed_responses.len(), 1);
+    assert_eq!(streamed_responses[0].body, "AB");
 }
 
 #[test]
@@ -305,6 +411,52 @@ fn dispatch_next_queued_drains_on_turn_failed() {
         error: "test error".into(),
     });
     assert!(app.pending_messages.is_empty());
+}
+
+#[test]
+fn runtime_submit_failure_continues_queued_dispatch() {
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+
+    app.pending_messages
+        .push_back(build_pending_turn("queued-a"));
+    app.pending_messages
+        .push_back(build_pending_turn("queued-b"));
+    app.agent_runtime.shutdown_for_test();
+
+    app.apply_agent_event_for_test(AgentEvent::TurnComplete);
+
+    assert!(app.pending_messages.is_empty());
+    assert!(app.messages().iter().any(|msg| msg.body == "queued-a"));
+    assert!(app.messages().iter().any(|msg| msg.body == "queued-b"));
+    let warning_count = app
+        .timeline
+        .iter()
+        .filter(|entry| entry.kind == EntryKind::Warning)
+        .count();
+    assert!(warning_count >= 2);
+}
+
+#[test]
+fn discover_dispatch_failure_continues_queued_dispatch() {
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+
+    app.pending_messages
+        .push_back(build_pending_turn("/discover-agents"));
+    app.pending_messages.push_back(build_pending_turn("after"));
+    app.agent_runtime.shutdown_for_test();
+
+    app.apply_agent_event_for_test(AgentEvent::TurnComplete);
+
+    assert!(app.pending_messages.is_empty());
+    assert!(app.messages().iter().any(|msg| msg.body == "/discover-agents"));
+    assert!(app.messages().iter().any(|msg| msg.body == "after"));
+    assert!(
+        app.timeline
+            .iter()
+            .any(|entry| entry.kind == EntryKind::Warning && entry.body.contains("Failed to refresh ACP agents"))
+    );
 }
 
 #[test]
@@ -1272,19 +1424,34 @@ fn turn_complete_plan_with_non_extractable_body_leaves_entry_untitled() {
 }
 
 #[test]
-fn build_pending_turn_and_dispatch_helpers_cover_plan_and_chat_paths() {
+fn build_pending_turn_parses_runtime_and_local_command_kinds() {
     let chat = super::turns::build_pending_turn("  hello ");
     assert_eq!(chat.user_text, "hello");
-    assert_eq!(chat.runtime_prompt, "hello");
-    assert_eq!(chat.kind, TurnKind::Chat);
+    assert_eq!(
+        chat.dispatch,
+        super::PendingDispatch::Runtime {
+            runtime_prompt: "hello".to_owned(),
+            kind: TurnKind::Chat,
+        }
+    );
+    assert!(!chat.timeline_inserted);
 
     let plan = super::turns::build_pending_turn("/plan   improve tests");
-    assert_eq!(plan.kind, TurnKind::Plan);
-    assert!(plan.runtime_prompt.contains("planning mode"));
-    assert!(plan.runtime_prompt.contains("User request:\nimprove tests"));
+    match &plan.dispatch {
+        super::PendingDispatch::Runtime {
+            runtime_prompt,
+            kind,
+        } => {
+            assert_eq!(*kind, TurnKind::Plan);
+            assert!(runtime_prompt.contains("planning mode"));
+            assert!(runtime_prompt.contains("User request:\nimprove tests"));
+        }
+        other => panic!("expected runtime dispatch, got {other:?}"),
+    }
+    assert!(!plan.timeline_inserted);
 
-    let repo_path = env!("CARGO_MANIFEST_DIR");
-    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
-    app.dispatch_next_queued();
-    assert!(app.pending_messages.is_empty());
+    let discover = super::turns::build_pending_turn("/discover-agents");
+    assert_eq!(discover.user_text, "/discover-agents");
+    assert_eq!(discover.dispatch, super::PendingDispatch::DiscoverAgents);
+    assert!(!discover.timeline_inserted);
 }

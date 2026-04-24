@@ -197,6 +197,14 @@ impl AgentRuntime {
     pub fn try_recv(&self) -> Option<AgentEvent> {
         self.event_rx.try_recv().ok()
     }
+
+    #[cfg(test)]
+    pub(crate) fn shutdown_for_test(&mut self) {
+        let _ = self.cmd_tx.send(AgentCommand::Shutdown);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
 }
 
 fn spawn_worker_thread(worker: RuntimeWorker) -> io::Result<JoinHandle<()>> {
