@@ -41,6 +41,36 @@ fn timeline_hides_banner_after_first_user_message_and_renders_thinking() {
 }
 
 #[test]
+fn timeline_does_not_render_a_standalone_streaming_indicator_row() {
+    let mut app = crate::chat::app::ChatApp::new_for_test(env!("CARGO_MANIFEST_DIR"))
+        .expect("app should initialize");
+    app.apply_agent_event_for_test(crate::agent::protocol::AgentEvent::TurnStarted {
+        turn_id: "streaming-turn".into(),
+    });
+
+    let lines = crate::chat::view::render_to_lines_for_test(&mut app, 100, 28);
+    let streaming_row = lines
+        .iter()
+        .rev()
+        .nth(3)
+        .expect("frame should include a row above the users pane");
+
+    assert!(
+        !streaming_row.contains('✶')
+            && !streaming_row.contains('✸')
+            && !streaming_row.contains('✹')
+            && !streaming_row.contains('✺'),
+        "streaming indicator should not render as a dedicated row"
+    );
+
+    let users_rows = &lines[lines.len().saturating_sub(3)..];
+    assert!(
+        users_rows.iter().any(|line| line.contains("streaming…")),
+        "users status row should still show the streaming state"
+    );
+}
+
+#[test]
 fn split_code_fences_no_code() {
     let segments = split_code_fences("Hello world\nSecond line");
     assert_eq!(segments.len(), 1);
