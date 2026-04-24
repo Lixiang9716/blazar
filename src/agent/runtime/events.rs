@@ -1,13 +1,89 @@
 use std::sync::mpsc::Sender;
 
+use log::Level;
+
 use super::RuntimeErrorKind;
 use crate::agent::protocol::AgentEvent;
 use crate::agent::tools::ToolKind;
+use crate::observability::logging::{StructuredEventContext, emit_structured_event_with_context};
 
 pub(crate) struct ToolCallStartMetadata {
     pub(crate) batch_id: u32,
     pub(crate) replay_index: usize,
     pub(crate) normalized_claims: Vec<String>,
+}
+
+fn emit_tool_args_fim_event(
+    level: Level,
+    event: &str,
+    message: &str,
+    call_id: &str,
+    tool_name: &str,
+    parse_error_category: &str,
+    repaired: bool,
+) {
+    emit_structured_event_with_context(
+        level,
+        module_path!(),
+        event,
+        message,
+        StructuredEventContext {
+            tool_name: Some(tool_name),
+            error_kind: Some(parse_error_category),
+            parse_error_category: Some(parse_error_category),
+            repaired: Some(repaired),
+            call_id: Some(call_id),
+            ..StructuredEventContext::default()
+        },
+    );
+}
+
+pub(super) fn emit_tool_args_fim_correction_requested(
+    call_id: &str,
+    tool_name: &str,
+    parse_error_category: &str,
+) {
+    emit_tool_args_fim_event(
+        Level::Info,
+        "tool_args_fim_correction_requested",
+        "runtime requested bounded FIM-style tool-arg correction",
+        call_id,
+        tool_name,
+        parse_error_category,
+        false,
+    );
+}
+
+pub(super) fn emit_tool_args_fim_correction_succeeded(
+    call_id: &str,
+    tool_name: &str,
+    parse_error_category: &str,
+) {
+    emit_tool_args_fim_event(
+        Level::Info,
+        "tool_args_fim_correction_succeeded",
+        "runtime accepted bounded FIM-style tool-arg correction",
+        call_id,
+        tool_name,
+        parse_error_category,
+        true,
+    );
+}
+
+pub(super) fn emit_tool_args_fim_correction_failed(
+    call_id: &str,
+    tool_name: &str,
+    parse_error_category: &str,
+) {
+    emit_tool_args_fim_event(
+        Level::Warn,
+        "tool_args_fim_correction_failed",
+        "runtime rejected bounded FIM-style tool-arg correction",
+        call_id,
+        tool_name,
+        parse_error_category,
+        false,
+    );
 }
 
 /// Observer that receives lifecycle events during a turn.

@@ -1702,6 +1702,268 @@ fn run_turn_repairs_truncated_payload_for_bash_tool_calls() {
 }
 
 #[test]
+fn run_turn_uses_fim_correction_only_after_deterministic_repair_fails() {
+    struct FallbackNeededProvider;
+
+    impl LlmProvider for FallbackNeededProvider {
+        fn stream_turn(
+            &self,
+            _model: &str,
+            messages: &[ProviderMessage],
+            _tools: &[ToolSpec],
+            tx: Sender<ProviderEvent>,
+        ) {
+            let has_tool_result = messages
+                .iter()
+                .any(|message| matches!(message, ProviderMessage::ToolResult { .. }));
+            if has_tool_result {
+                let _ = tx.send(ProviderEvent::TextDelta("done".into()));
+                let _ = tx.send(ProviderEvent::TurnComplete);
+            } else {
+                let _ = tx.send(ProviderEvent::ToolCall {
+                    call_id: "call-fim-ok".into(),
+                    name: "bash".into(),
+                    arguments: r#"{"command":"echo broken""timeout_secs":30}"#.into(),
+                });
+                let _ = tx.send(ProviderEvent::TurnComplete);
+            }
+        }
+    }
+
+    struct BashCountingTool {
+        calls: Arc<AtomicU32>,
+    }
+
+    impl Tool for BashCountingTool {
+        fn spec(&self) -> ToolSpec {
+            ToolSpec {
+                name: "bash".into(),
+                description: "count bash-style executions".into(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "command": { "type": "string" },
+                        "timeout_secs": { "type": "integer" }
+                    },
+                    "required": ["command"],
+                    "additionalProperties": false
+                }),
+            }
+        }
+
+        fn execute(&self, _args: serde_json::Value) -> crate::agent::tools::ToolResult {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            crate::agent::tools::ToolResult::success("bash counted")
+        }
+    }
+
+    let counter = Arc::new(AtomicU32::new(0));
+    let mut registry = empty_registry();
+    registry.register(Box::new(BashCountingTool {
+        calls: Arc::clone(&counter),
+    }));
+
+    let (event_tx, _event_rx) = mpsc::channel();
+    let cancel = Arc::new(AtomicBool::new(false));
+    let mut messages = user_messages("test fim fallback");
+
+    let (outcome, captured) = crate::observability::logging::with_captured_structured_events_for_test(
+        || {
+            execute_turn(
+                &mut messages,
+                &FallbackNeededProvider,
+                "echo",
+                &registry,
+                &ChannelObserver { tx: &event_tx },
+                &cancel,
+            )
+        },
+    );
+
+    assert!(matches!(outcome, TurnOutcome::Complete));
+    assert_eq!(counter.load(Ordering::SeqCst), 1);
+    assert!(messages.iter().any(|message| {
+        matches!(message, ProviderMessage::ToolResult { output, is_error, .. }
+                if !*is_error && output.contains(JSON_REPAIR_NOTE))
+    }));
+
+    let captured = captured
+        .iter()
+        .filter_map(|raw| serde_json::from_str::<Value>(raw).ok())
+        .collect::<Vec<_>>();
+    let requested = captured
+        .iter()
+        .find(|event| {
+            event.get("event").and_then(Value::as_str) == Some("tool_args_fim_correction_requested")
+                && event.get("call_id").and_then(Value::as_str) == Some("call-fim-ok")
+                && event.get("tool_name").and_then(Value::as_str) == Some("bash")
+        })
+        .expect("FIM fallback should emit a request event");
+    let succeeded = captured
+        .iter()
+        .find(|event| {
+            event.get("event").and_then(Value::as_str) == Some("tool_args_fim_correction_succeeded")
+                && event.get("call_id").and_then(Value::as_str) == Some("call-fim-ok")
+                && event.get("tool_name").and_then(Value::as_str) == Some("bash")
+        })
+        .expect("FIM fallback should emit a success event");
+
+    assert_eq!(
+        captured
+            .iter()
+            .filter(|event| {
+                event.get("event").and_then(Value::as_str)
+                    == Some("tool_args_fim_correction_requested")
+                    && event.get("call_id").and_then(Value::as_str) == Some("call-fim-ok")
+            })
+            .count(),
+        1,
+        "FIM fallback should request exactly once"
+    );
+    assert_eq!(
+        requested.get("parse_error_category").and_then(Value::as_str),
+        Some("expected_comma_or_end")
+    );
+    assert_eq!(requested.get("repaired").and_then(Value::as_bool), Some(false));
+    assert_eq!(
+        succeeded.get("parse_error_category").and_then(Value::as_str),
+        Some("expected_comma_or_end")
+    );
+    assert_eq!(succeeded.get("repaired").and_then(Value::as_bool), Some(true));
+}
+
+#[test]
+fn run_turn_rejects_invalid_fim_correction_and_returns_parse_error() {
+    struct FallbackInvalidProvider;
+
+    impl LlmProvider for FallbackInvalidProvider {
+        fn stream_turn(
+            &self,
+            _model: &str,
+            messages: &[ProviderMessage],
+            _tools: &[ToolSpec],
+            tx: Sender<ProviderEvent>,
+        ) {
+            let has_tool_result = messages
+                .iter()
+                .any(|message| matches!(message, ProviderMessage::ToolResult { .. }));
+            if has_tool_result {
+                let _ = tx.send(ProviderEvent::TextDelta("done".into()));
+                let _ = tx.send(ProviderEvent::TurnComplete);
+            } else {
+                let _ = tx.send(ProviderEvent::ToolCall {
+                    call_id: "call-fim-bad".into(),
+                    name: "bash".into(),
+                    arguments: r#"{"command":"echo broken""timeout_secs":}"#.into(),
+                });
+                let _ = tx.send(ProviderEvent::TurnComplete);
+            }
+        }
+    }
+
+    struct BashCountingTool {
+        calls: Arc<AtomicU32>,
+    }
+
+    impl Tool for BashCountingTool {
+        fn spec(&self) -> ToolSpec {
+            ToolSpec {
+                name: "bash".into(),
+                description: "count bash-style executions".into(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "command": { "type": "string" },
+                        "timeout_secs": { "type": "integer" }
+                    },
+                    "required": ["command"],
+                    "additionalProperties": false
+                }),
+            }
+        }
+
+        fn execute(&self, _args: serde_json::Value) -> crate::agent::tools::ToolResult {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            crate::agent::tools::ToolResult::success("bash counted")
+        }
+    }
+
+    let counter = Arc::new(AtomicU32::new(0));
+    let mut registry = empty_registry();
+    registry.register(Box::new(BashCountingTool {
+        calls: Arc::clone(&counter),
+    }));
+
+    let (event_tx, _event_rx) = mpsc::channel();
+    let cancel = Arc::new(AtomicBool::new(false));
+    let mut messages = user_messages("test invalid fim fallback");
+
+    let (outcome, captured) = crate::observability::logging::with_captured_structured_events_for_test(
+        || {
+            execute_turn(
+                &mut messages,
+                &FallbackInvalidProvider,
+                "echo",
+                &registry,
+                &ChannelObserver { tx: &event_tx },
+                &cancel,
+            )
+        },
+    );
+
+    assert!(matches!(outcome, TurnOutcome::Complete));
+    assert_eq!(counter.load(Ordering::SeqCst), 0);
+    assert!(messages.iter().any(|message| {
+        matches!(message, ProviderMessage::ToolResult { output, is_error, .. }
+                if *is_error && output.contains("JSON PARSE ERROR"))
+    }));
+
+    let captured = captured
+        .iter()
+        .filter_map(|raw| serde_json::from_str::<Value>(raw).ok())
+        .collect::<Vec<_>>();
+    let requested = captured
+        .iter()
+        .find(|event| {
+            event.get("event").and_then(Value::as_str) == Some("tool_args_fim_correction_requested")
+                && event.get("call_id").and_then(Value::as_str) == Some("call-fim-bad")
+                && event.get("tool_name").and_then(Value::as_str) == Some("bash")
+        })
+        .expect("FIM fallback should emit a request event");
+    let failed = captured
+        .iter()
+        .find(|event| {
+            event.get("event").and_then(Value::as_str) == Some("tool_args_fim_correction_failed")
+                && event.get("call_id").and_then(Value::as_str) == Some("call-fim-bad")
+                && event.get("tool_name").and_then(Value::as_str) == Some("bash")
+        })
+        .expect("invalid FIM correction should emit a failure event");
+
+    assert_eq!(
+        captured
+            .iter()
+            .filter(|event| {
+                event.get("event").and_then(Value::as_str)
+                    == Some("tool_args_fim_correction_requested")
+                    && event.get("call_id").and_then(Value::as_str) == Some("call-fim-bad")
+            })
+            .count(),
+        1,
+        "FIM fallback should request exactly once"
+    );
+    assert_eq!(
+        requested.get("parse_error_category").and_then(Value::as_str),
+        Some("expected_comma_or_end")
+    );
+    assert_eq!(requested.get("repaired").and_then(Value::as_bool), Some(false));
+    assert_eq!(
+        failed.get("parse_error_category").and_then(Value::as_str),
+        Some("expected_value")
+    );
+    assert_eq!(failed.get("repaired").and_then(Value::as_bool), Some(false));
+}
+
+#[test]
 fn run_turn_repairs_control_chars_and_executes_tool() {
     struct ControlCharArgsProvider;
 

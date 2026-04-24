@@ -2,6 +2,10 @@ use std::collections::{HashMap, HashSet};
 
 use log::warn;
 
+use super::events::{
+    emit_tool_args_fim_correction_failed, emit_tool_args_fim_correction_requested,
+    emit_tool_args_fim_correction_succeeded,
+};
 use crate::agent::capability::{
     CapabilityClaim, CapabilityInput, CapabilityResult, ConflictPolicy,
 };
@@ -9,7 +13,8 @@ use crate::agent::tools::ToolRegistry;
 
 use super::REPEATED_SUCCESS_GUIDANCE;
 use super::json_repair::{
-    canonical_tool_args, parse_or_repair_json, preview_text, repair_truncated_json_closure,
+    attempt_single_fim_tool_args_correction, canonical_tool_args, parse_error_category,
+    parse_or_repair_json, preview_text, repair_truncated_json_closure,
     repair_unescaped_inner_quotes, strip_thinking_tags,
 };
 
@@ -59,6 +64,9 @@ pub(super) fn plan_tool_call(
             )
         }
         Err(error) => {
+            let fail_key = (pending.name.clone(), cleaned_args.clone());
+            let primary_error_category = parse_error_category(&error);
+
             if pending.name == "bash"
                 && let Some((repaired, repair_kind)) = repair_bash_arguments(&cleaned_args)
                 && let Ok(value) = serde_json::from_str::<serde_json::Value>(&repaired)
@@ -78,7 +86,58 @@ pub(super) fn plan_tool_call(
                 );
             }
 
-            let fail_key = (pending.name.clone(), pending.arguments.clone());
+            if !consecutive_failures.contains_key(&fail_key) {
+                emit_tool_args_fim_correction_requested(
+                    &pending.call_id,
+                    &pending.name,
+                    primary_error_category,
+                );
+
+                if let Some(corrected) = attempt_single_fim_tool_args_correction(&cleaned_args) {
+                    match parse_or_repair_json(&corrected) {
+                        Ok(parsed) => {
+                            if validate_fim_corrected_args(tools, &pending.name, &parsed.value)
+                                .is_ok()
+                            {
+                                emit_tool_args_fim_correction_succeeded(
+                                    &pending.call_id,
+                                    &pending.name,
+                                    primary_error_category,
+                                );
+                                consecutive_failures.remove(&fail_key);
+                                return schedule_parsed_call(
+                                    tools,
+                                    pending,
+                                    parsed.value,
+                                    true,
+                                    &corrected,
+                                    previous_pass_successes,
+                                );
+                            }
+
+                            emit_tool_args_fim_correction_failed(
+                                &pending.call_id,
+                                &pending.name,
+                                primary_error_category,
+                            );
+                        }
+                        Err(corrected_error) => {
+                            emit_tool_args_fim_correction_failed(
+                                &pending.call_id,
+                                &pending.name,
+                                parse_error_category(&corrected_error),
+                            );
+                        }
+                    }
+                } else {
+                    emit_tool_args_fim_correction_failed(
+                        &pending.call_id,
+                        &pending.name,
+                        primary_error_category,
+                    );
+                }
+            }
+
             let count = consecutive_failures.entry(fail_key).or_insert(0);
             *count += 1;
 
@@ -137,6 +196,74 @@ fn repair_bash_arguments(raw: &str) -> Option<(String, &'static str)> {
     }
 
     None
+}
+
+fn validate_fim_corrected_args(
+    tools: &ToolRegistry,
+    tool_name: &str,
+    value: &serde_json::Value,
+) -> Result<(), String> {
+    let Some(tool) = tools.get(tool_name) else {
+        return Ok(());
+    };
+
+    validate_against_schema(value, &tool.spec().parameters)
+}
+
+fn validate_against_schema(
+    value: &serde_json::Value,
+    schema: &serde_json::Value,
+) -> Result<(), String> {
+    let Some(expected_type) = schema.get("type").and_then(serde_json::Value::as_str) else {
+        return Ok(());
+    };
+
+    match expected_type {
+        "object" => {
+            let object = value
+                .as_object()
+                .ok_or_else(|| "corrected args must be a JSON object".to_string())?;
+
+            let properties = schema
+                .get("properties")
+                .and_then(serde_json::Value::as_object)
+                .cloned()
+                .unwrap_or_default();
+
+            if let Some(required) = schema.get("required").and_then(serde_json::Value::as_array) {
+                for key in required.iter().filter_map(serde_json::Value::as_str) {
+                    if !object.contains_key(key) {
+                        return Err(format!("missing required field `{key}`"));
+                    }
+                }
+            }
+
+            if schema
+                .get("additionalProperties")
+                .and_then(serde_json::Value::as_bool)
+                == Some(false)
+                && let Some(unknown_key) = object.keys().find(|key| !properties.contains_key(*key))
+            {
+                return Err(format!("unexpected field `{unknown_key}`"));
+            }
+
+            for (key, property_value) in object {
+                if let Some(property_schema) = properties.get(key) {
+                    validate_against_schema(property_value, property_schema)?;
+                }
+            }
+
+            Ok(())
+        }
+        "string" if value.is_string() => Ok(()),
+        "integer" if value.as_i64().is_some() || value.as_u64().is_some() => Ok(()),
+        "number" if value.is_number() => Ok(()),
+        "boolean" if value.is_boolean() => Ok(()),
+        "array" if value.is_array() => Ok(()),
+        _ => Err(format!(
+            "corrected value does not match schema type `{expected_type}`"
+        )),
+    }
 }
 
 fn schedule_parsed_call(
