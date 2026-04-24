@@ -446,11 +446,11 @@ git commit -m "chore: finalize inline tool params action status and fim repair"
 - [x] **Step 4: Prepare merge handoff notes**
 
 ```text
-Summarize:
-1) inline tool parameter rendering behavior
-2) removed streaming surface behavior
-3) action-first status transitions
-4) FIM fallback safety constraints and events
+Merge handoff:
+1) Thinking label uses the short action name only; it stays concise and action-first.
+2) Other labels stay unchanged: executing remains executing, ready remains ready, errors still surface as error text.
+3) Naming protocol: derive action names from the first action word or explicit next-step name, then keep the label short.
+4) Verification: targeted tests passed for action-name extraction and status-label transitions, and repo gates passed (`just fmt-check`, `just lint`, `just test`).
 ```
 
 #### Task 5 Closure Notes (Completed)
