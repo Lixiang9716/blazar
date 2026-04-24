@@ -55,6 +55,7 @@ pub struct ChatApp {
     model_name: String,
     user_mode: UserMode,
     users_status_mode: StatusMode,
+    inline_command_matches: Vec<String>,
     git_pr_label: Option<String>,
     referenced_files: Vec<String>,
     context_usage: Option<ContextUsage>,
@@ -154,6 +155,7 @@ impl ChatApp {
             model_name,
             user_mode: UserMode::Auto,
             users_status_mode: StatusMode::Normal,
+            inline_command_matches: Vec::new(),
             git_pr_label: None,
             referenced_files: Vec::new(),
             context_usage: None,
@@ -284,6 +286,10 @@ impl ChatApp {
             .status_summary(self.pending_messages.len())
     }
 
+    pub(crate) fn inline_command_matches(&self) -> &[String] {
+        &self.inline_command_matches
+    }
+
     /// Whether the user has sent at least one message this session.
     pub fn has_user_sent(&self) -> bool {
         self.has_user_sent
@@ -366,6 +372,7 @@ impl ChatApp {
 
     pub fn set_composer_text(&mut self, value: &str) {
         self.composer = TextArea::from([value.to_owned()]);
+        self.sync_users_status_from_composer();
     }
 
     pub fn composer_text(&self) -> String {
@@ -376,6 +383,29 @@ impl ChatApp {
         let text = self.composer_text();
         self.send_message(&text);
         self.composer = TextArea::default();
+        self.sync_users_status_from_composer();
+    }
+
+    pub(crate) fn sync_users_status_from_composer(&mut self) {
+        let query = self.composer_text();
+        if query.starts_with('/') {
+            self.users_status_mode = StatusMode::CommandList;
+            self.refresh_inline_command_matches(&query);
+        } else {
+            self.users_status_mode = StatusMode::Normal;
+            self.inline_command_matches.clear();
+        }
+    }
+
+    fn refresh_inline_command_matches(&mut self, query: &str) {
+        let command_specs: Vec<crate::chat::commands::CommandSpec> =
+            self.command_registry.list().into_iter().cloned().collect();
+        self.inline_command_matches =
+            crate::chat::commands::matcher::ranked_match_names(query, &command_specs)
+                .into_iter()
+                .take(6)
+                .map(str::to_owned)
+                .collect();
     }
 
     fn active_turn_kind_label(&self) -> Option<&'static str> {

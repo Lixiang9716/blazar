@@ -119,24 +119,20 @@ impl ChatApp {
                 self.scroll_offset = self.scroll_offset.saturating_add(3);
             }
             InputAction::Key(key) => {
-                // Open command palette when typing '/' in empty composer
-                if let crossterm::event::KeyCode::Char('/') = key.code
-                    && self.composer_text().is_empty()
-                {
-                    self.picker.open();
-                    return;
-                }
                 self.composer.input(key);
+                self.sync_users_status_from_composer();
             }
             InputAction::Backspace => {
                 self.composer.input(crossterm::event::KeyEvent::new(
                     crossterm::event::KeyCode::Backspace,
                     crossterm::event::KeyModifiers::NONE,
                 ));
+                self.sync_users_status_from_composer();
             }
             InputAction::Paste(text) => {
                 debug!("handle_action: paste len={}", text.len());
                 self.composer.insert_str(&text);
+                self.sync_users_status_from_composer();
             }
             _ => {}
         }

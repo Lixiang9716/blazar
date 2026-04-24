@@ -617,10 +617,7 @@ fn picker_backspace_pops_filter_then_closes_overlay() {
     let repo_path = env!("CARGO_MANIFEST_DIR");
     let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
 
-    app.handle_action(InputAction::Key(KeyEvent::new(
-        KeyCode::Char('/'),
-        KeyModifiers::NONE,
-    )));
+    app.picker.open();
     app.handle_action(InputAction::Key(KeyEvent::new(
         KeyCode::Char('h'),
         KeyModifiers::NONE,
@@ -809,10 +806,7 @@ fn picker_plan_command_prefills_composer_shortcut() {
 
     let repo_path = env!("CARGO_MANIFEST_DIR");
     let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
-    app.handle_action(InputAction::Key(KeyEvent::new(
-        KeyCode::Char('/'),
-        KeyModifiers::NONE,
-    )));
+    app.picker.open();
     for ch in "plan".chars() {
         app.handle_action(InputAction::Key(KeyEvent::new(
             KeyCode::Char(ch),
@@ -822,6 +816,24 @@ fn picker_plan_command_prefills_composer_shortcut() {
 
     app.handle_action(InputAction::Submit);
     assert_eq!(app.composer_text(), "/plan ");
+}
+
+#[test]
+fn slash_input_switches_to_inline_command_status_mode() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+    app.handle_action(InputAction::Key(KeyEvent::new(
+        KeyCode::Char('/'),
+        KeyModifiers::NONE,
+    )));
+
+    assert!(!app.picker.is_open());
+    assert_eq!(
+        app.users_status_snapshot().status_mode,
+        StatusMode::CommandList
+    );
 }
 
 #[test]
@@ -1022,10 +1034,7 @@ fn picker_submit_regular_command_and_navigation_actions_work() {
 
     let repo_path = env!("CARGO_MANIFEST_DIR");
     let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
-    app.handle_action(InputAction::Key(KeyEvent::new(
-        KeyCode::Char('/'),
-        KeyModifiers::NONE,
-    )));
+    app.picker.open();
 
     let selected_before = app.picker.selected_index();
     app.handle_action(InputAction::ScrollDown);

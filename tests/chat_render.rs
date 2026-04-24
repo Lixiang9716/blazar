@@ -66,7 +66,7 @@ fn chat_view_keeps_mode_row_render_path_in_tight_heights() {
 }
 
 #[test]
-fn slash_opens_command_picker_overlay() {
+fn slash_renders_inline_command_matches_in_status_row() {
     use blazar::chat::input::InputAction;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
@@ -77,29 +77,33 @@ fn slash_opens_command_picker_overlay() {
         KeyModifiers::NONE,
     )));
 
-    let lines = render_to_lines_for_test(&mut app, 100, 35);
+    app.handle_action(InputAction::Key(KeyEvent::new(
+        KeyCode::Char('h'),
+        KeyModifiers::NONE,
+    )));
+    app.handle_action(InputAction::Key(KeyEvent::new(
+        KeyCode::Char('e'),
+        KeyModifiers::NONE,
+    )));
+
+    let lines = render_to_lines_for_test(&mut app, 100, 22);
 
     assert!(
-        lines.iter().any(|line| line.contains("Commands")),
-        "picker overlay should show its title"
+        lines.iter().any(|line| line.contains("/help")),
+        "status row should render inline slash command matches"
     );
     assert!(
-        lines.iter().any(|line| line.contains("/help")),
-        "picker overlay should show command entries"
+        lines.iter().all(|line| !line.contains("Commands")),
+        "typing slash should not open command picker overlay"
     );
 }
 
 #[test]
 fn picker_navigation_reaches_later_commands() {
     use blazar::chat::input::InputAction;
-    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     let mut app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
-
-    app.handle_action(InputAction::Key(KeyEvent::new(
-        KeyCode::Char('/'),
-        KeyModifiers::NONE,
-    )));
+    app.picker.open();
 
     for _ in 0..12 {
         app.handle_action(InputAction::PickerDown);
@@ -129,10 +133,7 @@ fn closing_picker_routes_typing_back_to_composer() {
         .with_duration(Duration::from_millis(250));
     *app.picker.overlay_state_mut() = animated_overlay;
 
-    app.handle_action(InputAction::Key(KeyEvent::new(
-        KeyCode::Char('/'),
-        KeyModifiers::NONE,
-    )));
+    app.picker.open();
     app.handle_action(InputAction::Quit);
     assert!(
         app.picker.is_visible(),
@@ -193,16 +194,10 @@ fn title_bar_uses_terminal_default_background() {
 
 #[test]
 fn picker_render_persists_overlay_layout_state() {
-    use blazar::chat::input::InputAction;
-    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-
     let backend = TestBackend::new(100, 35);
     let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
     let mut app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
-    app.handle_action(InputAction::Key(KeyEvent::new(
-        KeyCode::Char('/'),
-        KeyModifiers::NONE,
-    )));
+    app.picker.open();
 
     terminal
         .draw(|frame| render_frame(frame, &mut app, 1_200))

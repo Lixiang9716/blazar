@@ -8,7 +8,7 @@ use ratatui_core::{
 use ratatui_widgets::paragraph::Paragraph;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-use crate::chat::users_state::UserMode;
+use crate::chat::users_state::{StatusMode, UserMode};
 
 pub(super) fn render_users_status_row(
     frame: &mut Frame,
@@ -17,6 +17,23 @@ pub(super) fn render_users_status_row(
     theme: &ChatTheme,
 ) {
     let snapshot = app.users_status_snapshot();
+    if snapshot.status_mode == StatusMode::CommandList {
+        let query = app.composer_text();
+        let command_matches = app.inline_command_matches();
+        let status_text = if command_matches.is_empty() {
+            format!("{query} · No command matches")
+        } else {
+            format!("{query} · {}", command_matches.join("  "))
+        };
+        let line = Line::from(Span::styled(
+            truncate_left_status_text(&status_text, area.width as usize),
+            theme.status_bar,
+        ));
+        let bar = Paragraph::new(line).style(theme.status_bar);
+        frame.render_widget(bar, area);
+        return;
+    }
+
     let ws_name = snapshot
         .current_path
         .rsplit('/')
