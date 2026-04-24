@@ -1703,7 +1703,9 @@ fn run_turn_repairs_truncated_payload_for_bash_tool_calls() {
 
 #[test]
 fn run_turn_uses_fim_correction_only_after_deterministic_repair_fails() {
-    struct FallbackNeededProvider;
+    struct FallbackNeededProvider {
+        correction_requests: Arc<AtomicU32>,
+    }
 
     impl LlmProvider for FallbackNeededProvider {
         fn stream_turn(
@@ -1713,6 +1715,21 @@ fn run_turn_uses_fim_correction_only_after_deterministic_repair_fails() {
             _tools: &[ToolSpec],
             tx: Sender<ProviderEvent>,
         ) {
+            let last_user_message = messages.iter().rev().find_map(|message| match message {
+                ProviderMessage::User { content } => Some(content.as_str()),
+                _ => None,
+            });
+            if last_user_message.is_some_and(|content| {
+                content.contains("Return ONLY corrected JSON tool arguments.")
+            }) {
+                self.correction_requests.fetch_add(1, Ordering::SeqCst);
+                let _ = tx.send(ProviderEvent::TextDelta(
+                    r#"{"command":"echo fixed","timeout_secs":30}"#.into(),
+                ));
+                let _ = tx.send(ProviderEvent::TurnComplete);
+                return;
+            }
+
             let has_tool_result = messages
                 .iter()
                 .any(|message| matches!(message, ProviderMessage::ToolResult { .. }));
@@ -1766,12 +1783,15 @@ fn run_turn_uses_fim_correction_only_after_deterministic_repair_fails() {
     let (event_tx, _event_rx) = mpsc::channel();
     let cancel = Arc::new(AtomicBool::new(false));
     let mut messages = user_messages("test fim fallback");
+    let correction_requests = Arc::new(AtomicU32::new(0));
 
     let (outcome, captured) = crate::observability::logging::with_captured_structured_events_for_test(
         || {
             execute_turn(
                 &mut messages,
-                &FallbackNeededProvider,
+                &FallbackNeededProvider {
+                    correction_requests: Arc::clone(&correction_requests),
+                },
                 "echo",
                 &registry,
                 &ChannelObserver { tx: &event_tx },
@@ -1782,6 +1802,7 @@ fn run_turn_uses_fim_correction_only_after_deterministic_repair_fails() {
 
     assert!(matches!(outcome, TurnOutcome::Complete));
     assert_eq!(counter.load(Ordering::SeqCst), 1);
+    assert_eq!(correction_requests.load(Ordering::SeqCst), 1);
     assert!(messages.iter().any(|message| {
         matches!(message, ProviderMessage::ToolResult { output, is_error, .. }
                 if !*is_error && output.contains(JSON_REPAIR_NOTE))
@@ -1834,7 +1855,9 @@ fn run_turn_uses_fim_correction_only_after_deterministic_repair_fails() {
 
 #[test]
 fn run_turn_rejects_invalid_fim_correction_and_returns_parse_error() {
-    struct FallbackInvalidProvider;
+    struct FallbackInvalidProvider {
+        correction_requests: Arc<AtomicU32>,
+    }
 
     impl LlmProvider for FallbackInvalidProvider {
         fn stream_turn(
@@ -1844,6 +1867,21 @@ fn run_turn_rejects_invalid_fim_correction_and_returns_parse_error() {
             _tools: &[ToolSpec],
             tx: Sender<ProviderEvent>,
         ) {
+            let last_user_message = messages.iter().rev().find_map(|message| match message {
+                ProviderMessage::User { content } => Some(content.as_str()),
+                _ => None,
+            });
+            if last_user_message.is_some_and(|content| {
+                content.contains("Return ONLY corrected JSON tool arguments.")
+            }) {
+                self.correction_requests.fetch_add(1, Ordering::SeqCst);
+                let _ = tx.send(ProviderEvent::TextDelta(
+                    r#"{"command":"echo fixed","timeout_secs":30}</tool_call>"#.into(),
+                ));
+                let _ = tx.send(ProviderEvent::TurnComplete);
+                return;
+            }
+
             let has_tool_result = messages
                 .iter()
                 .any(|message| matches!(message, ProviderMessage::ToolResult { .. }));
@@ -1897,12 +1935,15 @@ fn run_turn_rejects_invalid_fim_correction_and_returns_parse_error() {
     let (event_tx, _event_rx) = mpsc::channel();
     let cancel = Arc::new(AtomicBool::new(false));
     let mut messages = user_messages("test invalid fim fallback");
+    let correction_requests = Arc::new(AtomicU32::new(0));
 
     let (outcome, captured) = crate::observability::logging::with_captured_structured_events_for_test(
         || {
             execute_turn(
                 &mut messages,
-                &FallbackInvalidProvider,
+                &FallbackInvalidProvider {
+                    correction_requests: Arc::clone(&correction_requests),
+                },
                 "echo",
                 &registry,
                 &ChannelObserver { tx: &event_tx },
@@ -1913,6 +1954,7 @@ fn run_turn_rejects_invalid_fim_correction_and_returns_parse_error() {
 
     assert!(matches!(outcome, TurnOutcome::Complete));
     assert_eq!(counter.load(Ordering::SeqCst), 0);
+    assert_eq!(correction_requests.load(Ordering::SeqCst), 1);
     assert!(messages.iter().any(|message| {
         matches!(message, ProviderMessage::ToolResult { output, is_error, .. }
                 if *is_error && output.contains("JSON PARSE ERROR"))
@@ -1958,9 +2000,42 @@ fn run_turn_rejects_invalid_fim_correction_and_returns_parse_error() {
     assert_eq!(requested.get("repaired").and_then(Value::as_bool), Some(false));
     assert_eq!(
         failed.get("parse_error_category").and_then(Value::as_str),
-        Some("expected_value")
+        Some("expected_comma_or_end")
     );
     assert_eq!(failed.get("repaired").and_then(Value::as_bool), Some(false));
+}
+
+#[test]
+fn plan_tool_call_clears_failure_signature_with_cleaned_args_key() {
+    let cleaned_args = r#"{"command":"echo fixed","timeout_secs":30}"#;
+    let mut failures = std::collections::HashMap::from([(
+        ("bash".to_string(), cleaned_args.to_string()),
+        1usize,
+    )]);
+    let pending = super::scheduler::PendingToolCall {
+        call_id: "call-sig".into(),
+        name: "bash".into(),
+        arguments: format!("<think>hidden</think>{cleaned_args}"),
+    };
+
+    let scheduled = super::scheduler::plan_tool_call(
+        &empty_registry(),
+        pending,
+        &std::collections::HashSet::new(),
+        &mut failures,
+        &mut |_pending, _cleaned, _parse_error| {
+            panic!("valid cleaned args should not request correction")
+        },
+    );
+
+    assert!(matches!(
+        scheduled.item.action,
+        super::scheduler::PlannedToolAction::Execute { .. }
+    ));
+    assert!(
+        !failures.contains_key(&("bash".to_string(), cleaned_args.to_string())),
+        "parse success should clear the normalized cleaned-args failure key"
+    );
 }
 
 #[test]

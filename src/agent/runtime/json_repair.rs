@@ -94,8 +94,8 @@ pub(super) fn parse_error_category(error: &serde_json::Error) -> &'static str {
     }
 }
 
-pub(super) fn attempt_single_fim_tool_args_correction(raw: &str) -> Option<String> {
-    repair_missing_comma_between_string_and_key(raw)
+pub(super) fn parse_json_strict(raw: &str) -> Result<Value, serde_json::Error> {
+    serde_json::from_str::<Value>(raw)
 }
 
 pub(super) fn canonical_tool_args(value: &Value, fallback: &str) -> String {
@@ -345,49 +345,6 @@ fn is_probable_string_terminator(bytes: &[u8], quote_idx: usize) -> bool {
     }
 
     matches!(bytes[idx], b',' | b'}' | b']' | b':')
-}
-
-fn repair_missing_comma_between_string_and_key(raw: &str) -> Option<String> {
-    let bytes = raw.as_bytes();
-
-    for idx in 0..bytes.len().saturating_sub(1) {
-        if bytes[idx] != b'"' || bytes[idx + 1] != b'"' {
-            continue;
-        }
-
-        let key_start = idx + 2;
-        if key_start >= bytes.len()
-            || !(bytes[key_start].is_ascii_alphabetic() || bytes[key_start] == b'_')
-        {
-            continue;
-        }
-
-        let mut key_end = key_start;
-        while key_end < bytes.len()
-            && (bytes[key_end].is_ascii_alphanumeric() || matches!(bytes[key_end], b'_' | b'-'))
-        {
-            key_end += 1;
-        }
-
-        if key_end >= bytes.len() || bytes[key_end] != b'"' {
-            continue;
-        }
-
-        let mut cursor = key_end + 1;
-        while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
-            cursor += 1;
-        }
-
-        if cursor >= bytes.len() || bytes[cursor] != b':' {
-            continue;
-        }
-
-        let mut repaired = raw.to_string();
-        repaired.replace_range(idx..idx + 2, "\",\"");
-        return Some(repaired);
-    }
-
-    None
 }
 
 /// Safe UTF-8 text preview for logging.

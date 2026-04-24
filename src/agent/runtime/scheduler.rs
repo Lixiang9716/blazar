@@ -13,9 +13,9 @@ use crate::agent::tools::ToolRegistry;
 
 use super::REPEATED_SUCCESS_GUIDANCE;
 use super::json_repair::{
-    attempt_single_fim_tool_args_correction, canonical_tool_args, parse_error_category,
-    parse_or_repair_json, preview_text, repair_truncated_json_closure,
-    repair_unescaped_inner_quotes, strip_thinking_tags,
+    canonical_tool_args, parse_error_category, parse_json_strict, parse_or_repair_json,
+    preview_text, repair_truncated_json_closure, repair_unescaped_inner_quotes,
+    strip_thinking_tags,
 };
 
 pub(super) struct PendingToolCall {
@@ -44,16 +44,21 @@ pub(super) struct ScheduledCall<T> {
     pub(super) claims: Vec<CapabilityClaim>,
 }
 
-pub(super) fn plan_tool_call(
+pub(super) fn plan_tool_call<F>(
     tools: &ToolRegistry,
     pending: PendingToolCall,
     previous_pass_successes: &HashSet<(String, String)>,
     consecutive_failures: &mut HashMap<(String, String), usize>,
-) -> ScheduledCall<PlannedToolCall> {
+    request_tool_args_correction: &mut F,
+) -> ScheduledCall<PlannedToolCall>
+where
+    F: FnMut(&PendingToolCall, &str, &str) -> Option<String>,
+{
     let cleaned_args = strip_thinking_tags(&pending.arguments);
+    let fail_key = tool_args_failure_key(&pending.name, &cleaned_args);
     match parse_or_repair_json(&cleaned_args) {
         Ok(parsed) => {
-            consecutive_failures.remove(&(pending.name.clone(), pending.arguments.clone()));
+            consecutive_failures.remove(&fail_key);
             schedule_parsed_call(
                 tools,
                 pending,
@@ -64,7 +69,6 @@ pub(super) fn plan_tool_call(
             )
         }
         Err(error) => {
-            let fail_key = (pending.name.clone(), cleaned_args.clone());
             let primary_error_category = parse_error_category(&error);
 
             if pending.name == "bash"
@@ -75,7 +79,7 @@ pub(super) fn plan_tool_call(
                     "runtime: repaired {repair_kind} in bash arguments\n  raw: {}",
                     preview_text(&pending.arguments, 200)
                 );
-                consecutive_failures.remove(&(pending.name.clone(), pending.arguments.clone()));
+                consecutive_failures.remove(&fail_key);
                 return schedule_parsed_call(
                     tools,
                     pending,
@@ -93,12 +97,12 @@ pub(super) fn plan_tool_call(
                     primary_error_category,
                 );
 
-                if let Some(corrected) = attempt_single_fim_tool_args_correction(&cleaned_args) {
-                    match parse_or_repair_json(&corrected) {
-                        Ok(parsed) => {
-                            if validate_fim_corrected_args(tools, &pending.name, &parsed.value)
-                                .is_ok()
-                            {
+                if let Some(corrected) =
+                    request_tool_args_correction(&pending, &cleaned_args, &error.to_string())
+                {
+                    match parse_json_strict(&corrected) {
+                        Ok(value) => {
+                            if validate_fim_corrected_args(tools, &pending.name, &value).is_ok() {
                                 emit_tool_args_fim_correction_succeeded(
                                     &pending.call_id,
                                     &pending.name,
@@ -108,7 +112,7 @@ pub(super) fn plan_tool_call(
                                 return schedule_parsed_call(
                                     tools,
                                     pending,
-                                    parsed.value,
+                                    value,
                                     true,
                                     &corrected,
                                     previous_pass_successes,
@@ -196,6 +200,10 @@ fn repair_bash_arguments(raw: &str) -> Option<(String, &'static str)> {
     }
 
     None
+}
+
+fn tool_args_failure_key(tool_name: &str, cleaned_args: &str) -> (String, String) {
+    (tool_name.to_string(), cleaned_args.to_string())
 }
 
 fn validate_fim_corrected_args(

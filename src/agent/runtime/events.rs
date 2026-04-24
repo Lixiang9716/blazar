@@ -29,7 +29,6 @@ fn emit_tool_args_fim_event(
         message,
         StructuredEventContext {
             tool_name: Some(tool_name),
-            error_kind: Some(parse_error_category),
             parse_error_category: Some(parse_error_category),
             repaired: Some(repaired),
             call_id: Some(call_id),
