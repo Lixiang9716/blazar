@@ -54,6 +54,18 @@ fn chat_view_renders_status_input_mode_rows_in_users_region() {
     );
 }
 
+
+#[test]
+fn chat_view_keeps_mode_row_render_path_in_tight_heights() {
+    let mut app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
+    let lines = render_to_lines_for_test(&mut app, 100, 3);
+
+    assert!(
+        lines.iter().any(|line| line.contains("AUTO")),
+        "users mode row should still render in tight heights"
+    );
+}
+
 #[test]
 fn slash_opens_command_picker_overlay() {
     use blazar::chat::input::InputAction;

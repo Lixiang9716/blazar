@@ -58,12 +58,6 @@ pub fn render_frame(frame: &mut Frame, app: &mut ChatApp, tick_ms: u64) {
 
     let streaming = app.is_streaming();
     let users_height = users_height(area.height);
-
-    if users_height == 0 {
-        timeline::render_timeline(frame, area, app, &theme);
-        return;
-    }
-
     let [timeline_zone, users_area] = vertical![>=1, ==(users_height)].areas(area);
     let streaming_height: u16 = if streaming { 1 } else { 0 };
     let banner_height = if app.has_user_sent() {
@@ -84,16 +78,11 @@ pub fn render_frame(frame: &mut Frame, app: &mut ChatApp, tick_ms: u64) {
         streaming::render_streaming_indicator(frame, streaming_area, tick_ms, app, &theme);
     }
 
-    if users_area.height >= 3 {
-        let [status_area, input_area, mode_area] = vertical![==1, >=1, ==1].areas(users_area);
-        status::render_users_status_row(frame, status_area, app, &theme);
-        input::render_input(frame, input_area, app, &theme);
-        status::render_mode_config_row(frame, mode_area, app, &theme);
-    } else {
-        let [status_area, input_area] = vertical![==1, >=1].areas(users_area);
-        status::render_users_status_row(frame, status_area, app, &theme);
-        input::render_input(frame, input_area, app, &theme);
-    }
+    let [status_area, users_tail] = vertical![==1, >=0].areas(users_area);
+    let [input_area, mode_area] = vertical![>=0, ==1].areas(users_tail);
+    status::render_users_status_row(frame, status_area, app, &theme);
+    input::render_input(frame, input_area, app, &theme);
+    status::render_mode_config_row(frame, mode_area, app, &theme);
 
     if app.picker.is_visible() {
         picker::render_picker(frame, area, app, &theme);

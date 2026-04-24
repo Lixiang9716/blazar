@@ -6,7 +6,7 @@ use ratatui_core::{
     text::{Line, Span},
 };
 use ratatui_widgets::paragraph::Paragraph;
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+use unicode_width::UnicodeWidthStr;
 
 use crate::chat::users_state::UserMode;
 
@@ -55,7 +55,11 @@ pub(super) fn render_users_status_row(
 
     // Truncate left side if total exceeds available width
     let max_left = available.saturating_sub(right_len + 1);
-    let left_display = truncate_with_ellipsis(&left, max_left);
+    let left_display = if left.width() > max_left {
+        format!("{}…", &left[..max_left.saturating_sub(1)])
+    } else {
+        left
+    };
 
     let gap = available.saturating_sub(left_display.width() + right_len);
 
@@ -67,55 +71,6 @@ pub(super) fn render_users_status_row(
 
     let bar = Paragraph::new(line).style(theme.status_bar);
     frame.render_widget(bar, area);
-}
-
-fn truncate_with_ellipsis(text: &str, max_width: usize) -> String {
-    if max_width == 0 {
-        return String::new();
-    }
-    if text.width() <= max_width {
-        return text.to_owned();
-    }
-    if max_width == 1 {
-        return "…".to_owned();
-    }
-
-    let mut out = String::new();
-    let mut used = 0usize;
-    for ch in text.chars() {
-        let ch_width = ch.width().unwrap_or(0);
-        if used + ch_width > max_width - 1 {
-            break;
-        }
-        out.push(ch);
-        used += ch_width;
-    }
-    out.push('…');
-    out
-}
-
-#[cfg(test)]
-mod tests {
-    use super::truncate_with_ellipsis;
-    use unicode_width::UnicodeWidthStr;
-
-    #[test]
-    fn truncate_with_ellipsis_handles_wide_unicode_without_splitting_codepoints() {
-        let text = "状态状态状态";
-        let truncated = truncate_with_ellipsis(text, 5);
-
-        assert_eq!(truncated, "状态…");
-        assert_eq!(truncated.width(), 5);
-    }
-
-    #[test]
-    fn truncate_with_ellipsis_returns_only_ellipsis_when_width_is_one() {
-        let text = "状态状态";
-        let truncated = truncate_with_ellipsis(text, 1);
-
-        assert_eq!(truncated, "…");
-        assert_eq!(truncated.width(), 1);
-    }
 }
 
 pub(super) fn render_mode_config_row(
