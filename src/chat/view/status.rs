@@ -6,28 +6,26 @@ use ratatui_core::{
     text::{Line, Span},
 };
 use ratatui_widgets::paragraph::Paragraph;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-pub(super) fn render_separator(frame: &mut Frame, area: Rect, theme: &ChatTheme) {
-    let line = Line::from(Span::styled(
-        "─".repeat(area.width as usize),
-        theme.dim_text,
-    ));
-    let bar = Paragraph::new(line);
-    frame.render_widget(bar, area);
-}
+use crate::chat::users_state::UserMode;
 
-pub(super) fn render_status_bar(frame: &mut Frame, area: Rect, app: &ChatApp, theme: &ChatTheme) {
-    // Left: workspace basename + git branch (repo awareness)
-    let ws_name = app
-        .display_path()
+pub(super) fn render_users_status_row(
+    frame: &mut Frame,
+    area: Rect,
+    app: &ChatApp,
+    theme: &ChatTheme,
+) {
+    let snapshot = app.users_status_snapshot();
+    let ws_name = snapshot
+        .current_path
         .rsplit('/')
         .next()
-        .unwrap_or(app.display_path());
-    let branch = app.branch();
-    let left = if branch.is_empty() {
+        .unwrap_or(snapshot.current_path.as_str());
+    let left = if snapshot.branch.is_empty() {
         format!("{ws_name} · / commands")
     } else {
-        format!("{ws_name} ({branch}) · / commands")
+        format!("{ws_name} ({}) · / commands", snapshot.branch)
     };
 
     let status = app.status_label();
@@ -40,11 +38,11 @@ pub(super) fn render_status_bar(frame: &mut Frame, area: Rect, app: &ChatApp, th
     };
 
     // Show short model name (last path segment) for brevity.
-    let model_short = app
-        .model_name()
+    let model_short = snapshot
+        .model_name
         .rsplit('/')
         .next()
-        .unwrap_or(app.model_name());
+        .unwrap_or(snapshot.model_name.as_str());
     let debug = app.debug_status_label();
     let right = if debug.is_empty() {
         format!("{model_short} · {status}")
@@ -53,22 +51,105 @@ pub(super) fn render_status_bar(frame: &mut Frame, area: Rect, app: &ChatApp, th
     };
 
     let available = area.width as usize;
-    let right_len = right.len();
+    let right_len = right.width();
 
     // Truncate left side if total exceeds available width
     let max_left = available.saturating_sub(right_len + 1);
-    let left_display = if left.len() > max_left {
-        format!("{}…", &left[..max_left.saturating_sub(1)])
-    } else {
-        left
-    };
+    let left_display = truncate_with_ellipsis(&left, max_left);
 
-    let gap = available.saturating_sub(left_display.len() + right_len);
+    let gap = available.saturating_sub(left_display.width() + right_len);
 
     let line = Line::from(vec![
         Span::styled(left_display, theme.status_bar),
         Span::styled(" ".repeat(gap), theme.status_bar),
         Span::styled(right, status_style),
+    ]);
+
+    let bar = Paragraph::new(line).style(theme.status_bar);
+    frame.render_widget(bar, area);
+}
+
+fn truncate_with_ellipsis(text: &str, max_width: usize) -> String {
+    if max_width == 0 {
+        return String::new();
+    }
+    if text.width() <= max_width {
+        return text.to_owned();
+    }
+    if max_width == 1 {
+        return "…".to_owned();
+    }
+
+    let mut out = String::new();
+    let mut used = 0usize;
+    for ch in text.chars() {
+        let ch_width = ch.width().unwrap_or(0);
+        if used + ch_width > max_width - 1 {
+            break;
+        }
+        out.push(ch);
+        used += ch_width;
+    }
+    out.push('…');
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::truncate_with_ellipsis;
+    use unicode_width::UnicodeWidthStr;
+
+    #[test]
+    fn truncate_with_ellipsis_handles_wide_unicode_without_splitting_codepoints() {
+        let text = "状态状态状态";
+        let truncated = truncate_with_ellipsis(text, 5);
+
+        assert_eq!(truncated, "状态…");
+        assert_eq!(truncated.width(), 5);
+    }
+
+    #[test]
+    fn truncate_with_ellipsis_returns_only_ellipsis_when_width_is_one() {
+        let text = "状态状态";
+        let truncated = truncate_with_ellipsis(text, 1);
+
+        assert_eq!(truncated, "…");
+        assert_eq!(truncated.width(), 1);
+    }
+}
+
+pub(super) fn render_mode_config_row(
+    frame: &mut Frame,
+    area: Rect,
+    app: &ChatApp,
+    theme: &ChatTheme,
+) {
+    let snapshot = app.users_status_snapshot();
+    let left = match snapshot.mode {
+        UserMode::Auto => "AUTO",
+        UserMode::Plan => "PLAN",
+    };
+
+    let context_text = match snapshot.context_usage {
+        Some(context) if context.max_tokens > 0 => format!(
+            "{}/{} ({}%)",
+            context.used_tokens,
+            context.max_tokens,
+            context.used_tokens.saturating_mul(100) / context.max_tokens
+        ),
+        _ => "n/a".to_owned(),
+    };
+    let right = format!("{} · ctx {context_text}", snapshot.model_name);
+
+    let available = area.width as usize;
+    let left_len = left.width();
+    let right_len = right.width();
+    let gap = available.saturating_sub(left_len + right_len);
+
+    let line = Line::from(vec![
+        Span::styled(left, theme.bold_text),
+        Span::styled(" ".repeat(gap), theme.status_bar),
+        Span::styled(right, theme.status_right),
     ]);
 
     let bar = Paragraph::new(line).style(theme.status_bar);

@@ -14,7 +14,7 @@ pub(super) fn render_input(frame: &mut Frame, area: Rect, app: &ChatApp, theme: 
     let [prompt_area, composer_area] = horizontal![==2, >=1].areas(area);
 
     let prompt =
-        Paragraph::new(Line::from(Span::styled("› ", theme.input_prompt))).style(theme.timeline_bg);
+        Paragraph::new(Line::from(Span::styled("> ", theme.input_prompt))).style(theme.timeline_bg);
     frame.render_widget(prompt, prompt_area);
 
     if app.composer_text().is_empty() {

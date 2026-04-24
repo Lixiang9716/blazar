@@ -35,6 +35,26 @@ fn chat_view_renders_status_bar() {
 }
 
 #[test]
+fn chat_view_renders_status_input_mode_rows_in_users_region() {
+    let mut app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
+    let lines = render_to_lines_for_test(&mut app, 100, 22);
+    let users_rows = &lines[lines.len().saturating_sub(3)..];
+
+    assert!(
+        users_rows[1].contains("> "),
+        "users input row should render the prompt"
+    );
+    assert!(
+        users_rows[2].contains("AUTO"),
+        "users mode row should render AUTO mode"
+    );
+    assert!(
+        users_rows[2].contains("echo"),
+        "users mode row should render the active model"
+    );
+}
+
+#[test]
 fn slash_opens_command_picker_overlay() {
     use blazar::chat::input::InputAction;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};

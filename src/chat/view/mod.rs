@@ -57,30 +57,23 @@ pub fn render_frame(frame: &mut Frame, app: &mut ChatApp, tick_ms: u64) {
     frame.render_widget(bg_block, area);
 
     let streaming = app.is_streaming();
-    // When streaming, allocate rows for the slime_run animation above input.
+    let users_height = users_height(area.height);
+
+    if users_height == 0 {
+        timeline::render_timeline(frame, area, app, &theme);
+        return;
+    }
+
+    let [timeline_zone, users_area] = vertical![>=1, ==(users_height)].areas(area);
     let streaming_height: u16 = if streaming { 1 } else { 0 };
+    let banner_height = if app.has_user_sent() {
+        0
+    } else {
+        12.min(timeline_zone.height.saturating_sub(1 + streaming_height))
+    };
 
-    // Auto-collapse banner once user starts chatting.
-    let banner_height: u16 = if app.has_user_sent() { 0 } else { 12 };
-
-    let [
-        banner_area,
-        timeline_area,
-        streaming_area,
-        sep_top,
-        input_area,
-        sep_bot,
-        status_area,
-    ] = vertical![
-        ==(banner_height),
-        >=1,
-        ==(streaming_height),
-        ==1,
-        ==1,
-        ==1,
-        ==1
-    ]
-    .areas(area);
+    let [banner_area, timeline_area, streaming_area] =
+        vertical![==(banner_height), >=1, ==(streaming_height)].areas(timeline_zone);
 
     if banner_height > 0 {
         banner::render_welcome_banner(frame, banner_area, app, tick_ms, &theme);
@@ -91,12 +84,26 @@ pub fn render_frame(frame: &mut Frame, app: &mut ChatApp, tick_ms: u64) {
         streaming::render_streaming_indicator(frame, streaming_area, tick_ms, app, &theme);
     }
 
-    status::render_separator(frame, sep_top, &theme);
-    input::render_input(frame, input_area, app, &theme);
-    status::render_separator(frame, sep_bot, &theme);
-    status::render_status_bar(frame, status_area, app, &theme);
+    if users_area.height >= 3 {
+        let [status_area, input_area, mode_area] = vertical![==1, >=1, ==1].areas(users_area);
+        status::render_users_status_row(frame, status_area, app, &theme);
+        input::render_input(frame, input_area, app, &theme);
+        status::render_mode_config_row(frame, mode_area, app, &theme);
+    } else {
+        let [status_area, input_area] = vertical![==1, >=1].areas(users_area);
+        status::render_users_status_row(frame, status_area, app, &theme);
+        input::render_input(frame, input_area, app, &theme);
+    }
 
     if app.picker.is_visible() {
         picker::render_picker(frame, area, app, &theme);
+    }
+}
+
+fn users_height(total_height: u16) -> u16 {
+    if total_height <= 1 {
+        0
+    } else {
+        3.min(total_height.saturating_sub(1))
     }
 }
