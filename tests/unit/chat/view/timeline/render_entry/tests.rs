@@ -74,8 +74,17 @@ fn render_entry_renders_tool_use_and_tool_call_statuses() {
     let running_text = lines_text(&running_lines).join("\n");
     assert!(running_text.contains("read_file"));
     assert!(running_text.contains("Cargo.toml"));
+    assert!(
+        running_lines[0]
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<String>()
+            .contains("Cargo.toml")
+    );
     assert_eq!(running_text.matches('●').count(), 1);
     assert_eq!(first_line_marker_style(&running_lines), Some(theme.spinner));
+    assert_eq!(running_lines.len(), 2);
 
     let success = TimelineEntry::tool_call(
         "c2",
@@ -149,7 +158,7 @@ fn tool_descriptor_maps_status_and_semantic_summary() {
         descriptor.status_visual,
         super::tooling::descriptor::StatusVisual::RunningDot
     );
-    assert_eq!(descriptor.subtitle.as_deref(), Some("src/main.rs"));
+    assert_eq!(descriptor.inline_parameter.as_deref(), Some("src/main.rs"));
 
     let success = TimelineEntry::tool_call(
         "call-2",
@@ -180,6 +189,35 @@ fn tool_descriptor_maps_status_and_semantic_summary() {
         error_descriptor.status_visual,
         super::tooling::descriptor::StatusVisual::ErrorX
     );
+}
+
+#[test]
+fn tool_descriptor_renders_inline_parameter_with_width_safe_truncation() {
+    let theme = crate::chat::theme::build_theme();
+    let entry = TimelineEntry::tool_call(
+        "call-width",
+        "bash",
+        ToolKind::Local,
+        r#"{"command":"cargo test --package very-long-package-name --all-features"}"#,
+        "running",
+        r#"{"command":"cargo test --package very-long-package-name --all-features"}"#,
+        ToolCallStatus::Running,
+    );
+
+    let rendered = render_entry(&entry, &theme, 24);
+    let header = rendered
+        .first()
+        .map(|line| {
+            line.spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect::<String>()
+        })
+        .unwrap_or_default();
+
+    assert!(header.contains("bash"));
+    assert!(header.contains("…"));
+    assert_eq!(rendered.len(), 2);
 }
 
 #[test]

@@ -1,6 +1,7 @@
 use super::descriptor::{EntryDescriptor, ResultMode, StatusVisual};
 use super::*;
 use crate::chat::view::timeline::render_entry::common::tool_badge;
+use unicode_width::UnicodeWidthStr;
 
 pub(crate) fn status_marker(
     status_visual: StatusVisual,
@@ -18,6 +19,7 @@ pub(super) fn render_tool_descriptor<'a>(
     entry: &TimelineEntry,
     theme: &ChatTheme,
     _marker_style: Style,
+    width: u16,
 ) -> Vec<Line<'a>> {
     let mut lines = Vec::new();
 
@@ -36,14 +38,23 @@ pub(super) fn render_tool_descriptor<'a>(
         header.push(Span::raw(" "));
         header.push(Span::styled(badge, theme.dim_text));
     }
-    lines.push(Line::from(header));
 
-    if let Some(subtitle) = &descriptor.subtitle {
-        lines.push(Line::from(vec![
-            Span::raw(INDENT),
-            Span::styled(subtitle.clone(), theme.tool_target),
-        ]));
+    let mut header_width = MARGIN.width() + status_marker.width() + 1 + descriptor.title.width();
+    if let Some(badge) = tool_badge(*kind) {
+        header_width += 1 + badge.width();
     }
+
+    if let Some(inline_parameter) = descriptor.inline_parameter.as_deref() {
+        let available = (width as usize).saturating_sub(header_width + 1);
+        let fitted_parameter =
+            super::super::common::truncate_display_width(inline_parameter, available);
+        if !fitted_parameter.is_empty() {
+            header.push(Span::raw(" "));
+            header.push(Span::styled(fitted_parameter, theme.tool_target));
+        }
+    }
+
+    lines.push(Line::from(header));
 
     let preview_style = match descriptor.result_mode {
         ResultMode::Diff => theme.diff_add,
