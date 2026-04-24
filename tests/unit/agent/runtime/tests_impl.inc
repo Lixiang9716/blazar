@@ -2006,6 +2006,130 @@ fn run_turn_rejects_invalid_fim_correction_and_returns_parse_error() {
 }
 
 #[test]
+fn run_turn_rejects_fim_correction_that_violates_schema_constraints() {
+    struct SchemaInvalidCorrectionProvider {
+        correction_requests: Arc<AtomicU32>,
+    }
+
+    impl LlmProvider for SchemaInvalidCorrectionProvider {
+        fn stream_turn(
+            &self,
+            _model: &str,
+            messages: &[ProviderMessage],
+            _tools: &[ToolSpec],
+            tx: Sender<ProviderEvent>,
+        ) {
+            let last_user_message = messages.iter().rev().find_map(|message| match message {
+                ProviderMessage::User { content } => Some(content.as_str()),
+                _ => None,
+            });
+            if last_user_message.is_some_and(|content| {
+                content.contains("Return ONLY corrected JSON tool arguments.")
+            }) {
+                self.correction_requests.fetch_add(1, Ordering::SeqCst);
+                let _ = tx.send(ProviderEvent::TextDelta(
+                    r#"{"command":"echo fixed","timeout_secs":0}"#.into(),
+                ));
+                let _ = tx.send(ProviderEvent::TurnComplete);
+                return;
+            }
+
+            let has_tool_result = messages
+                .iter()
+                .any(|message| matches!(message, ProviderMessage::ToolResult { .. }));
+            if has_tool_result {
+                let _ = tx.send(ProviderEvent::TextDelta("done".into()));
+                let _ = tx.send(ProviderEvent::TurnComplete);
+            } else {
+                let _ = tx.send(ProviderEvent::ToolCall {
+                    call_id: "call-fim-schema".into(),
+                    name: "bash".into(),
+                    arguments: r#"{"command":"echo broken""timeout_secs":30}"#.into(),
+                });
+                let _ = tx.send(ProviderEvent::TurnComplete);
+            }
+        }
+    }
+
+    struct BashCountingTool {
+        calls: Arc<AtomicU32>,
+    }
+
+    impl Tool for BashCountingTool {
+        fn spec(&self) -> ToolSpec {
+            ToolSpec {
+                name: "bash".into(),
+                description: "count bash-style executions".into(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "command": { "type": "string" },
+                        "timeout_secs": { "type": "integer", "minimum": 1 }
+                    },
+                    "required": ["command"],
+                    "additionalProperties": false
+                }),
+            }
+        }
+
+        fn execute(&self, _args: serde_json::Value) -> crate::agent::tools::ToolResult {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            crate::agent::tools::ToolResult::success("bash counted")
+        }
+    }
+
+    let counter = Arc::new(AtomicU32::new(0));
+    let correction_requests = Arc::new(AtomicU32::new(0));
+    let mut registry = empty_registry();
+    registry.register(Box::new(BashCountingTool {
+        calls: Arc::clone(&counter),
+    }));
+
+    let (event_tx, _event_rx) = mpsc::channel();
+    let cancel = Arc::new(AtomicBool::new(false));
+    let mut messages = user_messages("test schema-invalid fim fallback");
+
+    let (outcome, captured) = crate::observability::logging::with_captured_structured_events_for_test(
+        || {
+            execute_turn(
+                &mut messages,
+                &SchemaInvalidCorrectionProvider {
+                    correction_requests: Arc::clone(&correction_requests),
+                },
+                "echo",
+                &registry,
+                &ChannelObserver { tx: &event_tx },
+                &cancel,
+            )
+        },
+    );
+
+    assert!(matches!(outcome, TurnOutcome::Complete));
+    assert_eq!(correction_requests.load(Ordering::SeqCst), 1);
+    assert_eq!(counter.load(Ordering::SeqCst), 0);
+    assert!(messages.iter().any(|message| {
+        matches!(message, ProviderMessage::ToolResult { output, is_error, .. }
+                if *is_error && output.contains("JSON PARSE ERROR"))
+    }));
+
+    let captured = captured
+        .iter()
+        .filter_map(|raw| serde_json::from_str::<Value>(raw).ok())
+        .collect::<Vec<_>>();
+    let success = captured.iter().any(|event| {
+        event.get("event").and_then(Value::as_str) == Some("tool_args_fim_correction_succeeded")
+            && event.get("call_id").and_then(Value::as_str) == Some("call-fim-schema")
+    });
+    let failed = captured.iter().any(|event| {
+        event.get("event").and_then(Value::as_str) == Some("tool_args_fim_correction_failed")
+            && event.get("call_id").and_then(Value::as_str) == Some("call-fim-schema")
+    });
+
+    assert!(!success, "schema-invalid corrected args must not emit success");
+    assert!(failed, "schema-invalid corrected args must emit failure");
+}
+
+#[test]
 fn plan_tool_call_clears_failure_signature_with_cleaned_args_key() {
     let cleaned_args = r#"{"command":"echo fixed","timeout_secs":30}"#;
     let mut failures = std::collections::HashMap::from([(

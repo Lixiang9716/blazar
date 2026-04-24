@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
+use jsonschema::JSONSchema;
 use log::warn;
 
 use super::events::{
@@ -215,62 +216,17 @@ fn validate_fim_corrected_args(
         return Ok(());
     };
 
-    validate_against_schema(value, &tool.spec().parameters)
-}
+    let schema = tool.spec().parameters;
+    let compiled = JSONSchema::options()
+        .compile(&schema)
+        .map_err(|error| format!("invalid tool schema for `{tool_name}`: {error}"))?;
 
-fn validate_against_schema(
-    value: &serde_json::Value,
-    schema: &serde_json::Value,
-) -> Result<(), String> {
-    let Some(expected_type) = schema.get("type").and_then(serde_json::Value::as_str) else {
-        return Ok(());
-    };
-
-    match expected_type {
-        "object" => {
-            let object = value
-                .as_object()
-                .ok_or_else(|| "corrected args must be a JSON object".to_string())?;
-
-            let properties = schema
-                .get("properties")
-                .and_then(serde_json::Value::as_object)
-                .cloned()
-                .unwrap_or_default();
-
-            if let Some(required) = schema.get("required").and_then(serde_json::Value::as_array) {
-                for key in required.iter().filter_map(serde_json::Value::as_str) {
-                    if !object.contains_key(key) {
-                        return Err(format!("missing required field `{key}`"));
-                    }
-                }
-            }
-
-            if schema
-                .get("additionalProperties")
-                .and_then(serde_json::Value::as_bool)
-                == Some(false)
-                && let Some(unknown_key) = object.keys().find(|key| !properties.contains_key(*key))
-            {
-                return Err(format!("unexpected field `{unknown_key}`"));
-            }
-
-            for (key, property_value) in object {
-                if let Some(property_schema) = properties.get(key) {
-                    validate_against_schema(property_value, property_schema)?;
-                }
-            }
-
-            Ok(())
-        }
-        "string" if value.is_string() => Ok(()),
-        "integer" if value.as_i64().is_some() || value.as_u64().is_some() => Ok(()),
-        "number" if value.is_number() => Ok(()),
-        "boolean" if value.is_boolean() => Ok(()),
-        "array" if value.is_array() => Ok(()),
-        _ => Err(format!(
-            "corrected value does not match schema type `{expected_type}`"
-        )),
+    match compiled.validate(value) {
+        Ok(()) => Ok(()),
+        Err(errors) => Err(errors
+            .map(|error| error.to_string())
+            .collect::<Vec<_>>()
+            .join("; ")),
     }
 }
 
