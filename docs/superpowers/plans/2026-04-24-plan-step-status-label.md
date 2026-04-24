@@ -276,12 +276,12 @@ git commit -m "test: align status transitions with thinking action names"
 **Files:**
 - Modify (if needed): files from Tasks 1-3 only
 
-- [ ] **Step 1: Run targeted tests**
+- [x] **Step 1: Run targeted tests**
 
 Run: `cargo test --lib short_action_name_from_text_extracts_first_action_word extract_plan_action_names_reads_numbered_plan_body parse_next_step_name_line_extracts_explicit_name short_action_name_is_kept_concise status_label_uses_action_name_only_for_thinking status_label_keeps_executing_label_unchanged status_label_transitions_across_action_states`
 Expected: PASS.
 
-- [ ] **Step 2: Run repository gates**
+- [x] **Step 2: Run repository gates**
 
 Run: `just fmt-check`
 Expected: PASS.
@@ -292,21 +292,21 @@ Expected: PASS.
 Run: `just test`
 Expected: PASS.
 
-- [ ] **Step 3: Commit final polish (if needed)**
+- [x] **Step 3: Commit final polish (if needed)**
 
 ```bash
 git add src/chat/app.rs src/chat/app/events.rs src/chat/app/turns.rs src/chat/view/status.rs tests/unit/chat/app/tests_impl.inc
 git commit -m "chore: finalize thinking action-name status rollout"
 ```
 
-- [ ] **Step 4: Prepare merge handoff notes**
+- [x] **Step 4: Prepare merge handoff notes**
 
 ```text
-Summarize:
-1) thinking label now uses short action name (e.g. explore)
-2) planning/executing/ready/error behavior unchanged
-3) plan/reasoning text extraction rules
-4) verification results
+Merge handoff:
+1) Thinking labels use a short action name only, derived from `next_step_name:`.
+2) Planning, executing, ready, and error labels remain unchanged.
+3) Naming protocol: read `next_step_name:` first, then fall back to concise action extraction.
+4) Verification: targeted tests passed for extractor/status behavior, and repo gates passed (`just fmt-check`, `just lint`, `just test`).
 ```
 
 ---
