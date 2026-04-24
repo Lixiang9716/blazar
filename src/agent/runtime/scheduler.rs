@@ -9,7 +9,8 @@ use crate::agent::tools::ToolRegistry;
 
 use super::REPEATED_SUCCESS_GUIDANCE;
 use super::json_repair::{
-    canonical_tool_args, parse_or_repair_json, preview_text, strip_thinking_tags,
+    canonical_tool_args, parse_or_repair_json, preview_text, repair_unescaped_inner_quotes,
+    strip_thinking_tags,
 };
 
 pub(super) struct PendingToolCall {
@@ -48,44 +49,35 @@ pub(super) fn plan_tool_call(
     match parse_or_repair_json(&cleaned_args) {
         Ok(parsed) => {
             consecutive_failures.remove(&(pending.name.clone(), pending.arguments.clone()));
-
-            let input = CapabilityInput::new(parsed.value);
-            let signature = (
-                pending.name.clone(),
-                canonical_tool_args(&input.arguments, &cleaned_args),
-            );
-
-            if previous_pass_successes.contains(&signature) {
-                ScheduledCall {
-                    item: PlannedToolCall {
-                        pending,
-                        action: PlannedToolAction::Immediate(CapabilityResult::failure(
-                            REPEATED_SUCCESS_GUIDANCE,
-                        )),
-                    },
-                    claims: Vec::new(),
-                }
-            } else {
-                let claims = tools
-                    .resource_claims(&pending.name, &input.arguments)
-                    .into_iter()
-                    .map(Into::into)
-                    .collect();
-
-                ScheduledCall {
-                    item: PlannedToolCall {
-                        pending,
-                        action: PlannedToolAction::Execute {
-                            input,
-                            was_repaired: parsed.was_repaired,
-                            signature,
-                        },
-                    },
-                    claims,
-                }
-            }
+            schedule_parsed_call(
+                tools,
+                pending,
+                parsed.value,
+                parsed.was_repaired,
+                &cleaned_args,
+                previous_pass_successes,
+            )
         }
         Err(error) => {
+            if pending.name == "bash"
+                && let Some(repaired) = repair_unescaped_inner_quotes(&cleaned_args)
+                && let Ok(value) = serde_json::from_str::<serde_json::Value>(&repaired)
+            {
+                warn!(
+                    "runtime: repaired unescaped quotes in bash arguments\n  raw: {}",
+                    preview_text(&pending.arguments, 200)
+                );
+                consecutive_failures.remove(&(pending.name.clone(), pending.arguments.clone()));
+                return schedule_parsed_call(
+                    tools,
+                    pending,
+                    value,
+                    true,
+                    &cleaned_args,
+                    previous_pass_successes,
+                );
+            }
+
             let fail_key = (pending.name.clone(), pending.arguments.clone());
             let count = consecutive_failures.entry(fail_key).or_insert(0);
             *count += 1;
@@ -120,6 +112,51 @@ pub(super) fn plan_tool_call(
                 },
                 claims: Vec::new(),
             }
+        }
+    }
+}
+
+fn schedule_parsed_call(
+    tools: &ToolRegistry,
+    pending: PendingToolCall,
+    parsed_value: serde_json::Value,
+    was_repaired: bool,
+    signature_fallback: &str,
+    previous_pass_successes: &HashSet<(String, String)>,
+) -> ScheduledCall<PlannedToolCall> {
+    let input = CapabilityInput::new(parsed_value);
+    let signature = (
+        pending.name.clone(),
+        canonical_tool_args(&input.arguments, signature_fallback),
+    );
+
+    if previous_pass_successes.contains(&signature) {
+        ScheduledCall {
+            item: PlannedToolCall {
+                pending,
+                action: PlannedToolAction::Immediate(CapabilityResult::failure(
+                    REPEATED_SUCCESS_GUIDANCE,
+                )),
+            },
+            claims: Vec::new(),
+        }
+    } else {
+        let claims = tools
+            .resource_claims(&pending.name, &input.arguments)
+            .into_iter()
+            .map(Into::into)
+            .collect();
+
+        ScheduledCall {
+            item: PlannedToolCall {
+                pending,
+                action: PlannedToolAction::Execute {
+                    input,
+                    was_repaired,
+                    signature,
+                },
+            },
+            claims,
         }
     }
 }

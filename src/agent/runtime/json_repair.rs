@@ -186,6 +186,68 @@ pub(super) fn repair_control_chars(raw: &str) -> Option<String> {
     if changed { Some(result) } else { None }
 }
 
+/// Escape unescaped `"` that appear *inside* JSON string values.
+/// A `"` is treated as a real string terminator only if the next
+/// non-whitespace byte is one of: `,`, `}`, `]`, `:`, or end-of-input.
+pub(super) fn repair_unescaped_inner_quotes(raw: &str) -> Option<String> {
+    let bytes = raw.as_bytes();
+    let mut result: Vec<u8> = Vec::with_capacity(bytes.len() + 16);
+    let mut in_string = false;
+    let mut prev_backslash = false;
+    let mut changed = false;
+
+    for (idx, &b) in bytes.iter().enumerate() {
+        if in_string {
+            if prev_backslash {
+                prev_backslash = false;
+                result.push(b);
+                continue;
+            }
+            if b == b'\\' {
+                prev_backslash = true;
+                result.push(b);
+                continue;
+            }
+            if b == b'"' {
+                if is_probable_string_terminator(bytes, idx) {
+                    in_string = false;
+                    result.push(b);
+                } else {
+                    changed = true;
+                    result.push(b'\\');
+                    result.push(b'"');
+                }
+                continue;
+            }
+            result.push(b);
+            continue;
+        }
+
+        if b == b'"' {
+            in_string = true;
+        }
+        result.push(b);
+    }
+
+    if !changed {
+        return None;
+    }
+
+    String::from_utf8(result).ok()
+}
+
+fn is_probable_string_terminator(bytes: &[u8], quote_idx: usize) -> bool {
+    let mut idx = quote_idx.saturating_add(1);
+    while idx < bytes.len() && bytes[idx].is_ascii_whitespace() {
+        idx += 1;
+    }
+    if idx >= bytes.len() {
+        return true;
+    }
+
+    matches!(bytes[idx], b',' | b'}' | b']' | b':')
+}
+
 /// Safe UTF-8 text preview for logging.
 pub(super) fn preview_text(text: &str, max_chars: usize) -> &str {
     match text.char_indices().nth(max_chars) {
