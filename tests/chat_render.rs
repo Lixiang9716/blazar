@@ -270,3 +270,20 @@ fn render_frame_handles_streaming_indicator_in_tight_layouts() {
         .draw(|frame| render_frame(frame, &mut app, 0))
         .expect("render should succeed even when streaming area is narrow");
 }
+
+#[test]
+fn chat_view_renders_pending_user_rows_while_busy() {
+    let mut app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
+    app.apply_agent_event_for_test(blazar::agent::protocol::AgentEvent::TurnStarted {
+        turn_id: "busy-turn".into(),
+    });
+    app.send_message("queued while busy");
+
+    let lines = render_to_lines_for_test(&mut app, 100, 35);
+    let text = lines.join("\n");
+
+    assert!(
+        text.contains("queued while busy (pending)"),
+        "queued user text should render as a pending timeline row while the agent is busy"
+    );
+}

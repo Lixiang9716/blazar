@@ -20,6 +20,7 @@ mod text_wrap;
 mod tests;
 
 use render_entry::render_entry;
+use text_wrap::push_wrapped_lines;
 
 #[cfg(test)]
 use markdown::{MdSegment, split_code_fences};
@@ -107,6 +108,17 @@ pub(super) fn render_timeline(frame: &mut Frame, area: Rect, app: &ChatApp, them
         }
 
         lines.push(Line::from("")); // blank separator
+    }
+
+    for queued_text in app.queued_user_texts_for_render() {
+        push_wrapped_lines(
+            &mut lines,
+            &format!("{queued_text} (pending)"),
+            theme.bold_text,
+            vec![Span::raw(MARGIN), Span::styled("› ", theme.marker_response)],
+            content_width,
+        );
+        lines.push(Line::from(""));
     }
 
     // If no entries, show welcome
