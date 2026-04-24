@@ -66,6 +66,20 @@ fn chat_view_keeps_mode_row_render_path_in_tight_heights() {
 }
 
 #[test]
+fn mode_row_renders_context_ratio_when_available() {
+    let mut app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
+    app.set_context_usage_for_test(1200, 8000);
+
+    let lines = render_to_lines_for_test(&mut app, 120, 24);
+    let users_rows = &lines[lines.len().saturating_sub(3)..];
+
+    assert!(
+        users_rows[2].contains("1200/8000 (15%)"),
+        "mode row should render context ratio when available"
+    );
+}
+
+#[test]
 fn slash_renders_inline_command_matches_in_status_row() {
     use blazar::chat::input::InputAction;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -107,8 +121,22 @@ fn slash_status_row_normalizes_multiline_query_text() {
     let users_rows = &lines[lines.len().saturating_sub(3)..];
 
     assert!(
-        users_rows[0].contains("/help next  final"),
-        "status row should normalize slash query CR/LF into spaces"
+        users_rows[0].contains("/help next final"),
+        "status row should normalize slash query CR/LF and collapse repeated whitespace"
+    );
+}
+
+#[test]
+fn slash_status_row_and_matcher_share_normalization_for_crlf_queries() {
+    let mut app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
+    app.set_composer_text("/help\r\n   ");
+
+    let lines = render_to_lines_for_test(&mut app, 120, 22);
+    let users_rows = &lines[lines.len().saturating_sub(3)..];
+
+    assert!(
+        users_rows[0].contains("/help · /help"),
+        "status row and matcher should use the same normalized slash query"
     );
 }
 

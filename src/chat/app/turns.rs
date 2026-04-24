@@ -33,7 +33,7 @@ impl ChatApp {
             return;
         }
 
-        let turn = build_pending_turn(trimmed);
+        let turn = build_pending_turn_for_mode(trimmed, self.user_mode);
 
         info!(
             "send_message: len={} preview={:.60}",
@@ -147,7 +147,12 @@ impl ChatApp {
     }
 }
 
+#[cfg(test)]
 pub(super) fn build_pending_turn(input: &str) -> PendingTurn {
+    build_pending_turn_for_mode(input, UserMode::Auto)
+}
+
+pub(super) fn build_pending_turn_for_mode(input: &str, user_mode: UserMode) -> PendingTurn {
     let trimmed = input.trim();
     if trimmed == "/discover-agents" {
         return PendingTurn {
@@ -162,6 +167,17 @@ pub(super) fn build_pending_turn(input: &str) -> PendingTurn {
             user_text: trimmed.to_owned(),
             dispatch: PendingDispatch::Runtime {
                 runtime_prompt: build_plan_prompt(request.trim()),
+                kind: TurnKind::Plan,
+            },
+            timeline_inserted: false,
+        };
+    }
+
+    if user_mode == UserMode::Plan {
+        return PendingTurn {
+            user_text: trimmed.to_owned(),
+            dispatch: PendingDispatch::Runtime {
+                runtime_prompt: build_plan_prompt(trimmed),
                 kind: TurnKind::Plan,
             },
             timeline_inserted: false,

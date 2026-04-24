@@ -397,11 +397,16 @@ impl ChatApp {
         }
     }
 
+    pub(crate) fn normalized_slash_query(&self) -> String {
+        normalize_slash_query(&self.composer_text())
+    }
+
     fn refresh_inline_command_matches(&mut self, query: &str) {
+        let normalized_query = normalize_slash_query(query);
         let command_specs: Vec<crate::chat::commands::CommandSpec> =
             self.command_registry.list().into_iter().cloned().collect();
         self.inline_command_matches =
-            crate::chat::commands::matcher::ranked_match_names(query, &command_specs)
+            crate::chat::commands::matcher::ranked_match_names(&normalized_query, &command_specs)
                 .into_iter()
                 .take(6)
                 .map(str::to_owned)
@@ -463,6 +468,14 @@ fn shorten_home(path: &str) -> String {
         return format!("~{rest}");
     }
     path.to_owned()
+}
+
+pub(crate) fn normalize_slash_query(query: &str) -> String {
+    query
+        .replace(['\r', '\n'], " ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn preview_text(text: &str, max_chars: usize) -> &str {

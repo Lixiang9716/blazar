@@ -18,7 +18,7 @@ pub(super) fn render_users_status_row(
 ) {
     let snapshot = app.users_status_snapshot();
     if snapshot.status_mode == StatusMode::CommandList {
-        let query = normalize_slash_query_for_status(&app.composer_text());
+        let query = app.normalized_slash_query();
         let command_matches = app.inline_command_matches();
         let status_text = if command_matches.is_empty() {
             format!("{query} · No command matches")
@@ -84,10 +84,6 @@ pub(super) fn render_users_status_row(
 
     let bar = Paragraph::new(line).style(theme.status_bar);
     frame.render_widget(bar, area);
-}
-
-fn normalize_slash_query_for_status(query: &str) -> String {
-    query.replace(['\r', '\n'], " ")
 }
 
 fn truncate_left_status_text(text: &str, max_width: usize) -> String {
@@ -174,7 +170,7 @@ mod tests {
 
     #[test]
     fn slash_query_normalization_replaces_crlf_with_spaces() {
-        let normalized = super::normalize_slash_query_for_status("/help\nnext\r\nfinal");
-        assert_eq!(normalized, "/help next  final");
+        let normalized = crate::chat::app::normalize_slash_query("/help\nnext\r\nfinal");
+        assert_eq!(normalized, "/help next final");
     }
 }

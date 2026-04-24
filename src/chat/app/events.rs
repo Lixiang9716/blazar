@@ -12,6 +12,14 @@ impl ChatApp {
         self.apply_agent_event(event);
     }
 
+    #[doc(hidden)]
+    pub fn set_context_usage_for_test(&mut self, used_tokens: u32, max_tokens: u32) {
+        self.context_usage = Some(ContextUsage {
+            used_tokens,
+            max_tokens,
+        });
+    }
+
     pub(super) fn apply_agent_event(&mut self, event: AgentEvent) {
         let turn_id_context = self.current_turn_id().map(str::to_owned);
         let _ = self.agent_state.apply_event(&event);
