@@ -398,7 +398,7 @@ git commit -m "feat: add bounded FIM fallback for tool-arg repair"
 - Modify (if needed for test fixes): files changed in Tasks 1-4 only
 - Test: repository quality gates
 
-- [x] **Step 1: Run targeted suites first**
+- [ ] **Step 1: Run targeted suites first**
 
 Run: `cargo test --test unit tool_call_renders_parameter_inline_on_header_row -- --exact`
 Expected: PASS.
@@ -412,7 +412,7 @@ Expected: PASS.
 Run: `cargo test --test unit run_turn_uses_fim_correction_only_after_deterministic_repair_fails -- --exact`
 Expected: PASS.
 
-- [x] **Step 2: Run repository gates**
+- [ ] **Step 2: Run repository gates**
 
 Run: `just fmt-check`
 Expected: PASS.
@@ -423,7 +423,7 @@ Expected: PASS.
 Run: `just test`
 Expected: PASS.
 
-- [x] **Step 3: Commit final polish (if any)**
+- [ ] **Step 3: Commit final polish (if any)**
 
 ```bash
 git add src/chat/view/timeline/render_entry/tooling/descriptor.rs \
@@ -443,7 +443,7 @@ git add src/chat/view/timeline/render_entry/tooling/descriptor.rs \
 git commit -m "chore: finalize inline tool params action status and fim repair"
 ```
 
-- [x] **Step 4: Prepare merge handoff notes**
+- [ ] **Step 4: Prepare merge handoff notes**
 
 ```text
 Summarize:
@@ -452,32 +452,6 @@ Summarize:
 3) action-first status transitions
 4) FIM fallback safety constraints and events
 ```
-
-#### Task 5 Closure Notes (Completed)
-
-Runnable targeted commands used in this repository:
-
-```bash
-cargo test --quiet tool_descriptor_renders_inline_parameter_in_right_aligned_slot --lib
-cargo test --quiet timeline_does_not_render_a_standalone_streaming_indicator_row --lib
-cargo test --quiet status_label_transitions_across_action_states --lib
-cargo test --quiet run_turn_uses_fim_correction_only_after_deterministic_repair_fails --lib
-cargo test --quiet run_turn_rejects_invalid_fim_correction_and_returns_parse_error --lib
-cargo test --quiet run_turn_rejects_fim_correction_that_violates_schema_constraints --lib
-just fmt-check
-just lint
-just test
-```
-
-Task-closure scope note:
-- Task 5 did not introduce additional code commits.
-- Branch head includes Task 4 follow-up fixes finalized before Task 5 closure (`1ef53bf`).
-
-Final handoff summary:
-1) Tool parameters render in a right-aligned header slot with Unicode/display-width-safe truncation.
-2) Standalone streaming surface is removed; status is shown only in the users/status area.
-3) Status transitions are action-first (`thinking`, `planning`, `executing <tool>`, `ready`, `error: ...`).
-4) Tool-arg fallback is deterministic-first with bounded single-attempt model correction, strict parse+schema validation, and structured requested/succeeded/failed events.
 
 ---
 

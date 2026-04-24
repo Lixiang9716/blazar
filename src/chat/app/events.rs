@@ -42,7 +42,6 @@ impl ChatApp {
                     self.active_turn_kind_label(),
                     self.pending_messages.len(),
                 );
-                self.refresh_active_turn_status_label();
                 self.scroll_offset = u16::MAX;
             }
             AgentEvent::ThinkingDelta { text } => {
@@ -125,7 +124,6 @@ impl ChatApp {
                     ),
                     ToolCallStatus::Running,
                 ));
-                self.refresh_active_turn_status_label();
                 self.scroll_offset = u16::MAX;
             }
             AgentEvent::ToolCallCompleted {
@@ -187,7 +185,6 @@ impl ChatApp {
                         };
                     }
                 }
-                self.refresh_active_turn_status_label();
                 self.scroll_offset = u16::MAX;
             }
             AgentEvent::AcpAgentsRefreshed => {
@@ -284,9 +281,17 @@ impl ChatApp {
 
     pub(super) fn streaming_title_for_turn(&self, kind: TurnKind) -> Option<String> {
         match kind {
-            TurnKind::Plan => Some("planning".to_owned()),
-            TurnKind::Chat => Some("thinking".to_owned()),
+            TurnKind::Plan => None,
+            TurnKind::Chat => self.latest_plan_title(),
         }
+    }
+
+    fn latest_plan_title(&self) -> Option<String> {
+        self.timeline
+            .iter()
+            .rev()
+            .find_map(|entry| (entry.actor == Actor::Assistant).then(|| entry.title.clone()))
+            .flatten()
     }
 
     fn current_turn_id(&self) -> Option<&str> {

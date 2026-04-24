@@ -32,9 +32,7 @@ pub(super) fn render_entry<'a>(
         EntryKind::Message => message::render_message_entry(entry, theme, width, marker_style),
         EntryKind::Banner => message::render_message_entry(entry, theme, width, marker_style),
         EntryKind::ToolUse { .. } => tooling::render_tool_use_entry(entry, theme, marker_style),
-        EntryKind::ToolCall { .. } => {
-            tooling::render_tool_call_entry(entry, theme, width, marker_style)
-        }
+        EntryKind::ToolCall { .. } => tooling::render_tool_call_entry(entry, theme, marker_style),
         EntryKind::Bash { .. } => tooling::render_bash_entry(entry, theme, width, marker_style),
         EntryKind::Warning => status::render_warning_entry(entry, theme, width, marker_style),
         EntryKind::Hint => status::render_hint_entry(entry, theme, width, marker_style),

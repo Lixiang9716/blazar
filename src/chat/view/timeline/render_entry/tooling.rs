@@ -49,14 +49,13 @@ pub(super) fn render_tool_use_entry<'a>(
 pub(super) fn render_tool_call_entry<'a>(
     entry: &TimelineEntry,
     theme: &ChatTheme,
-    width: u16,
     marker_style: Style,
 ) -> Vec<Line<'a>> {
     let Some(descriptor) = tool_descriptor(entry) else {
         return Vec::new();
     };
 
-    renderer::render_tool_descriptor(&descriptor, entry, theme, marker_style, width)
+    renderer::render_tool_descriptor(&descriptor, entry, theme, marker_style)
 }
 
 pub(super) fn render_bash_entry<'a>(

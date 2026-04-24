@@ -24,7 +24,7 @@ pub(crate) enum ResultMode {
 pub(crate) struct EntryDescriptor {
     pub status_visual: StatusVisual,
     pub title: String,
-    pub inline_parameter: Option<String>,
+    pub subtitle: Option<String>,
     pub preview_lines: Vec<String>,
     pub result_mode: ResultMode,
 }
@@ -49,7 +49,7 @@ pub(crate) fn tool_descriptor(entry: &TimelineEntry) -> Option<EntryDescriptor> 
     };
 
     let preview_source = preview_source_text(status, entry);
-    let inline_parameter = if arguments.trim().is_empty() {
+    let subtitle = if arguments.trim().is_empty() {
         extract_tool_subtitle_from_details(tool_name, &entry.details)
     } else {
         let extracted = extract_tool_subtitle(tool_name, arguments);
@@ -63,7 +63,7 @@ pub(crate) fn tool_descriptor(entry: &TimelineEntry) -> Option<EntryDescriptor> 
     Some(EntryDescriptor {
         status_visual,
         title: tool_name.clone(),
-        inline_parameter: (!inline_parameter.is_empty()).then_some(inline_parameter),
+        subtitle: (!subtitle.is_empty()).then_some(subtitle),
         preview_lines: build_preview_lines(preview_source.as_ref()),
         result_mode: infer_result_mode(tool_name, preview_source.as_ref()),
     })

@@ -76,28 +76,6 @@ pub(super) fn parse_or_repair_json(raw: &str) -> Result<ParsedToolArgs, serde_js
     })
 }
 
-pub(super) fn parse_error_category(error: &serde_json::Error) -> &'static str {
-    let message = error.to_string().to_ascii_lowercase();
-    if message.contains("eof while parsing") {
-        "eof"
-    } else if message.contains("expected `,` or")
-        || message.contains("trailing characters")
-        || message.contains("key must be a string")
-    {
-        "expected_comma_or_end"
-    } else if message.contains("expected `:`") {
-        "expected_colon"
-    } else if message.contains("expected value") {
-        "expected_value"
-    } else {
-        "syntax"
-    }
-}
-
-pub(super) fn parse_json_strict(raw: &str) -> Result<Value, serde_json::Error> {
-    serde_json::from_str::<Value>(raw)
-}
-
 pub(super) fn canonical_tool_args(value: &Value, fallback: &str) -> String {
     serde_json::to_string(value).unwrap_or_else(|_| fallback.to_string())
 }

@@ -1,12 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
-use jsonschema::JSONSchema;
 use log::warn;
 
-use super::events::{
-    emit_tool_args_fim_correction_failed, emit_tool_args_fim_correction_requested,
-    emit_tool_args_fim_correction_succeeded,
-};
 use crate::agent::capability::{
     CapabilityClaim, CapabilityInput, CapabilityResult, ConflictPolicy,
 };
@@ -14,9 +9,8 @@ use crate::agent::tools::ToolRegistry;
 
 use super::REPEATED_SUCCESS_GUIDANCE;
 use super::json_repair::{
-    canonical_tool_args, parse_error_category, parse_json_strict, parse_or_repair_json,
-    preview_text, repair_truncated_json_closure, repair_unescaped_inner_quotes,
-    strip_thinking_tags,
+    canonical_tool_args, parse_or_repair_json, preview_text, repair_truncated_json_closure,
+    repair_unescaped_inner_quotes, strip_thinking_tags,
 };
 
 pub(super) struct PendingToolCall {
@@ -45,26 +39,16 @@ pub(super) struct ScheduledCall<T> {
     pub(super) claims: Vec<CapabilityClaim>,
 }
 
-struct ToolArgsFailureDetail {
-    category: &'static str,
-    detail: String,
-}
-
-pub(super) fn plan_tool_call<F>(
+pub(super) fn plan_tool_call(
     tools: &ToolRegistry,
     pending: PendingToolCall,
     previous_pass_successes: &HashSet<(String, String)>,
     consecutive_failures: &mut HashMap<(String, String), usize>,
-    request_tool_args_correction: &mut F,
-) -> ScheduledCall<PlannedToolCall>
-where
-    F: FnMut(&PendingToolCall, &str, &str) -> Option<String>,
-{
+) -> ScheduledCall<PlannedToolCall> {
     let cleaned_args = strip_thinking_tags(&pending.arguments);
-    let fail_key = tool_args_failure_key(&pending.name, &cleaned_args);
     match parse_or_repair_json(&cleaned_args) {
         Ok(parsed) => {
-            consecutive_failures.remove(&fail_key);
+            consecutive_failures.remove(&(pending.name.clone(), pending.arguments.clone()));
             schedule_parsed_call(
                 tools,
                 pending,
@@ -75,9 +59,6 @@ where
             )
         }
         Err(error) => {
-            let primary_error_category = parse_error_category(&error);
-            let mut correction_failure: Option<ToolArgsFailureDetail> = None;
-
             if pending.name == "bash"
                 && let Some((repaired, repair_kind)) = repair_bash_arguments(&cleaned_args)
                 && let Ok(value) = serde_json::from_str::<serde_json::Value>(&repaired)
@@ -86,7 +67,7 @@ where
                     "runtime: repaired {repair_kind} in bash arguments\n  raw: {}",
                     preview_text(&pending.arguments, 200)
                 );
-                consecutive_failures.remove(&fail_key);
+                consecutive_failures.remove(&(pending.name.clone(), pending.arguments.clone()));
                 return schedule_parsed_call(
                     tools,
                     pending,
@@ -97,69 +78,7 @@ where
                 );
             }
 
-            if !consecutive_failures.contains_key(&fail_key) {
-                emit_tool_args_fim_correction_requested(
-                    &pending.call_id,
-                    &pending.name,
-                    primary_error_category,
-                );
-
-                if let Some(corrected) =
-                    request_tool_args_correction(&pending, &cleaned_args, &error.to_string())
-                {
-                    match parse_json_strict(&corrected) {
-                        Ok(value) => {
-                            match validate_fim_corrected_args(tools, &pending.name, &value) {
-                                Ok(()) => {
-                                    emit_tool_args_fim_correction_succeeded(
-                                        &pending.call_id,
-                                        &pending.name,
-                                        primary_error_category,
-                                    );
-                                    consecutive_failures.remove(&fail_key);
-                                    return schedule_parsed_call(
-                                        tools,
-                                        pending,
-                                        value,
-                                        true,
-                                        &corrected,
-                                        previous_pass_successes,
-                                    );
-                                }
-                                Err(schema_error) => {
-                                    emit_tool_args_fim_correction_failed(
-                                        &pending.call_id,
-                                        &pending.name,
-                                        "schema_validation",
-                                    );
-                                    correction_failure = Some(ToolArgsFailureDetail {
-                                        category: "schema_validation",
-                                        detail: schema_error,
-                                    });
-                                }
-                            }
-                        }
-                        Err(corrected_error) => {
-                            emit_tool_args_fim_correction_failed(
-                                &pending.call_id,
-                                &pending.name,
-                                parse_error_category(&corrected_error),
-                            );
-                            correction_failure = Some(ToolArgsFailureDetail {
-                                category: parse_error_category(&corrected_error),
-                                detail: corrected_error.to_string(),
-                            });
-                        }
-                    }
-                } else {
-                    emit_tool_args_fim_correction_failed(
-                        &pending.call_id,
-                        &pending.name,
-                        primary_error_category,
-                    );
-                }
-            }
-
+            let fail_key = (pending.name.clone(), pending.arguments.clone());
             let count = consecutive_failures.entry(fail_key).or_insert(0);
             *count += 1;
 
@@ -178,22 +97,6 @@ where
                      You MUST fix the JSON and retry now."
                         .to_string(),
                 )
-            } else if let Some(correction_failure) = correction_failure {
-                match correction_failure.category {
-                    "schema_validation" => CapabilityResult::failure(format!(
-                        "JSON SCHEMA VALIDATION ERROR in corrected tool arguments: {}\n\
-                         Fix: ensure the corrected JSON satisfies the tool schema exactly, \
-                         including numeric/string constraints, enums, array item rules, and \
-                         required fields. Then retry this tool call.",
-                        correction_failure.detail
-                    )),
-                    _ => CapabilityResult::failure(format!(
-                        "JSON PARSE ERROR in corrected tool arguments: {}\n\
-                         Fix: ensure the corrected output is exactly one valid JSON object with \
-                         no markdown fences or trailing text. Then retry this tool call.",
-                        correction_failure.detail
-                    )),
-                }
             } else {
                 CapabilityResult::failure(format!(
                     "JSON PARSE ERROR in tool arguments: {error}\n\
@@ -234,33 +137,6 @@ fn repair_bash_arguments(raw: &str) -> Option<(String, &'static str)> {
     }
 
     None
-}
-
-fn tool_args_failure_key(tool_name: &str, cleaned_args: &str) -> (String, String) {
-    (tool_name.to_string(), cleaned_args.to_string())
-}
-
-fn validate_fim_corrected_args(
-    tools: &ToolRegistry,
-    tool_name: &str,
-    value: &serde_json::Value,
-) -> Result<(), String> {
-    let Some(tool) = tools.get(tool_name) else {
-        return Ok(());
-    };
-
-    let schema = tool.spec().parameters;
-    let compiled = JSONSchema::options()
-        .compile(&schema)
-        .map_err(|error| format!("invalid tool schema for `{tool_name}`: {error}"))?;
-
-    match compiled.validate(value) {
-        Ok(()) => Ok(()),
-        Err(errors) => Err(errors
-            .map(|error| error.to_string())
-            .collect::<Vec<_>>()
-            .join("; ")),
-    }
 }
 
 fn schedule_parsed_call(

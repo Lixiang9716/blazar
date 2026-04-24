@@ -623,7 +623,7 @@ fn plan_command_rewrites_prompt_for_planning_mode() {
 }
 
 #[test]
-fn planning_turn_uses_planning_while_streaming_then_sets_title() {
+fn planning_turn_uses_thinking_while_streaming_then_sets_title() {
     let repo_path = env!("CARGO_MANIFEST_DIR");
     let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
 
@@ -635,8 +635,8 @@ fn planning_turn_uses_planning_while_streaming_then_sets_title() {
     let streaming_lines = render_to_lines_for_test(&mut app, 90, 24);
     let streaming_text = streaming_lines.join("\n");
     assert!(
-        streaming_text.contains("planning"),
-        "planning turns should show planning while streaming"
+        streaming_text.contains("thinking"),
+        "planning turns should show thinking while streaming"
     );
 
     app.apply_agent_event_for_test(AgentEvent::TextDelta {
@@ -667,7 +667,7 @@ fn planning_turn_uses_planning_while_streaming_then_sets_title() {
 }
 
 #[test]
-fn follow_up_turn_keeps_action_first_status_label() {
+fn follow_up_turn_reuses_latest_plan_title_while_streaming() {
     let repo_path = env!("CARGO_MANIFEST_DIR");
     let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
     app.timeline.push(
@@ -680,7 +680,10 @@ fn follow_up_turn_keeps_action_first_status_label() {
         turn_id: "exec-1".into(),
     });
 
-    assert_eq!(app.status_label(), "thinking");
+    let lines = render_to_lines_for_test(&mut app, 90, 24);
+    let text = lines.join("\n");
+    assert!(text.contains("MiniMax Provider Integration"));
+    assert!(!text.contains("streaming…"));
 }
 
 #[test]
@@ -768,6 +771,43 @@ fn turn_helpers_ignore_blank_input_and_validate_plan_title() {
     let parsed = super::turns::extract_plan_title_and_body("Title\n\n1. step").expect("valid plan");
     assert_eq!(parsed.0, "Title");
     assert_eq!(parsed.1, "1. step");
+}
+
+#[test]
+fn short_action_name_from_text_extracts_first_action_word() {
+    assert_eq!(
+        super::turns::short_action_name_from_text("Implement step status labels"),
+        Some("Implement".to_owned())
+    );
+}
+
+#[test]
+fn extract_plan_action_names_reads_numbered_plan_body() {
+    let body = "1. Inspect turn parsing\n2. Update plan extraction\n3. Add tests";
+    assert_eq!(
+        super::turns::extract_plan_action_names(body),
+        vec![
+            "Inspect turn parsing".to_owned(),
+            "Update plan extraction".to_owned(),
+            "Add tests".to_owned()
+        ]
+    );
+}
+
+#[test]
+fn parse_next_step_name_line_extracts_explicit_name() {
+    assert_eq!(
+        super::turns::parse_next_step_name_line("next_step_name: Update plan"),
+        Some("Update plan".to_owned())
+    );
+}
+
+#[test]
+fn short_action_name_is_kept_concise() {
+    assert_eq!(
+        super::turns::short_action_name_from_text("1234567890abcdef"),
+        Some("1234567890…".to_owned())
+    );
 }
 
 #[test]
@@ -1019,49 +1059,27 @@ fn slash_query_matching_normalizes_crlf_and_whitespace() {
 }
 
 #[test]
-fn status_label_transitions_across_action_states() {
+fn status_label_transitions_across_streaming_failure_and_recovery() {
     let repo_path = env!("CARGO_MANIFEST_DIR");
     let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
     assert_eq!(app.status_label(), "ready");
 
-    app.active_turn_kind = Some(TurnKind::Chat);
     app.apply_agent_event_for_test(AgentEvent::TurnStarted {
         turn_id: "t-1".into(),
     });
-    assert_eq!(app.status_label(), "thinking");
+    assert_eq!(app.status_label(), "streaming…");
 
-    app.apply_agent_event_for_test(AgentEvent::ToolCallStarted {
-        call_id: "call-1".into(),
-        tool_name: "bash".into(),
-        kind: crate::agent::tools::ToolKind::Local,
-        arguments: r#"{"command":"echo hi"}"#.into(),
-        batch_id: 0,
-        replay_index: 0,
-        normalized_claims: Vec::new(),
-    });
-    assert_eq!(app.status_label(), "executing bash");
-
-    app.apply_agent_event_for_test(AgentEvent::ToolCallCompleted {
-        call_id: "call-1".into(),
-        output: "done".into(),
-        is_error: false,
-    });
+    app.active_turn_kind = Some(TurnKind::Plan);
     assert_eq!(app.status_label(), "thinking");
 
     app.apply_agent_event_for_test(AgentEvent::TurnFailed {
         kind: crate::agent::runtime::RuntimeErrorKind::ProviderTransient,
         error: "network".into(),
     });
-    assert_eq!(app.status_label(), "error: network");
+    assert!(app.status_label().contains("error: network"));
 
     app.apply_agent_event_for_test(AgentEvent::TurnComplete);
     assert_eq!(app.status_label(), "ready");
-
-    app.active_turn_kind = Some(TurnKind::Plan);
-    app.apply_agent_event_for_test(AgentEvent::TurnStarted {
-        turn_id: "plan-1".into(),
-    });
-    assert_eq!(app.status_label(), "planning");
 }
 
 #[test]
@@ -1586,41 +1604,6 @@ fn render_status_bar_includes_compact_debug_summary() {
     assert!(rendered.contains("turn-debug-status"));
     assert!(rendered.contains("call-debug-status"));
     assert!(rendered.contains("q0"));
-}
-
-#[test]
-fn render_status_bar_shows_action_first_labels() {
-    let mut app = new_test_app();
-    app.active_turn_kind = Some(TurnKind::Chat);
-    app.apply_agent_event_for_test(AgentEvent::TurnStarted {
-        turn_id: "turn-action-labels".into(),
-    });
-
-    let thinking = render_to_lines_for_test(&mut app, 120, 30).join("\n");
-    assert!(thinking.contains("thinking"));
-
-    app.apply_agent_event_for_test(AgentEvent::ToolCallStarted {
-        call_id: "call-action-labels".into(),
-        tool_name: "bash".into(),
-        kind: crate::agent::tools::ToolKind::Local,
-        arguments: r#"{"command":"echo hi"}"#.into(),
-        batch_id: 0,
-        replay_index: 0,
-        normalized_claims: Vec::new(),
-    });
-
-    let executing = render_to_lines_for_test(&mut app, 120, 30).join("\n");
-    assert!(executing.contains("executing bash"));
-
-    app.apply_agent_event_for_test(AgentEvent::ToolCallCompleted {
-        call_id: "call-action-labels".into(),
-        output: "ok".into(),
-        is_error: false,
-    });
-
-    let resumed = render_to_lines_for_test(&mut app, 120, 30).join("\n");
-    assert!(resumed.contains("thinking"));
-    assert!(!resumed.contains("streaming…"));
 }
 
 #[test]

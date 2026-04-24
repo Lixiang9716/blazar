@@ -221,6 +221,103 @@ pub(super) fn extract_plan_title_and_body(text: &str) -> Option<(String, String)
     Some((title, body))
 }
 
+pub(super) fn short_action_name_from_text(text: &str) -> Option<String> {
+    let action = first_action_word(text)?;
+    Some(truncate_action_name(action, 10))
+}
+
+pub(super) fn extract_plan_action_names(body: &str) -> Vec<String> {
+    let trimmed = body.trim();
+    if trimmed.is_empty() {
+        return Vec::new();
+    }
+
+    if let Some(name) = parse_next_step_name_line(trimmed) {
+        return vec![name];
+    }
+
+    let numbered_actions: Vec<String> = trimmed
+        .lines()
+        .filter_map(parse_numbered_plan_action_line)
+        .collect();
+
+    if !numbered_actions.is_empty() {
+        return numbered_actions;
+    }
+
+    short_action_name_from_text(trimmed).into_iter().collect()
+}
+
+pub(super) fn parse_next_step_name_line(text: &str) -> Option<String> {
+    let first_line = text.lines().next()?.trim();
+    let name = first_line.strip_prefix("next_step_name:")?.trim();
+    (!name.is_empty()).then(|| name.to_owned())
+}
+
+fn parse_numbered_plan_action_line(line: &str) -> Option<String> {
+    let trimmed = line.trim();
+    let candidate = trimmed
+        .trim_start_matches(|c: char| {
+            c.is_ascii_digit() || matches!(c, '.' | ')' | ':' | '-' | '•')
+        })
+        .trim_start();
+
+    if candidate.is_empty() || candidate == trimmed {
+        return None;
+    }
+
+    Some(candidate.to_owned())
+}
+
+fn first_action_word(text: &str) -> Option<&str> {
+    text.split_whitespace().find_map(|token| {
+        let token = token
+            .trim_matches(|c: char| {
+                matches!(
+                    c,
+                    ',' | '.'
+                        | '!'
+                        | '?'
+                        | ';'
+                        | ':'
+                        | '('
+                        | ')'
+                        | '['
+                        | ']'
+                        | '"'
+                        | '\''
+                        | '`'
+                        | '*'
+                        | '-'
+                )
+            })
+            .trim();
+        if token.is_empty() || token.chars().all(|c| c.is_ascii_digit()) {
+            None
+        } else {
+            Some(token)
+        }
+    })
+}
+
+fn truncate_action_name(name: &str, max_chars: usize) -> String {
+    let mut chars = name.chars();
+    let mut shortened = String::new();
+    for _ in 0..max_chars {
+        if let Some(ch) = chars.next() {
+            shortened.push(ch);
+        } else {
+            return shortened;
+        }
+    }
+
+    if chars.next().is_some() {
+        shortened.push('…');
+    }
+
+    shortened
+}
+
 pub(super) fn format_tool_call_details(
     arguments: &str,
     batch_id: u32,

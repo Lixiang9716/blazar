@@ -14,8 +14,6 @@ use super::executor::execute_batch;
 use super::scheduler::{PendingToolCall, plan_tool_call, schedule_batches};
 use super::{MAX_TOOL_ITERATIONS, REPEATED_TIMEOUT_GUIDANCE, RuntimeErrorKind, TIMEOUT_NOTE};
 
-const TOOL_ARGS_CORRECTION_PROMPT_HEADER: &str = "Return ONLY corrected JSON tool arguments.";
-
 pub(crate) enum TurnOutcome {
     Complete,
     Cancelled,
@@ -107,24 +105,11 @@ pub(crate) fn execute_turn(
                 let planned_calls = pending_calls
                     .into_iter()
                     .map(|pending| {
-                        let mut request_tool_args_correction =
-                            |pending: &PendingToolCall, cleaned_args: &str, parse_error: &str| {
-                                request_tool_args_fim_correction(
-                                    provider,
-                                    model,
-                                    tools,
-                                    pending,
-                                    cleaned_args,
-                                    parse_error,
-                                    cancel_flag,
-                                )
-                            };
                         plan_tool_call(
                             tools,
                             pending,
                             &previous_pass_successes,
                             &mut consecutive_failures,
-                            &mut request_tool_args_correction,
                         )
                     })
                     .collect();
@@ -247,86 +232,6 @@ fn annotate_timeout_failure(
 fn is_timeout_output(output: &str) -> bool {
     let lower = output.to_ascii_lowercase();
     lower.contains("timed out") || lower.contains("timeout")
-}
-
-fn request_tool_args_fim_correction(
-    provider: &dyn LlmProvider,
-    model: &str,
-    tools: &ToolRegistry,
-    pending: &PendingToolCall,
-    cleaned_args: &str,
-    parse_error: &str,
-    cancel_flag: &Arc<AtomicBool>,
-) -> Option<String> {
-    if cancel_flag.load(Ordering::SeqCst) {
-        return None;
-    }
-
-    let tool_schema = tools
-        .get(&pending.name)
-        .map(|tool| serde_json::to_string(&tool.spec().parameters).unwrap_or_else(|_| "{}".into()))
-        .unwrap_or_else(|| "{}".into());
-    let prompt = format!(
-        "{TOOL_ARGS_CORRECTION_PROMPT_HEADER}\n\
-         Tool: {}\n\
-         Schema: {}\n\
-         Parse error: {}\n\
-         Malformed arguments:\n{}\n\
-         Constraints:\n\
-         - Output exactly one JSON object matching the tool schema.\n\
-         - Do not call tools.\n\
-         - Do not add markdown fences.\n\
-         - Do not include explanation.",
-        pending.name, tool_schema, parse_error, cleaned_args
-    );
-    let correction_messages = vec![ProviderMessage::User { content: prompt }];
-    let (chunk_tx, chunk_rx) = mpsc::channel::<ProviderEvent>();
-    let mut correction = String::new();
-    let mut failed = false;
-
-    std::thread::scope(|scope| {
-        scope.spawn(|| provider.stream_turn(model, &correction_messages, &[], chunk_tx));
-
-        for event in &chunk_rx {
-            if cancel_flag.load(Ordering::SeqCst) {
-                failed = true;
-                break;
-            }
-
-            match event {
-                ProviderEvent::TextDelta(text) => correction.push_str(&text),
-                ProviderEvent::ThinkingDelta(_) => {}
-                ProviderEvent::TurnComplete => break,
-                ProviderEvent::Error(error) => {
-                    warn!(
-                        "runtime: tool-arg correction request failed for {}: {}",
-                        pending.name, error
-                    );
-                    failed = true;
-                    break;
-                }
-                ProviderEvent::ToolCall { .. } => {
-                    warn!(
-                        "runtime: tool-arg correction request for {} unexpectedly emitted a tool call",
-                        pending.name
-                    );
-                    failed = true;
-                    break;
-                }
-            }
-        }
-    });
-
-    if failed {
-        return None;
-    }
-
-    let trimmed = correction.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-
-    Some(trimmed.to_string())
 }
 
 pub(super) fn stream_provider_pass(

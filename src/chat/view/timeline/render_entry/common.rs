@@ -1,7 +1,6 @@
 use super::*;
 use crate::agent::tools::ToolKind;
 use crate::chat::app::turns::tool_call_details_payload;
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 pub(super) fn marker_style_for(entry: &TimelineEntry, theme: &ChatTheme) -> Style {
     match (&entry.actor, &entry.kind) {
@@ -17,7 +16,7 @@ pub(super) fn marker_style_for(entry: &TimelineEntry, theme: &ChatTheme) -> Styl
     }
 }
 
-/// Extract a short inline parameter summary from tool-call arguments.
+/// Extract a short subtitle from tool-call arguments (stored in `details`).
 /// Shows the most useful field — file path for read/write, command for bash.
 pub(super) fn extract_tool_subtitle(tool_name: &str, arguments: &str) -> String {
     if arguments.trim().is_empty() {
@@ -53,32 +52,11 @@ pub(super) fn extract_tool_subtitle(tool_name: &str, arguments: &str) -> String 
 }
 
 fn truncate_subtitle(s: &str) -> String {
-    truncate_display_width(s, 78)
-}
-
-pub(super) fn truncate_display_width(text: &str, max_width: usize) -> String {
-    if max_width == 0 {
-        return String::new();
+    if s.len() > 80 {
+        format!("{}…", &s[..77])
+    } else {
+        s.to_owned()
     }
-    if text.width() <= max_width {
-        return text.to_owned();
-    }
-    if max_width == 1 {
-        return "…".to_owned();
-    }
-
-    let mut out = String::new();
-    let mut used = 0usize;
-    for ch in text.chars() {
-        let width = ch.width().unwrap_or(0);
-        if used + width > max_width.saturating_sub(1) {
-            break;
-        }
-        out.push(ch);
-        used += width;
-    }
-    out.push('…');
-    out
 }
 
 pub(super) fn tool_badge(kind: ToolKind) -> Option<&'static str> {

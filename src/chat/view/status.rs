@@ -38,10 +38,10 @@ pub(super) fn render_users_status_row(
     let refs_summary = format_references_summary(&snapshot.referenced_files);
 
     let status = app.status_label();
-    let status_style = if status.starts_with("error:") {
-        theme.marker_warning
-    } else if status != "ready" {
+    let status_style = if app.is_streaming() {
         theme.spinner
+    } else if app.is_failed() {
+        theme.marker_warning
     } else {
         theme.status_right
     };
