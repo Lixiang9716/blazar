@@ -65,8 +65,8 @@ fn timeline_does_not_render_a_standalone_streaming_indicator_row() {
 
     let users_rows = &lines[lines.len().saturating_sub(3)..];
     assert!(
-        users_rows.iter().any(|line| line.contains("streaming…")),
-        "users status row should still show the streaming state"
+        users_rows.iter().any(|line| line.contains("thinking")),
+        "users status row should still show the current action state"
     );
 }
 
