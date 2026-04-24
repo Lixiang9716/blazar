@@ -15,10 +15,10 @@ fn lines_text(lines: &[Line<'_>]) -> Vec<String> {
         .collect()
 }
 
-fn first_line_status_style(lines: &[Line<'_>]) -> Option<Style> {
+fn first_line_marker_style(lines: &[Line<'_>]) -> Option<Style> {
     lines
         .first()
-        .and_then(|line| line.spans.last())
+        .and_then(|line| line.spans.get(1))
         .map(|span| span.style)
 }
 
@@ -31,8 +31,10 @@ fn render_entry_handles_user_and_empty_assistant_messages() {
     assert!(user_text.iter().any(|line| line.contains("world")));
 
     let assistant_lines = render_entry(&TimelineEntry::response(""), &theme, 60);
-    let assistant_text = lines_text(&assistant_lines).join("\n");
-    assert!(assistant_text.contains("● "));
+    assert!(
+        assistant_lines.is_empty(),
+        "empty assistant entries should not render stray status markers"
+    );
 }
 
 #[test]
@@ -72,7 +74,8 @@ fn render_entry_renders_tool_use_and_tool_call_statuses() {
     let running_text = lines_text(&running_lines).join("\n");
     assert!(running_text.contains("read_file"));
     assert!(running_text.contains("Cargo.toml"));
-    assert_eq!(first_line_status_style(&running_lines), Some(theme.spinner));
+    assert_eq!(running_text.matches('●').count(), 1);
+    assert_eq!(first_line_marker_style(&running_lines), Some(theme.spinner));
 
     let success = TimelineEntry::tool_call(
         "c2",
@@ -87,8 +90,9 @@ fn render_entry_renders_tool_use_and_tool_call_statuses() {
     let success_text = lines_text(&success_lines).join("\n");
     assert!(success_text.contains("bash"));
     assert!(success_text.contains("cargo test"));
+    assert_eq!(success_text.matches('●').count(), 1);
     assert_eq!(
-        first_line_status_style(&success_lines),
+        first_line_marker_style(&success_lines),
         Some(theme.diff_add)
     );
 
@@ -105,8 +109,12 @@ fn render_entry_renders_tool_use_and_tool_call_statuses() {
     let error_text = lines_text(&error_lines).join("\n");
     assert!(error_text.contains("grep"));
     assert!(error_text.contains("TODO"));
+    assert!(
+        !error_text.contains("grep x"),
+        "error marker should not trail the title"
+    );
     assert_eq!(
-        first_line_status_style(&error_lines),
+        first_line_marker_style(&error_lines),
         Some(theme.marker_warning)
     );
 

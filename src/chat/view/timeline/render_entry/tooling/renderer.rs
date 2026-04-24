@@ -17,7 +17,7 @@ pub(super) fn render_tool_descriptor<'a>(
     descriptor: &EntryDescriptor,
     entry: &TimelineEntry,
     theme: &ChatTheme,
-    marker_style: Style,
+    _marker_style: Style,
 ) -> Vec<Line<'a>> {
     let mut lines = Vec::new();
 
@@ -29,14 +29,13 @@ pub(super) fn render_tool_descriptor<'a>(
 
     let mut header = vec![
         Span::raw(MARGIN),
-        Span::styled("● ", marker_style),
+        Span::styled(format!("{status_marker} "), status_style),
         Span::styled(descriptor.title.clone(), theme.tool_label),
     ];
     if let Some(badge) = tool_badge(*kind) {
         header.push(Span::raw(" "));
         header.push(Span::styled(badge, theme.dim_text));
     }
-    header.extend([Span::raw(" "), Span::styled(status_marker, status_style)]);
     lines.push(Line::from(header));
 
     if let Some(subtitle) = &descriptor.subtitle {

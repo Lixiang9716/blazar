@@ -71,10 +71,7 @@ pub(super) fn render_message_entry<'a>(
             // Normalize soft breaks first — termimad treats every \n as hard break.
             let body = entry.body.trim();
             if body.is_empty() {
-                lines.push(Line::from(vec![
-                    Span::raw(MARGIN),
-                    Span::styled("● ", marker_style),
-                ]));
+                return lines;
             } else {
                 // Assistant messages: split code fences for custom rendering,
                 // render remaining text via ratskin (termimad backend).
@@ -127,10 +124,7 @@ pub(super) fn render_message_entry<'a>(
             }
         }
     } else {
-        lines.push(Line::from(vec![
-            Span::raw(MARGIN),
-            Span::styled("● ", marker_style),
-        ]));
+        return lines;
     }
 
     lines
