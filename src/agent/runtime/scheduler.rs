@@ -9,8 +9,8 @@ use crate::agent::tools::ToolRegistry;
 
 use super::REPEATED_SUCCESS_GUIDANCE;
 use super::json_repair::{
-    canonical_tool_args, parse_or_repair_json, preview_text, repair_unescaped_inner_quotes,
-    strip_thinking_tags,
+    canonical_tool_args, parse_or_repair_json, preview_text, repair_truncated_json_closure,
+    repair_unescaped_inner_quotes, strip_thinking_tags,
 };
 
 pub(super) struct PendingToolCall {
@@ -60,11 +60,11 @@ pub(super) fn plan_tool_call(
         }
         Err(error) => {
             if pending.name == "bash"
-                && let Some(repaired) = repair_unescaped_inner_quotes(&cleaned_args)
+                && let Some((repaired, repair_kind)) = repair_bash_arguments(&cleaned_args)
                 && let Ok(value) = serde_json::from_str::<serde_json::Value>(&repaired)
             {
                 warn!(
-                    "runtime: repaired unescaped quotes in bash arguments\n  raw: {}",
+                    "runtime: repaired {repair_kind} in bash arguments\n  raw: {}",
                     preview_text(&pending.arguments, 200)
                 );
                 consecutive_failures.remove(&(pending.name.clone(), pending.arguments.clone()));
@@ -101,7 +101,9 @@ pub(super) fn plan_tool_call(
                 CapabilityResult::failure(format!(
                     "JSON PARSE ERROR in tool arguments: {error}\n\
                      Fix: ensure all double quotes inside string values are escaped \
-                     as \\\", and newlines are \\n. Then retry this tool call."
+                     as \\\", newlines are \\n, and JSON containers are fully closed. \
+                     If multiple JSON objects are present, send exactly one JSON object. \
+                     Then retry this tool call."
                 ))
             };
 
@@ -114,6 +116,27 @@ pub(super) fn plan_tool_call(
             }
         }
     }
+}
+
+fn repair_bash_arguments(raw: &str) -> Option<(String, &'static str)> {
+    if let Some(repaired_quotes) = repair_unescaped_inner_quotes(raw) {
+        if serde_json::from_str::<serde_json::Value>(&repaired_quotes).is_ok() {
+            return Some((repaired_quotes, "unescaped quotes"));
+        }
+        if let Some(repaired_combo) = repair_truncated_json_closure(&repaired_quotes)
+            && serde_json::from_str::<serde_json::Value>(&repaired_combo).is_ok()
+        {
+            return Some((repaired_combo, "unescaped quotes + truncated payload"));
+        }
+    }
+
+    if let Some(repaired_truncated) = repair_truncated_json_closure(raw)
+        && serde_json::from_str::<serde_json::Value>(&repaired_truncated).is_ok()
+    {
+        return Some((repaired_truncated, "truncated payload"));
+    }
+
+    None
 }
 
 fn schedule_parsed_call(

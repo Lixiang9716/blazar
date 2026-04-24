@@ -125,6 +125,12 @@ pub(super) fn extract_json_payload(raw: &str) -> Option<&str> {
 
     let end = end_pos.unwrap_or(bytes.len().saturating_sub(1));
     let slice = &raw[open_pos..=end];
+    let trailing = raw[end + 1..].trim_start();
+    // Reject ambiguous concatenated payloads like `{"a":1}{"b":2}`.
+    if trailing.starts_with('{') || trailing.starts_with('[') {
+        return None;
+    }
+
     // Only return if we actually trimmed something; avoids allocation.
     if open_pos == 0 && end == bytes.len() - 1 {
         None // Already the whole string, no extraction needed.
@@ -184,6 +190,77 @@ pub(super) fn repair_control_chars(raw: &str) -> Option<String> {
     }
 
     if changed { Some(result) } else { None }
+}
+
+/// Close unterminated JSON containers/strings without synthesizing content.
+/// This intentionally only appends missing terminators (`"`, `}`, `]`).
+pub(super) fn repair_truncated_json_closure(raw: &str) -> Option<String> {
+    let trimmed = raw.trim_end();
+    if !(trimmed.starts_with('{') || trimmed.starts_with('[')) {
+        return None;
+    }
+
+    let bytes = trimmed.as_bytes();
+    let mut expected_closers: Vec<u8> = Vec::new();
+    let mut in_string = false;
+    let mut prev_backslash = false;
+
+    for &b in bytes {
+        if in_string {
+            if prev_backslash {
+                prev_backslash = false;
+                continue;
+            }
+            if b == b'\\' {
+                prev_backslash = true;
+                continue;
+            }
+            if b == b'"' {
+                in_string = false;
+            }
+            continue;
+        }
+
+        match b {
+            b'"' => in_string = true,
+            b'{' => expected_closers.push(b'}'),
+            b'[' => expected_closers.push(b']'),
+            b'}' | b']' => {
+                let expected = expected_closers.pop()?;
+                if expected != b {
+                    return None;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // A dangling escape cannot be repaired safely without synthesizing content.
+    if in_string && prev_backslash {
+        return None;
+    }
+
+    let mut repaired = trimmed.to_string();
+    let original_len = repaired.len();
+
+    if in_string {
+        repaired.push('"');
+    }
+    for closer in expected_closers.iter().rev() {
+        repaired.push(*closer as char);
+    }
+
+    if repaired.len() == original_len {
+        return None;
+    }
+
+    let delta = repaired.len() - original_len;
+    let max_delta = std::cmp::max(8, original_len.saturating_mul(15) / 100);
+    if delta > max_delta {
+        return None;
+    }
+
+    Some(repaired)
 }
 
 /// Escape unescaped `"` that appear *inside* JSON string values.
