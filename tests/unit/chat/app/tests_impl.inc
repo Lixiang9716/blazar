@@ -1,5 +1,6 @@
 use super::*;
 use crate::agent::tools::{ToolCompatibilityTier, ToolRegistry};
+use crate::chat::users_state::{StatusMode, UserMode};
 use crate::chat::view::render_to_lines_for_test;
 use crate::provider::{LlmProvider, ProviderEvent, ProviderMessage};
 use std::path::PathBuf;
@@ -154,6 +155,16 @@ fn chat_runtime_tool_registry_reports_bridge_compatibility_tier_for_bash() {
         registry.compatibility_tier("bash"),
         Some(ToolCompatibilityTier::CompatibilityBridge)
     );
+}
+
+#[test]
+fn users_region_defaults_to_auto_and_normal_status() {
+    let app = ChatApp::new_for_test(env!("CARGO_MANIFEST_DIR")).expect("app should initialize");
+    let snapshot = app.users_status_snapshot();
+
+    assert_eq!(snapshot.mode, UserMode::Auto);
+    assert_eq!(snapshot.status_mode, StatusMode::Normal);
+    assert!(snapshot.context_usage.is_none());
 }
 
 fn wait_until(timeout: Duration, mut condition: impl FnMut() -> bool) -> bool {

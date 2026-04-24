@@ -7,6 +7,7 @@ use crate::chat::input::InputAction;
 use crate::chat::model::{Actor, Author, ChatMessage, EntryKind, TimelineEntry, ToolCallStatus};
 use crate::chat::picker::ModalPicker;
 use crate::chat::theme::ChatTheme;
+use crate::chat::users_state::{ContextUsage, StatusMode, UserMode, UsersStatusSnapshot};
 use log::{debug, info, trace, warn};
 use ratatui_textarea::TextArea;
 use std::cell::Cell;
@@ -52,6 +53,11 @@ pub struct ChatApp {
     workspace_root: PathBuf,
     /// Display name of the active model (e.g. "Qwen/Qwen3-8B").
     model_name: String,
+    user_mode: UserMode,
+    users_status_mode: StatusMode,
+    git_pr_label: Option<String>,
+    referenced_files: Vec<String>,
+    context_usage: Option<ContextUsage>,
     /// True once the user has sent at least one message (collapses welcome banner).
     has_user_sent: bool,
     active_turn_kind: Option<TurnKind>,
@@ -139,6 +145,11 @@ impl ChatApp {
             pending_messages: VecDeque::new(),
             workspace_root,
             model_name,
+            user_mode: UserMode::Auto,
+            users_status_mode: StatusMode::Normal,
+            git_pr_label: None,
+            referenced_files: Vec::new(),
+            context_usage: None,
             has_user_sent: false,
             active_turn_kind: None,
             active_turn_title: None,
@@ -246,6 +257,19 @@ impl ChatApp {
 
     pub fn model_name(&self) -> &str {
         &self.model_name
+    }
+
+    pub fn users_status_snapshot(&self) -> UsersStatusSnapshot {
+        UsersStatusSnapshot {
+            mode: self.user_mode,
+            status_mode: self.users_status_mode,
+            current_path: self.display_path.clone(),
+            branch: self.branch.clone(),
+            pr_label: self.git_pr_label.clone(),
+            referenced_files: self.referenced_files.clone(),
+            model_name: self.model_name.clone(),
+            context_usage: self.context_usage,
+        }
     }
 
     pub fn debug_status_label(&self) -> String {
