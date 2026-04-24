@@ -221,6 +221,25 @@ fn tool_descriptor_renders_inline_parameter_with_width_safe_truncation() {
 }
 
 #[test]
+fn tool_descriptor_handles_non_ascii_parameter_truncation_safely() {
+    let entry = TimelineEntry::tool_call(
+        "call-unicode",
+        "bash",
+        ToolKind::Local,
+        r#"{"command":"界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界"}"#,
+        "running",
+        r#"{"command":"界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界"}"#,
+        ToolCallStatus::Running,
+    );
+
+    let descriptor = super::tooling::tool_descriptor(&entry).unwrap();
+    let inline_parameter = descriptor.inline_parameter.as_deref().unwrap();
+
+    assert!(inline_parameter.ends_with('…'));
+    assert!(inline_parameter.chars().all(|ch| ch != '\u{FFFD}'));
+}
+
+#[test]
 fn tool_call_render_hides_call_id_and_keeps_parameter_context() {
     let theme = crate::chat::theme::build_theme();
     let first = TimelineEntry::tool_call(

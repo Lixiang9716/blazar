@@ -53,11 +53,7 @@ pub(super) fn extract_tool_subtitle(tool_name: &str, arguments: &str) -> String 
 }
 
 fn truncate_subtitle(s: &str) -> String {
-    if s.len() > 80 {
-        format!("{}…", &s[..77])
-    } else {
-        s.to_owned()
-    }
+    truncate_display_width(s, 78)
 }
 
 pub(super) fn truncate_display_width(text: &str, max_width: usize) -> String {
