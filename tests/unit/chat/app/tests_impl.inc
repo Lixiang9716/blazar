@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use std::collections::VecDeque;
 
 struct UnicodeArgumentProvider;
 
@@ -100,6 +101,60 @@ const TEST_WAIT_TIMEOUT: Duration = Duration::from_secs(2);
 
 fn new_test_app() -> ChatApp {
     ChatApp::new_for_test(env!("CARGO_MANIFEST_DIR")).expect("test app should initialize")
+}
+
+struct FakeRuntime {
+    events: std::sync::Arc<std::sync::Mutex<VecDeque<crate::agent::protocol::AgentEvent>>>,
+}
+
+impl FakeRuntime {
+    fn with_events(events: Vec<crate::agent::protocol::AgentEvent>) -> Self {
+        Self {
+            events: std::sync::Arc::new(std::sync::Mutex::new(events.into_iter().collect())),
+        }
+    }
+}
+
+impl crate::chat::runtime_port::AgentRuntimePort for FakeRuntime {
+    fn submit_turn(&self, _prompt: &str) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn set_model(&self, _model: &str) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn refresh_acp_agents(&self) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn cancel(&self) {}
+
+    fn try_recv(&self) -> Option<crate::agent::protocol::AgentEvent> {
+        self.events.lock().unwrap().pop_front()
+    }
+
+    #[cfg(test)]
+    fn shutdown_for_test(&mut self) {}
+}
+
+#[test]
+fn chat_app_tick_drains_events_from_runtime_port() {
+    use crate::agent::protocol::AgentEvent;
+
+    let fake = FakeRuntime::with_events(vec![AgentEvent::ToolCallStarted {
+        call_id: "call-1".into(),
+        tool_name: "read_file".into(),
+        kind: crate::agent::tools::ToolKind::Local,
+        arguments: r#"{"path":"x"}"#.into(),
+        batch_id: 0,
+        replay_index: 0,
+        normalized_claims: vec![],
+    }]);
+
+    let mut app = ChatApp::new_with_runtime_for_test(env!("CARGO_MANIFEST_DIR"), Box::new(fake), "echo").expect("init");
+    app.tick();
+    assert!(app.timeline.iter().any(|e| matches!(e.kind, EntryKind::ToolCall { .. })));
 }
 
 struct RuntimeProbeCommand {
@@ -258,12 +313,11 @@ fn wait_until(timeout: Duration, mut condition: impl FnMut() -> bool) -> bool {
 fn tick_handles_multibyte_tool_arguments_without_panicking() {
     let repo_path = env!("CARGO_MANIFEST_DIR");
     let mut app = new_test_app();
-    app.agent_runtime = AgentRuntime::new(
+    app.agent_runtime = Box::new(AgentRuntime::new(
         Box::new(UnicodeArgumentProvider),
         PathBuf::from(repo_path),
         "echo".to_owned(),
-    )
-    .expect("runtime should initialize");
+    ).expect("runtime should initialize"));
 
     app.agent_runtime
         .submit_turn("read unicode path")
@@ -292,12 +346,11 @@ fn tick_handles_multibyte_tool_arguments_without_panicking() {
 fn tick_handles_multibyte_tool_output_without_panicking() {
     let repo_path = env!("CARGO_MANIFEST_DIR");
     let mut app = new_test_app();
-    app.agent_runtime = AgentRuntime::new(
+    app.agent_runtime = Box::new(AgentRuntime::new(
         Box::new(UnicodeOutputProvider),
         PathBuf::from(repo_path),
         "echo".to_owned(),
-    )
-    .expect("runtime should initialize");
+    ).expect("runtime should initialize"));
 
     app.agent_runtime
         .submit_turn("render unicode output")
@@ -591,14 +644,13 @@ fn plan_command_rewrites_prompt_for_planning_mode() {
     let mut app = new_test_app();
     let captured_prompt = Arc::new(Mutex::new(None));
     let repo_path = env!("CARGO_MANIFEST_DIR");
-    app.agent_runtime = AgentRuntime::new(
+    app.agent_runtime = Box::new(AgentRuntime::new(
         Box::new(CapturePromptProvider {
             prompt: captured_prompt.clone(),
         }),
         PathBuf::from(repo_path),
         "echo".to_owned(),
-    )
-    .expect("runtime should initialize");
+    ).expect("runtime should initialize"));
 
     app.send_message("/plan add minimax provider");
     let captured = wait_until(TEST_WAIT_TIMEOUT, || {
@@ -1007,14 +1059,13 @@ fn submit_in_plan_mode_uses_plan_prompt_path() {
     let captured_prompt = Arc::new(Mutex::new(None));
     let repo_path = env!("CARGO_MANIFEST_DIR");
     let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
-    app.agent_runtime = AgentRuntime::new(
+    app.agent_runtime = Box::new(AgentRuntime::new(
         Box::new(CapturePromptProvider {
             prompt: captured_prompt.clone(),
         }),
         PathBuf::from(repo_path),
         "echo".to_owned(),
-    )
-    .expect("runtime should initialize");
+    ).expect("runtime should initialize"));
 
     app.handle_action(InputAction::ToggleMode);
     app.set_composer_text("optimize parser");
