@@ -57,22 +57,26 @@ fn status_row_renders_path_branch_pr_and_references() {
 }
 
 #[test]
-fn chat_view_renders_status_input_mode_rows_in_users_region() {
+fn users_area_renders_top_input_model_with_separator() {
     let mut app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
-    let lines = render_to_lines_for_test(&mut app, 100, 22);
-    let users_rows = &lines[lines.len().saturating_sub(3)..];
+    let lines = render_to_lines_for_test(&mut app, 120, 24);
+    let users_rows = &lines[lines.len().saturating_sub(6)..];
 
     assert!(
-        users_rows[1].contains("> "),
-        "users input row should render the prompt"
+        users_rows
+            .iter()
+            .any(|line| line.contains("~/blazar") && line.contains("main")),
+        "top panel should show path + branch"
     );
     assert!(
-        users_rows[2].contains("AUTO"),
-        "users mode row should render AUTO mode"
+        users_rows.iter().any(|line| line.contains("─")),
+        "users area should include separator between input and model panels"
     );
     assert!(
-        users_rows[2].contains("echo"),
-        "users mode row should render the active model"
+        users_rows
+            .iter()
+            .any(|line| line.contains("AUTO") && line.contains("echo")),
+        "bottom panel should show mode and model metadata"
     );
 }
 
@@ -93,10 +97,10 @@ fn mode_row_renders_context_ratio_when_available() {
     app.set_context_usage_for_test(1200, 8000);
 
     let lines = render_to_lines_for_test(&mut app, 120, 24);
-    let users_rows = &lines[lines.len().saturating_sub(3)..];
+    let users_rows = &lines[lines.len().saturating_sub(4)..];
 
     assert!(
-        users_rows[2].contains("1200/8000 (15%)"),
+        users_rows[3].contains("1200/8000 (15%)"),
         "mode row should render context ratio when available"
     );
 }
@@ -140,7 +144,7 @@ fn slash_status_row_normalizes_multiline_query_text() {
     app.set_composer_text("/help\nnext\r\nfinal");
 
     let lines = render_to_lines_for_test(&mut app, 120, 22);
-    let users_rows = &lines[lines.len().saturating_sub(3)..];
+    let users_rows = &lines[lines.len().saturating_sub(4)..];
 
     assert!(
         users_rows[0].contains("/help next final"),
@@ -154,7 +158,7 @@ fn slash_status_row_and_matcher_share_normalization_for_crlf_queries() {
     app.set_composer_text("/help\r\n   ");
 
     let lines = render_to_lines_for_test(&mut app, 120, 22);
-    let users_rows = &lines[lines.len().saturating_sub(3)..];
+    let users_rows = &lines[lines.len().saturating_sub(4)..];
 
     assert!(
         users_rows[0].contains("/help · /help"),

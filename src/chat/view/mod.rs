@@ -58,7 +58,7 @@ pub fn render_frame(frame: &mut Frame, app: &mut ChatApp, tick_ms: u64) {
     frame.render_widget(bg_block, area);
 
     let streaming = app.is_streaming();
-    let users_height = users_height(area.height);
+    let users_height = users::users_area_height(area.height);
     let [timeline_area, users_area] = vertical![>=1, ==(users_height)].areas(area);
     timeline::render_timeline(frame, timeline_area, app, &theme);
 
@@ -78,13 +78,5 @@ pub fn render_frame(frame: &mut Frame, app: &mut ChatApp, tick_ms: u64) {
 
     if app.picker.is_visible() {
         picker::render_picker(frame, area, app, &theme);
-    }
-}
-
-fn users_height(total_height: u16) -> u16 {
-    if total_height <= 1 {
-        0
-    } else {
-        3.min(total_height.saturating_sub(1))
     }
 }
