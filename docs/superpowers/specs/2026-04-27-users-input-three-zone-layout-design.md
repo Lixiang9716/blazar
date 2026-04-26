@@ -26,13 +26,19 @@ Additionally, when slash-command mode is active, the top area should present com
 
 ## Proposed Architecture
 
-Refactor `src/chat/view/users.rs` into a composition root that renders three explicit panels:
+Refactor `src/chat/view/users.rs` into a composition root that renders three explicit panels through renderer abstractions:
 
 1. `top_panel` — workspace/command context display
 2. `input_panel` — user composer and cursor placement
 3. `model_panel` — mode/model/context usage display
 
-`users.rs` only performs layout slicing and delegates each panel render to dedicated modules.
+Introduce a trait-based boundary (same spirit as timeline `render_entry` abstraction), for example:
+
+- `UsersPanelRenderer` trait (or three focused traits)
+- concrete implementations per panel (`TopPanelRenderer`, `InputPanelRenderer`, `ModelPanelRenderer`)
+- optional small registry/coordinator in `users.rs` to dispatch rendering
+
+`users.rs` only performs layout slicing and delegates each panel render through these abstractions.
 
 ## Panel Behavior
 
