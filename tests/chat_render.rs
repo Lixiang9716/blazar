@@ -1,4 +1,6 @@
 use blazar::chat::app::ChatApp;
+use blazar::chat::users_state::UsersLayoutPolicy;
+use blazar::chat::view::render_to_lines_for_test_with_users_policy;
 use blazar::chat::view::{render_frame, render_to_lines_for_test};
 use ratatui_core::{backend::TestBackend, style::Color, terminal::Terminal};
 
@@ -59,7 +61,13 @@ fn status_row_renders_path_branch_pr_and_references() {
 #[test]
 fn users_area_renders_top_input_model_with_separator() {
     let mut app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
-    let lines = render_to_lines_for_test(&mut app, 120, 24);
+    let policy = UsersLayoutPolicy {
+        top_height: 2,
+        input_height: 1,
+        model_height: 2,
+        max_command_window_size: 6,
+    };
+    let lines = render_to_lines_for_test_with_users_policy(&mut app, 120, 24, policy);
     let users_rows = &lines[lines.len().saturating_sub(6)..];
 
     assert!(
@@ -69,14 +77,12 @@ fn users_area_renders_top_input_model_with_separator() {
         "top panel should show path + branch"
     );
     assert!(
-        users_rows.iter().any(|line| line.contains("─")),
-        "users area should include separator between input and model panels"
+        lines[21].contains("─"),
+        "separator row should move according to policy-derived heights"
     );
     assert!(
-        users_rows
-            .iter()
-            .any(|line| line.contains("AUTO") && line.contains("echo")),
-        "bottom panel should show mode and model metadata"
+        lines[22].contains("AUTO") && lines[22].contains("echo"),
+        "model panel should land after policy-sized top/input/separator rows"
     );
 }
 
