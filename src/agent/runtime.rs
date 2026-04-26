@@ -11,14 +11,8 @@ use std::collections::HashSet;
 
 use super::acp_discovery::{AcpDiscovery, AcpTransport, ReqwestAcpTransport, normalize_endpoint};
 use super::protocol::{AgentCommand, AgentEvent};
-use super::tools::ToolRegistry;
+use super::tools::{ToolBuildContext, ToolBuildProfile, ToolRegistry, register_builtin_tools};
 use crate::agent::tools::acp::AcpAgentTool;
-use crate::agent::tools::agent::AgentTool;
-use crate::agent::tools::bash::BashTool;
-use crate::agent::tools::list_dir::ListDirTool;
-use crate::agent::tools::read_file::ReadFileTool;
-use crate::agent::tools::vet::VetTool;
-use crate::agent::tools::write_file::WriteFileTool;
 use crate::config::{AGENTS_CONFIG_PATH, load_agents_config_from_path};
 use crate::observability::logging::emit_structured_event;
 use crate::provider::{LlmProvider, ProviderMessage};
@@ -463,19 +457,12 @@ fn build_tool_registry(
     workspace_root: &Path,
     model: &str,
 ) -> Result<ToolRegistry, String> {
-    let mut tools = ToolRegistry::new(workspace_root.to_path_buf());
-    tools.register(Box::new(ReadFileTool::new(workspace_root.to_path_buf())));
-    tools.register(Box::new(WriteFileTool::new(workspace_root.to_path_buf())));
-    tools.register(Box::new(ListDirTool::new(workspace_root.to_path_buf())));
-    tools.register(Box::new(BashTool::new(workspace_root.to_path_buf())));
-    tools.register(Box::new(VetTool::new(workspace_root.to_path_buf())));
-    tools.register(Box::new(AgentTool::new(
-        "sub_agent",
-        "Delegate a task to a sub-agent that can read files, write files, list directories, and run bash commands. Use when the task is self-contained and benefits from independent reasoning.",
-        Arc::clone(&provider),
-        model,
-        workspace_root.to_path_buf(),
-    )));
+    let ctx = ToolBuildContext {
+        workspace_root: workspace_root.to_path_buf(),
+        provider,
+        model: model.to_string(),
+    };
+    let mut tools = register_builtin_tools(&ctx, ToolBuildProfile::MainRuntime)?;
 
     register_acp_tools(&mut tools, workspace_root)?;
 

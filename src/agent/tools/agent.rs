@@ -4,13 +4,9 @@ use std::sync::atomic::AtomicBool;
 
 use serde_json::{Value, json};
 
-use super::bash::BashTool;
-use super::list_dir::ListDirTool;
-use super::read_file::ReadFileTool;
-use super::write_file::WriteFileTool;
 use super::{
-    BuiltinToolDescriptor, BuiltinToolProfiles, Tool, ToolBuildContext, ToolKind, ToolRegistry,
-    ToolResult, ToolSpec,
+    BuiltinToolDescriptor, BuiltinToolProfiles, Tool, ToolBuildContext, ToolBuildProfile, ToolKind,
+    ToolResult, ToolSpec, register_builtin_tools,
 };
 use crate::agent::runtime::turn::{SilentObserver, TurnOutcome, execute_turn};
 use crate::provider::{LlmProvider, ProviderMessage};
@@ -92,11 +88,15 @@ impl Tool for AgentTool {
             return ToolResult::failure("agent tool requires a string 'prompt' argument");
         };
 
-        let mut tools = ToolRegistry::new(self.workspace_root.clone());
-        tools.register(Box::new(ReadFileTool::new(self.workspace_root.clone())));
-        tools.register(Box::new(WriteFileTool::new(self.workspace_root.clone())));
-        tools.register(Box::new(ListDirTool::new(self.workspace_root.clone())));
-        tools.register(Box::new(BashTool::new(self.workspace_root.clone())));
+        let ctx = ToolBuildContext {
+            workspace_root: self.workspace_root.clone(),
+            provider: Arc::clone(&self.provider),
+            model: self.model.clone(),
+        };
+        let tools = match register_builtin_tools(&ctx, ToolBuildProfile::SubAgent) {
+            Ok(t) => t,
+            Err(e) => return ToolResult::failure(format!("sub-agent tool assembly failed: {e}")),
+        };
 
         let mut messages = vec![ProviderMessage::User {
             content: prompt.to_string(),
