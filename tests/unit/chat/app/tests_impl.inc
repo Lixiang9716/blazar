@@ -6,7 +6,6 @@ use crate::provider::{LlmProvider, ProviderEvent, ProviderMessage};
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 use std::collections::VecDeque;
 
