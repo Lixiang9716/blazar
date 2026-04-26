@@ -490,7 +490,7 @@ impl ChatApp {
         }
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn normalized_slash_query(&self) -> String {
         normalize_slash_query(&self.composer_text())
     }
