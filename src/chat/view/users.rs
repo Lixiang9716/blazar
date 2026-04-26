@@ -1,4 +1,7 @@
+mod input_panel;
+mod model_panel;
 mod panels;
+mod top_panel;
 
 use crate::chat::app::ChatApp;
 use crate::chat::theme::ChatTheme;
@@ -18,8 +21,22 @@ const USERS_LAYOUT_POLICY: UsersLayoutPolicy = UsersLayoutPolicy {
     max_command_window_size: 6,
 };
 
-pub(super) fn users_area_height(total_height: u16, policy: UsersLayoutPolicy) -> u16 {
-    policy.users_area_height(total_height)
+pub(super) fn users_area_height(
+    total_height: u16,
+    policy: UsersLayoutPolicy,
+    app: &ChatApp,
+) -> u16 {
+    let base_height = policy.users_area_height(total_height);
+    if !app.is_users_command_list_mode() {
+        return base_height;
+    }
+
+    let expanded_height = policy
+        .input_height
+        .saturating_add(policy.model_height)
+        .saturating_add(policy.max_command_window_size)
+        .saturating_add(2);
+    expanded_height.min(total_height.saturating_sub(1))
 }
 
 pub(super) fn render_users_area(frame: &mut Frame, area: Rect, app: &ChatApp, theme: &ChatTheme) {
@@ -33,16 +50,26 @@ pub(super) fn render_users_area_with_policy(
     theme: &ChatTheme,
     policy: UsersLayoutPolicy,
 ) {
-    let context = UsersPanelRenderContext { app, theme };
+    let context = UsersPanelRenderContext { app, theme, policy };
     let registry = UsersPanelRenderRegistry::default();
 
-    let model_h = policy.model_height.min(area.height);
-    let remaining_after_model = area.height.saturating_sub(model_h);
-    let separator_h = u16::from(model_h > 0 && remaining_after_model > 0);
-    let remaining_after_separator = remaining_after_model.saturating_sub(separator_h);
-    let input_h = policy.input_height.min(remaining_after_separator);
-    let remaining_after_input = remaining_after_separator.saturating_sub(input_h);
-    let top_h = policy.top_height.min(remaining_after_input);
+    // Keep the input/model pair visible first, then place the optional separator
+    // between them when both panels have room; any leftover height stays with top.
+    let input_h = policy.input_height.min(area.height);
+    let model_h = policy.model_height.min(area.height.saturating_sub(input_h));
+    let separator_h = u16::from(
+        input_h > 0
+            && model_h > 0
+            && area.height >= input_h.saturating_add(model_h).saturating_add(1),
+    );
+    let remaining_after_input_model = area
+        .height
+        .saturating_sub(input_h.saturating_add(model_h).saturating_add(separator_h));
+    let top_h = if app.is_users_command_list_mode() {
+        remaining_after_input_model
+    } else {
+        policy.top_height.min(remaining_after_input_model)
+    };
 
     let mut y = area.y;
     let top_area = Rect::new(area.x, y, area.width, top_h);

@@ -1,7 +1,7 @@
 use super::*;
 use crate::agent::tools::{ToolCompatibilityTier, ToolRegistry};
-use crate::chat::users_state::{StatusMode, UserMode};
-use crate::chat::view::render_to_lines_for_test;
+use crate::chat::users_state::{StatusMode, UserMode, UsersLayoutPolicy};
+use crate::chat::view::{render_to_lines_for_test, render_to_lines_for_test_with_users_policy};
 use crate::provider::{LlmProvider, ProviderEvent, ProviderMessage};
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
@@ -997,8 +997,8 @@ fn command_mode_scroll_routes_to_users_command_window() {
     app.set_composer_text("/");
     assert_eq!(app.users_status_snapshot().status_mode, StatusMode::CommandList);
     assert!(
-        app.inline_command_matches().len() > 1,
-        "test requires multiple inline command matches"
+        app.inline_command_matches().len() > 6,
+        "test requires the full command list to remain available"
     );
 
     app.timeline_content_height.set(30);
@@ -1006,14 +1006,20 @@ fn command_mode_scroll_routes_to_users_command_window() {
     app.scroll_offset = 5;
     let before = app.users_command_scroll_offset();
 
+    for _ in 0..6 {
+        app.handle_action(InputAction::ScrollDown);
+    }
+
+    assert_eq!(app.users_command_scroll_offset(), before + 6);
+
     app.handle_action(InputAction::ScrollDown);
 
     assert_eq!(app.scroll_offset, 5, "timeline scroll should remain untouched");
-    assert!(app.users_command_scroll_offset() >= before);
+    assert_eq!(app.users_command_scroll_offset(), before + 7);
 
     app.handle_action(InputAction::ScrollUp);
     assert_eq!(app.scroll_offset, 5, "timeline scroll should still remain untouched");
-    assert_eq!(app.users_command_scroll_offset(), before);
+    assert_eq!(app.users_command_scroll_offset(), before + 6);
 }
 
 #[test]
@@ -1075,6 +1081,20 @@ fn slash_input_switches_to_inline_command_status_mode() {
         app.users_status_snapshot().status_mode,
         StatusMode::CommandList
     );
+
+    let policy = UsersLayoutPolicy {
+        top_height: 4,
+        input_height: 1,
+        model_height: 1,
+        max_command_window_size: 3,
+    };
+    let lines = render_to_lines_for_test_with_users_policy(&mut app, 100, 18, policy);
+    let users_rows = &lines[lines.len().saturating_sub(7)..];
+
+    assert_eq!(users_rows[0].trim(), "~/blazar · main");
+    assert_eq!(users_rows[1].trim(), "• /help");
+    assert_eq!(users_rows[2].trim(), "• /clear");
+    assert_eq!(users_rows[3].trim(), "• /copy");
 }
 
 #[test]

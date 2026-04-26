@@ -1,11 +1,13 @@
+use super::{input_panel::InputPanelRenderer, model_panel::ModelPanelRenderer};
 use crate::chat::app::ChatApp;
 use crate::chat::theme::ChatTheme;
-use crate::chat::view::{input, status};
+use crate::chat::users_state::UsersLayoutPolicy;
 use ratatui_core::{layout::Rect, terminal::Frame};
 
 pub(super) struct UsersPanelRenderContext<'a> {
     pub app: &'a ChatApp,
     pub theme: &'a ChatTheme,
+    pub policy: UsersLayoutPolicy,
 }
 
 pub(super) enum UsersPanelKind {
@@ -15,22 +17,21 @@ pub(super) enum UsersPanelKind {
 }
 
 pub(super) trait UsersPanelRenderer {
-    fn supports(&self, kind: &UsersPanelKind) -> bool;
     fn render(&self, frame: &mut Frame, area: Rect, context: &UsersPanelRenderContext<'_>);
 }
 
 pub(super) struct UsersPanelRenderRegistry {
-    renderers: Vec<Box<dyn UsersPanelRenderer>>,
+    top: TopPanelRenderer,
+    input: InputPanelRenderer,
+    model: ModelPanelRenderer,
 }
 
 impl Default for UsersPanelRenderRegistry {
     fn default() -> Self {
         Self {
-            renderers: vec![
-                Box::new(TopPanelRenderer),
-                Box::new(InputPanelRenderer),
-                Box::new(ModelPanelRenderer),
-            ],
+            top: TopPanelRenderer,
+            input: InputPanelRenderer,
+            model: ModelPanelRenderer,
         }
     }
 }
@@ -43,46 +44,18 @@ impl UsersPanelRenderRegistry {
         area: Rect,
         context: &UsersPanelRenderContext<'_>,
     ) {
-        if let Some(renderer) = self
-            .renderers
-            .iter()
-            .find(|renderer| renderer.supports(&kind))
-        {
-            renderer.render(frame, area, context);
+        match kind {
+            UsersPanelKind::Top => self.top.render(frame, area, context),
+            UsersPanelKind::Input => self.input.render(frame, area, context),
+            UsersPanelKind::Model => self.model.render(frame, area, context),
         }
     }
 }
 
 struct TopPanelRenderer;
-struct InputPanelRenderer;
-struct ModelPanelRenderer;
 
 impl UsersPanelRenderer for TopPanelRenderer {
-    fn supports(&self, kind: &UsersPanelKind) -> bool {
-        matches!(kind, UsersPanelKind::Top)
-    }
-
     fn render(&self, frame: &mut Frame, area: Rect, context: &UsersPanelRenderContext<'_>) {
-        status::render_users_status_row(frame, area, context.app, context.theme);
-    }
-}
-
-impl UsersPanelRenderer for InputPanelRenderer {
-    fn supports(&self, kind: &UsersPanelKind) -> bool {
-        matches!(kind, UsersPanelKind::Input)
-    }
-
-    fn render(&self, frame: &mut Frame, area: Rect, context: &UsersPanelRenderContext<'_>) {
-        input::render_input(frame, area, context.app, context.theme);
-    }
-}
-
-impl UsersPanelRenderer for ModelPanelRenderer {
-    fn supports(&self, kind: &UsersPanelKind) -> bool {
-        matches!(kind, UsersPanelKind::Model)
-    }
-
-    fn render(&self, frame: &mut Frame, area: Rect, context: &UsersPanelRenderContext<'_>) {
-        status::render_mode_config_row(frame, area, context.app, context.theme);
+        super::top_panel::render_top_panel(frame, area, context.app, context.theme, context.policy);
     }
 }
