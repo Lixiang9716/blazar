@@ -10,6 +10,7 @@ use ratatui_widgets::paragraph::Paragraph;
 
 use ratatui_core::layout::Position;
 
+// Shared behavior contract for the users input panel.
 pub(super) fn render_input(frame: &mut Frame, area: Rect, app: &ChatApp, theme: &ChatTheme) {
     let [prompt_area, composer_area] = horizontal![==2, >=1].areas(area);
 

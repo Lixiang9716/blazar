@@ -1,3 +1,5 @@
+mod input_panel;
+mod model_panel;
 mod panels;
 mod top_panel;
 
@@ -51,16 +53,20 @@ pub(super) fn render_users_area_with_policy(
     let context = UsersPanelRenderContext { app, theme, policy };
     let registry = UsersPanelRenderRegistry::default();
 
-    let model_h = policy.model_height.min(area.height);
-    let remaining_after_model = area.height.saturating_sub(model_h);
-    let separator_h = u16::from(model_h > 0 && remaining_after_model > 0);
-    let remaining_after_separator = remaining_after_model.saturating_sub(separator_h);
-    let input_h = policy.input_height.min(remaining_after_separator);
-    let remaining_after_input = remaining_after_separator.saturating_sub(input_h);
+    // Keep the input/model pair visible first, then place the optional separator
+    // between them when both panels have room; any leftover height stays with top.
+    let input_h = policy.input_height.min(area.height);
+    let model_h = policy.model_height.min(area.height.saturating_sub(input_h));
+    let separator_h = u16::from(
+        input_h > 0 && model_h > 0 && area.height >= input_h.saturating_add(model_h).saturating_add(1),
+    );
+    let remaining_after_input_model = area
+        .height
+        .saturating_sub(input_h.saturating_add(model_h).saturating_add(separator_h));
     let top_h = if app.is_users_command_list_mode() {
-        remaining_after_input
+        remaining_after_input_model
     } else {
-        policy.top_height.min(remaining_after_input)
+        policy.top_height.min(remaining_after_input_model)
     };
 
     let mut y = area.y;

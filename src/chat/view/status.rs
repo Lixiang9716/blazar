@@ -137,6 +137,7 @@ fn truncate_left_status_text(text: &str, max_width: usize) -> String {
     out
 }
 
+// Shared behavior contract for the users model panel.
 pub(super) fn render_mode_config_row(
     frame: &mut Frame,
     area: Rect,

@@ -82,23 +82,57 @@ fn users_area_renders_top_input_model_with_separator() {
         "top panel should show path + branch"
     );
     assert!(
-        lines[21].contains("─"),
+        users_rows[3].contains("─"),
         "separator row should move according to policy-derived heights"
     );
     assert!(
-        lines[22].contains("AUTO") && lines[22].contains("echo"),
+        users_rows[4].contains("AUTO") && users_rows[4].contains("echo"),
         "model panel should land after policy-sized top/input/separator rows"
     );
 }
 
 #[test]
-fn chat_view_keeps_mode_row_render_path_in_tight_heights() {
+fn users_area_hides_separator_when_input_or_model_is_zero_height() {
+    let mut app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
+
+    let input_zero = UsersLayoutPolicy {
+        top_height: 1,
+        input_height: 0,
+        model_height: 1,
+        max_command_window_size: 6,
+    };
+    let input_zero_lines = render_to_lines_for_test_with_users_policy(&mut app, 120, 8, input_zero);
+    assert!(
+        input_zero_lines.iter().all(|line| !line.contains("─")),
+        "separator should stay hidden when input height is zero"
+    );
+
+    let model_zero = UsersLayoutPolicy {
+        top_height: 1,
+        input_height: 1,
+        model_height: 0,
+        max_command_window_size: 6,
+    };
+    let model_zero_lines = render_to_lines_for_test_with_users_policy(&mut app, 120, 8, model_zero);
+    assert!(
+        model_zero_lines.iter().all(|line| !line.contains("─")),
+        "separator should stay hidden when model height is zero"
+    );
+}
+
+#[test]
+fn chat_view_keeps_input_and_model_visible_in_tight_heights() {
     let mut app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
     let lines = render_to_lines_for_test(&mut app, 100, 3);
+    let users_rows = &lines[lines.len().saturating_sub(2)..];
 
     assert!(
-        lines.iter().any(|line| line.contains("AUTO")),
-        "users mode row should still render in tight heights"
+        users_rows[0].contains("> ") && users_rows[0].contains("Describe a task"),
+        "input panel should still render in tight heights"
+    );
+    assert!(
+        users_rows[1].contains("AUTO") && users_rows[1].contains("echo"),
+        "model panel should still render in tight heights"
     );
 }
 
