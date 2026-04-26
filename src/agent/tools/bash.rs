@@ -1,5 +1,6 @@
 use super::{
-    ContentPart, ResourceAccess, ResourceClaim, Tool, ToolCompatibilityTier, ToolResult, ToolSpec,
+    BuiltinToolDescriptor, BuiltinToolProfiles, ContentPart, ResourceAccess, ResourceClaim, Tool,
+    ToolBuildContext, ToolCompatibilityTier, ToolResult, ToolSpec,
 };
 use nix::errno::Errno;
 use nix::libc;
@@ -15,6 +16,14 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 pub const MAX_OUTPUT_BYTES: usize = 8 * 1024;
+
+inventory::submit! {
+    BuiltinToolDescriptor {
+        name: "bash",
+        profiles: BuiltinToolProfiles::Both,
+        build: |ctx: &ToolBuildContext| Box::new(BashTool::new(ctx.workspace_root.clone())),
+    }
+}
 
 const DEFAULT_TIMEOUT_SECS: u64 = 30;
 const OUTPUT_TRUNCATED_MARKER: &str = "\n[output truncated]";

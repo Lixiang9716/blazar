@@ -1,5 +1,6 @@
 use super::{
-    ResourceAccess, ResourceClaim, Tool, ToolResult, ToolSpec, normalize_workspace_resource_claim,
+    BuiltinToolDescriptor, BuiltinToolProfiles, ResourceAccess, ResourceClaim, Tool,
+    ToolBuildContext, ToolResult, ToolSpec, normalize_workspace_resource_claim,
     resolve_workspace_path,
 };
 use serde_json::{Value, json};
@@ -7,6 +8,14 @@ use std::fs;
 use std::path::PathBuf;
 
 const MAX_FILE_BYTES: usize = 100 * 1024;
+
+inventory::submit! {
+    BuiltinToolDescriptor {
+        name: "read_file",
+        profiles: BuiltinToolProfiles::Both,
+        build: |ctx: &ToolBuildContext| Box::new(ReadFileTool::new(ctx.workspace_root.clone())),
+    }
+}
 
 pub struct ReadFileTool {
     workspace_root: PathBuf,

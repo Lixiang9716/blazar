@@ -1,11 +1,20 @@
 use super::{
-    ContentPart, Tool, ToolResult, ToolSpec, canonical_workspace_root, resolve_workspace_path,
+    BuiltinToolDescriptor, BuiltinToolProfiles, ContentPart, Tool, ToolBuildContext, ToolResult,
+    ToolSpec, canonical_workspace_root, resolve_workspace_path,
 };
 use serde_json::{Value, json};
 use std::fs;
 use std::path::{Path, PathBuf};
 
 const MAX_DEPTH: usize = 2;
+
+inventory::submit! {
+    BuiltinToolDescriptor {
+        name: "list_dir",
+        profiles: BuiltinToolProfiles::Both,
+        build: |ctx: &ToolBuildContext| Box::new(ListDirTool::new(ctx.workspace_root.clone())),
+    }
+}
 const MAX_ENTRIES: usize = 200;
 
 pub struct ListDirTool {

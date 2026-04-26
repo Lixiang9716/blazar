@@ -1,13 +1,22 @@
 #[cfg(not(unix))]
 use super::resolve_workspace_write_path;
 use super::{
-    ResourceAccess, ResourceClaim, Tool, ToolResult, ToolSpec, canonical_workspace_root,
+    BuiltinToolDescriptor, BuiltinToolProfiles, ResourceAccess, ResourceClaim, Tool,
+    ToolBuildContext, ToolResult, ToolSpec, canonical_workspace_root,
     normalize_workspace_resource_claim, validate_workspace_relative_path,
 };
 use serde_json::{Value, json};
 use std::ffi::CString;
 use std::fs::File;
 use std::io::Write;
+
+inventory::submit! {
+    BuiltinToolDescriptor {
+        name: "write_file",
+        profiles: BuiltinToolProfiles::Both,
+        build: |ctx: &ToolBuildContext| Box::new(WriteFileTool::new(ctx.workspace_root.clone())),
+    }
+}
 #[cfg(unix)]
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 #[cfg(unix)]

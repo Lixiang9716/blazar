@@ -3,7 +3,18 @@ use std::path::PathBuf;
 use serde_json::{Value, json};
 
 use super::bash::BashTool;
-use super::{ResourceAccess, ResourceClaim, Tool, ToolResult, ToolSpec};
+use super::{
+    BuiltinToolDescriptor, BuiltinToolProfiles, ResourceAccess, ResourceClaim, Tool,
+    ToolBuildContext, ToolResult, ToolSpec,
+};
+
+inventory::submit! {
+    BuiltinToolDescriptor {
+        name: "vet",
+        profiles: BuiltinToolProfiles::MainOnly,
+        build: |ctx: &ToolBuildContext| Box::new(VetTool::new(ctx.workspace_root.clone())),
+    }
+}
 
 pub struct VetTool {
     workspace_root: PathBuf,

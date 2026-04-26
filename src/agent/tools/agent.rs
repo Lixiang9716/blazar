@@ -8,9 +8,29 @@ use super::bash::BashTool;
 use super::list_dir::ListDirTool;
 use super::read_file::ReadFileTool;
 use super::write_file::WriteFileTool;
-use super::{Tool, ToolKind, ToolRegistry, ToolResult, ToolSpec};
+use super::{
+    BuiltinToolDescriptor, BuiltinToolProfiles, Tool, ToolBuildContext, ToolKind, ToolRegistry,
+    ToolResult, ToolSpec,
+};
 use crate::agent::runtime::turn::{SilentObserver, TurnOutcome, execute_turn};
 use crate::provider::{LlmProvider, ProviderMessage};
+
+pub const AGENT_TOOL_NAME: &str = "sub_agent";
+pub const AGENT_TOOL_DESCRIPTION: &str = "Delegate a task to a sub-agent that can read files, write files, list directories, and run bash commands. Use when the task is self-contained and benefits from independent reasoning.";
+
+inventory::submit! {
+    BuiltinToolDescriptor {
+        name: AGENT_TOOL_NAME,
+        profiles: BuiltinToolProfiles::MainOnly,
+        build: |ctx: &ToolBuildContext| Box::new(AgentTool::new(
+            AGENT_TOOL_NAME,
+            AGENT_TOOL_DESCRIPTION,
+            Arc::clone(&ctx.provider),
+            &ctx.model,
+            ctx.workspace_root.clone(),
+        )),
+    }
+}
 
 /// A tool that delegates work to a sub-agent turn.
 ///
