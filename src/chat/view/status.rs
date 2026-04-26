@@ -37,20 +37,20 @@ pub(super) fn render_users_status_row(
     let left = format_status_left(&snapshot);
     let refs_summary = format_references_summary(&snapshot.referenced_files);
 
-    let status = app.status_label();
-    let status_style = if app.is_streaming() {
-        theme.spinner
-    } else if app.is_failed() {
+    let status_label = app.status_label();
+    let status_style = if status_label.starts_with("error:") {
         theme.marker_warning
+    } else if status_label != "ready" {
+        theme.spinner
     } else {
         theme.status_right
     };
 
     let debug = app.debug_status_label();
     let right = if debug.is_empty() {
-        format!("{refs_summary} · {status}")
+        format!("{refs_summary} · {status_label}")
     } else {
-        format!("{refs_summary} · {status} · {debug}")
+        format!("{refs_summary} · {status_label} · {debug}")
     };
 
     let available = area.width as usize;

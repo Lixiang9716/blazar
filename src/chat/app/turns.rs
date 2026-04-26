@@ -221,13 +221,11 @@ pub(super) fn extract_plan_title_and_body(text: &str) -> Option<(String, String)
     Some((title, body))
 }
 
-#[cfg(test)]
 pub(super) fn short_action_name_from_text(text: &str) -> Option<String> {
     let action = first_action_word(text)?;
     Some(truncate_action_name(action, 10))
 }
 
-#[cfg(test)]
 pub(super) fn extract_plan_action_names(body: &str) -> Vec<String> {
     let trimmed = body.trim();
     if trimmed.is_empty() {
@@ -238,31 +236,39 @@ pub(super) fn extract_plan_action_names(body: &str) -> Vec<String> {
         return vec![name];
     }
 
-    let numbered_actions: Vec<String> = trimmed
-        .lines()
-        .filter_map(parse_numbered_plan_action_line)
-        .collect();
-
-    if !numbered_actions.is_empty() {
-        return numbered_actions;
+    let mut names = Vec::new();
+    for line in trimmed.lines() {
+        if let Some(candidate) = parse_numbered_plan_action_line(line)
+            && let Some(name) = short_action_name_from_text(&candidate)
+        {
+            names.push(name);
+        }
     }
 
-    short_action_name_from_text(trimmed).into_iter().collect()
+    if names.is_empty()
+        && let Some(name) = short_action_name_from_text(trimmed)
+    {
+        names.push(name);
+    }
+
+    names
 }
 
-#[cfg(test)]
 pub(super) fn parse_next_step_name_line(text: &str) -> Option<String> {
     let first_line = text.lines().next()?.trim();
-    let name = first_line.strip_prefix("next_step_name:")?.trim();
-    (!name.is_empty()).then(|| name.to_owned())
+    let value = first_line.strip_prefix("next_step_name:")?.trim();
+    short_action_name_from_text(value)
 }
 
-#[cfg(test)]
 fn parse_numbered_plan_action_line(line: &str) -> Option<String> {
     let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
     let candidate = trimmed
         .trim_start_matches(|c: char| {
-            c.is_ascii_digit() || matches!(c, '.' | ')' | ':' | '-' | '•')
+            c.is_ascii_digit() || matches!(c, '.' | ')' | ':' | '-' | '•' | '[' | ']' | ' ')
         })
         .trim_start();
 
@@ -273,8 +279,12 @@ fn parse_numbered_plan_action_line(line: &str) -> Option<String> {
     Some(candidate.to_owned())
 }
 
-#[cfg(test)]
 fn first_action_word(text: &str) -> Option<&str> {
+    const FILLER: &[&str] = &[
+        "next", "step", "then", "will", "would", "should", "i", "we", "to", "the", "a", "an",
+        "and", "now",
+    ];
+
     text.split_whitespace().find_map(|token| {
         let token = token
             .trim_matches(|c: char| {
@@ -297,7 +307,13 @@ fn first_action_word(text: &str) -> Option<&str> {
                 )
             })
             .trim();
+
         if token.is_empty() || token.chars().all(|c| c.is_ascii_digit()) {
+            return None;
+        }
+
+        let lowered = token.to_ascii_lowercase();
+        if FILLER.iter().any(|f| *f == lowered) {
             None
         } else {
             Some(token)
@@ -305,7 +321,6 @@ fn first_action_word(text: &str) -> Option<&str> {
     })
 }
 
-#[cfg(test)]
 fn truncate_action_name(name: &str, max_chars: usize) -> String {
     let mut chars = name.chars();
     let mut shortened = String::new();
@@ -313,7 +328,7 @@ fn truncate_action_name(name: &str, max_chars: usize) -> String {
         if let Some(ch) = chars.next() {
             shortened.push(ch);
         } else {
-            return shortened;
+            return shortened.to_ascii_lowercase();
         }
     }
 
@@ -321,7 +336,7 @@ fn truncate_action_name(name: &str, max_chars: usize) -> String {
         shortened.push('…');
     }
 
-    shortened
+    shortened.to_ascii_lowercase()
 }
 
 pub(super) fn format_tool_call_details(

@@ -1,6 +1,6 @@
 use crate::agent::protocol::AgentEvent;
 use crate::agent::runtime::{AgentRuntime, AgentRuntimeError};
-use crate::agent::state::{AgentRuntimeState, TurnState};
+use crate::agent::state::{ActiveToolStatus, AgentRuntimeState, TurnState};
 use crate::observability::debug::DebugRecorder;
 
 use crate::chat::input::InputAction;
@@ -63,6 +63,8 @@ pub struct ChatApp {
     has_user_sent: bool,
     active_turn_kind: Option<TurnKind>,
     active_turn_title: Option<String>,
+    thinking_action_name: Option<String>,
+    current_turn_has_thinking_entry: bool,
     debug_recorder: DebugRecorder,
 }
 
@@ -163,6 +165,8 @@ impl ChatApp {
             has_user_sent: false,
             active_turn_kind: None,
             active_turn_title: None,
+            thinking_action_name: None,
+            current_turn_has_thinking_entry: false,
             debug_recorder,
         })
     }
@@ -216,17 +220,41 @@ impl ChatApp {
     pub fn status_label(&self) -> String {
         match &self.agent_state.turn_state {
             TurnState::Idle => "ready".to_owned(),
-            TurnState::Streaming { .. } => {
-                self.active_turn_title
-                    .clone()
-                    .unwrap_or_else(|| match self.active_turn_kind {
-                        Some(TurnKind::Plan) => "thinking".to_owned(),
-                        _ => "streaming…".to_owned(),
-                    })
-            }
+            TurnState::Streaming { .. } => self
+                .active_turn_title
+                .clone()
+                .unwrap_or_else(|| self.derive_active_turn_status_label()),
             TurnState::Done => "ready".to_owned(),
             TurnState::Failed { error } => format!("error: {error}"),
         }
+    }
+
+    fn derive_active_turn_status_label(&self) -> String {
+        if let Some(tool_name) = self
+            .agent_state
+            .active_tools
+            .iter()
+            .rev()
+            .find(|tool| tool.status == ActiveToolStatus::Running)
+            .map(|tool| tool.tool_name.clone())
+        {
+            return format!("executing {tool_name}");
+        }
+
+        match self.active_turn_kind {
+            Some(TurnKind::Plan) => "planning".to_owned(),
+            _ => self
+                .thinking_action_name
+                .clone()
+                .unwrap_or_else(|| "thinking".to_owned()),
+        }
+    }
+
+    pub(crate) fn refresh_active_turn_status_label(&mut self) {
+        self.active_turn_title = match self.agent_state.turn_state {
+            TurnState::Streaming { .. } => Some(self.derive_active_turn_status_label()),
+            _ => None,
+        };
     }
 
     pub fn is_streaming(&self) -> bool {
