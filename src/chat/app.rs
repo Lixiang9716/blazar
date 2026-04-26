@@ -45,7 +45,7 @@ pub struct ChatApp {
     pub timeline_visible_height: Cell<u16>,
     theme_name: String,
     theme: ChatTheme,
-    agent_runtime: AgentRuntime,
+    agent_runtime: Box<dyn crate::chat::runtime_port::AgentRuntimePort + Send>,
     agent_state: AgentRuntimeState,
     /// Messages queued while agent was busy, dispatched FIFO on turn completion.
     pending_messages: VecDeque<PendingTurn>,
@@ -122,6 +122,7 @@ impl ChatApp {
         )?;
 
         let (provider, model_name) = crate::provider::load_provider(repo_path);
+        let runtime = AgentRuntime::new(provider, workspace_root.clone(), model_name.clone())?;
 
         Ok(Self {
             messages: vec![ChatMessage {
@@ -137,7 +138,7 @@ impl ChatApp {
             command_registry,
             theme_name: crate::chat::theme::DEFAULT_THEME.to_owned(),
             theme: crate::chat::theme::build_theme(),
-            agent_runtime: AgentRuntime::new(provider, workspace_root.clone(), model_name.clone())?,
+            agent_runtime: Box::new(runtime),
             debug_recorder: DebugRecorder::new(&workspace_root),
             workspace_root,
             model_name,
@@ -175,11 +176,30 @@ impl ChatApp {
         // Stable model name for tests.
         app.model_name = "echo".to_owned();
         // Always use EchoProvider in tests — no network calls.
-        app.agent_runtime = AgentRuntime::new(
+        app.agent_runtime = Box::new(AgentRuntime::new(
             Box::new(crate::provider::echo::EchoProvider::new(0)),
             std::path::PathBuf::from(_repo_path),
             "echo".to_owned(),
-        )?;
+        )?);
+        Ok(app)
+    }
+
+    /// Test-only constructor that accepts a pre-built runtime port.
+    #[cfg(test)]
+    pub fn new_with_runtime_for_test(
+        repo_path: &str,
+        runtime: Box<dyn crate::chat::runtime_port::AgentRuntimePort + Send>,
+        model_name: &str,
+    ) -> Result<Self, AgentRuntimeError> {
+        let mut app = Self::new(repo_path)?;
+        // Use a fixed display path so snapshots are environment-independent.
+        app.display_path = "~/blazar".to_owned();
+        // Stable branch for tests.
+        app.branch = "main".to_owned();
+        app.git_pr_label = infer_pr_label_from_branch(&app.branch);
+        // Stable model name for tests.
+        app.model_name = model_name.to_owned();
+        app.agent_runtime = runtime;
         Ok(app)
     }
 
@@ -349,10 +369,10 @@ impl ChatApp {
             .collect()
     }
 
-    /// Switch the active LLM model by rebuilding the provider and agent runtime.
+    /// Switch the active LLM model through the runtime port boundary.
     ///
     /// Cancels any in-flight turn, reloads config from disk with the new model
-    /// name, and creates a fresh `AgentRuntime`. Conversation history is reset.
+    /// name through the runtime port implementation. Conversation history is reset.
     pub fn set_model(&mut self, model: &str) {
         if self.is_streaming() {
             self.agent_runtime.cancel();
