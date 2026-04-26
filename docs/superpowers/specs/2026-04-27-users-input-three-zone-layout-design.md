@@ -85,6 +85,19 @@ Flow:
 2. If slash command mode is not active, existing scroll behavior remains unchanged.
 3. Command window viewport is capped at 6 visible rows.
 
+## Forward Compatibility: Ask Tool Question Mode
+
+The users-area refactor must keep a clean extension point for a future Ask Tool multi-select flow:
+
+1. When Ask Tool question mode is active, users area can switch to a **single-question panel** view.
+2. That panel should contain:
+   - question title/content
+   - options list (including multi-select support)
+   - key hints for selection/submit
+   - input zone for custom/free-text when schema allows
+3. In question mode, the default three-zone users layout may be temporarily replaced by this single panel.
+4. Question mode state remains Blazar-owned state (no widget-owned source of truth).
+
 ## Edge Handling
 
 1. If command list is empty, top panel shows a clear empty-state line.
