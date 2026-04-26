@@ -991,6 +991,46 @@ fn quit_and_scroll_actions_follow_runtime_state_rules() {
 }
 
 #[test]
+fn command_mode_scroll_routes_to_users_command_window() {
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+    app.set_composer_text("/");
+    assert_eq!(app.users_status_snapshot().status_mode, StatusMode::CommandList);
+    assert!(
+        app.inline_command_matches().len() > 1,
+        "test requires multiple inline command matches"
+    );
+
+    app.timeline_content_height.set(30);
+    app.timeline_visible_height.set(10);
+    app.scroll_offset = 5;
+    let before = app.users_command_scroll_offset();
+
+    app.handle_action(InputAction::ScrollDown);
+
+    assert_eq!(app.scroll_offset, 5, "timeline scroll should remain untouched");
+    assert!(app.users_command_scroll_offset() >= before);
+
+    app.handle_action(InputAction::ScrollUp);
+    assert_eq!(app.scroll_offset, 5, "timeline scroll should still remain untouched");
+    assert_eq!(app.users_command_scroll_offset(), before);
+}
+
+#[test]
+fn normal_mode_scroll_keeps_timeline_scroll_behavior() {
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+    app.timeline_content_height.set(30);
+    app.timeline_visible_height.set(10);
+    app.scroll_offset = 5;
+
+    app.handle_action(InputAction::ScrollDown);
+
+    assert_eq!(app.scroll_offset, 8);
+    assert_eq!(app.users_command_scroll_offset(), 0);
+}
+
+#[test]
 fn set_model_sends_command_and_updates_timeline() {
     let mut app = new_test_app();
     app.set_model("Qwen/Qwen3-8B");

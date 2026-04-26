@@ -121,12 +121,20 @@ impl ChatApp {
             }
             InputAction::ToggleDetails => self.show_details = !self.show_details,
             InputAction::ScrollUp => {
-                self.resolve_scroll_sentinel();
-                self.scroll_offset = self.scroll_offset.saturating_sub(3);
+                if self.users_status_mode == StatusMode::CommandList {
+                    self.scroll_users_command_window(-1);
+                } else {
+                    self.resolve_scroll_sentinel();
+                    self.scroll_offset = self.scroll_offset.saturating_sub(3);
+                }
             }
             InputAction::ScrollDown => {
-                self.resolve_scroll_sentinel();
-                self.scroll_offset = self.scroll_offset.saturating_add(3);
+                if self.users_status_mode == StatusMode::CommandList {
+                    self.scroll_users_command_window(1);
+                } else {
+                    self.resolve_scroll_sentinel();
+                    self.scroll_offset = self.scroll_offset.saturating_add(3);
+                }
             }
             InputAction::Key(key) => {
                 self.composer.input(key);

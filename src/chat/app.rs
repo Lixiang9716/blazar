@@ -55,6 +55,7 @@ pub struct ChatApp {
     model_name: String,
     user_mode: UserMode,
     users_status_mode: StatusMode,
+    users_command_scroll_offset: usize,
     inline_command_matches: Vec<String>,
     git_pr_label: Option<String>,
     referenced_files: Vec<String>,
@@ -155,6 +156,7 @@ impl ChatApp {
             agent_state: AgentRuntimeState::default(),
             pending_messages: VecDeque::new(),
             users_status_mode: StatusMode::Normal,
+            users_command_scroll_offset: 0,
             inline_command_matches: Vec::new(),
             referenced_files: Vec::new(),
             context_usage: None,
@@ -334,6 +336,23 @@ impl ChatApp {
         &self.inline_command_matches
     }
 
+    #[cfg(test)]
+    pub(crate) fn users_command_scroll_offset(&self) -> usize {
+        self.users_command_scroll_offset
+    }
+
+    pub(crate) fn scroll_users_command_window(&mut self, delta: isize) {
+        let max_offset = self.inline_command_matches.len().saturating_sub(1);
+        let next = if delta.is_negative() {
+            self.users_command_scroll_offset
+                .saturating_sub(delta.unsigned_abs())
+        } else {
+            self.users_command_scroll_offset
+                .saturating_add(delta as usize)
+        };
+        self.users_command_scroll_offset = next.min(max_offset);
+    }
+
     pub(crate) fn ingest_referenced_files_from_claims(&mut self, normalized_claims: &[String]) {
         const MAX_REFERENCED_FILES: usize = 8;
 
@@ -458,9 +477,13 @@ impl ChatApp {
         if query.starts_with('/') {
             self.users_status_mode = StatusMode::CommandList;
             self.refresh_inline_command_matches(&query);
+            self.users_command_scroll_offset = self
+                .users_command_scroll_offset
+                .min(self.inline_command_matches.len().saturating_sub(1));
         } else {
             self.users_status_mode = StatusMode::Normal;
             self.inline_command_matches.clear();
+            self.users_command_scroll_offset = 0;
         }
     }
 
@@ -475,7 +498,10 @@ impl ChatApp {
         self.inline_command_matches =
             crate::chat::commands::matcher::ranked_match_names(&normalized_query, &command_specs)
                 .into_iter()
-                .take(6)
+                .take(
+                    crate::chat::users_state::UsersLayoutPolicy::default().max_command_window_size
+                        as usize,
+                )
                 .map(str::to_owned)
                 .collect();
     }
