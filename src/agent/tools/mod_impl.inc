@@ -13,12 +13,15 @@ use serde_json::Value;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
+use std::sync::Arc;
+
 use crate::agent::capability::acp::AcpToolCapability;
 use crate::agent::capability::local::LocalToolCapability;
 use crate::agent::capability::{
     CapabilityAccess, CapabilityClaim, CapabilityContentPart, CapabilityError, CapabilityHandle,
     CapabilityInput, CapabilityKind, CapabilityResult,
 };
+use crate::provider::LlmProvider;
 
 /// Declarative metadata advertised to the model for each callable tool.
 #[derive(Debug, Clone, PartialEq)]
@@ -393,6 +396,113 @@ fn should_use_local_capability_wrapper(kind: ToolKind) -> bool {
 
 fn should_use_acp_capability_wrapper(kind: ToolKind) -> bool {
     matches!(kind, ToolKind::Agent { is_acp: true })
+}
+
+// ---------------------------------------------------------------------------
+// Inventory-backed built-in tool registration
+// ---------------------------------------------------------------------------
+
+/// Selects which assembly context a built-in tool is being constructed for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolBuildProfile {
+    MainRuntime,
+    SubAgent,
+}
+
+/// Declares which profiles a built-in descriptor participates in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuiltinToolProfiles {
+    MainOnly,
+    SubAgentOnly,
+    Both,
+}
+
+impl BuiltinToolProfiles {
+    /// Returns `true` when the descriptor should be included for `profile`.
+    pub fn includes(self, profile: ToolBuildProfile) -> bool {
+        match self {
+            Self::Both => true,
+            Self::MainOnly => profile == ToolBuildProfile::MainRuntime,
+            Self::SubAgentOnly => profile == ToolBuildProfile::SubAgent,
+        }
+    }
+}
+
+/// Runtime dependencies passed to built-in tool constructors.
+pub struct ToolBuildContext {
+    pub workspace_root: PathBuf,
+    pub provider: Arc<dyn LlmProvider>,
+    pub model: String,
+}
+
+/// A compile-time descriptor for a built-in tool registered via `inventory`.
+///
+/// Each built-in tool module submits one of these. At runtime,
+/// [`register_builtin_tools`] collects them, filters by profile, and builds
+/// concrete [`Tool`] instances through the `build` function pointer.
+pub struct BuiltinToolDescriptor {
+    pub name: &'static str,
+    pub profiles: BuiltinToolProfiles,
+    pub build: fn(&ToolBuildContext) -> Box<dyn Tool>,
+}
+
+inventory::collect!(BuiltinToolDescriptor);
+
+/// Collects built-in descriptors matching `profile`, builds tools, and returns
+/// a populated [`ToolRegistry`].
+///
+/// Determinism: descriptors are sorted by name before construction.
+/// Errors: duplicate descriptor names or descriptor/tool name mismatches
+/// cause an immediate error return.
+pub fn register_builtin_tools(
+    ctx: &ToolBuildContext,
+    profile: ToolBuildProfile,
+) -> Result<ToolRegistry, String> {
+    let descriptors: Vec<&BuiltinToolDescriptor> = inventory::iter::<BuiltinToolDescriptor>
+        .into_iter()
+        .filter(|d| d.profiles.includes(profile))
+        .collect();
+    let tools = collect_and_build_builtins(&descriptors, ctx)?;
+    let mut registry = ToolRegistry::new(ctx.workspace_root.clone());
+    for tool in tools {
+        registry.register(tool);
+    }
+    Ok(registry)
+}
+
+/// Internal helper that is testable with synthetic descriptor slices.
+///
+/// Steps: sort by name → reject duplicates → build → validate name match.
+pub fn collect_and_build_builtins(
+    descriptors: &[&BuiltinToolDescriptor],
+    ctx: &ToolBuildContext,
+) -> Result<Vec<Box<dyn Tool>>, String> {
+    let mut sorted: Vec<&BuiltinToolDescriptor> = descriptors.to_vec();
+    sorted.sort_by_key(|d| d.name);
+
+    // Reject duplicate descriptor names.
+    for window in sorted.windows(2) {
+        if window[0].name == window[1].name {
+            return Err(format!(
+                "duplicate built-in tool descriptor name: {}",
+                window[0].name
+            ));
+        }
+    }
+
+    let mut tools: Vec<Box<dyn Tool>> = Vec::with_capacity(sorted.len());
+    for descriptor in &sorted {
+        let tool = (descriptor.build)(ctx);
+        let spec = tool.spec();
+        if spec.name != descriptor.name {
+            return Err(format!(
+                "built-in tool descriptor name mismatch: descriptor declares '{}' but tool advertises '{}'",
+                descriptor.name, spec.name
+            ));
+        }
+        tools.push(tool);
+    }
+    Ok(tools)
 }
 
 /// Validates a user-provided path is workspace-relative and traversal-safe.

@@ -33,6 +33,7 @@ flexi_logger = "0.31.8"
 termimad = "0.34.1"
 nix = { version = "0.29", features = ["process", "signal"] }
 toml = "0.8"
+inventory = "0.3"
 console-subscriber = { version = "0.4", optional = true }
 
 [dev-dependencies]
