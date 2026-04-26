@@ -263,6 +263,47 @@ pub(super) fn repair_truncated_json_closure(raw: &str) -> Option<String> {
     Some(repaired)
 }
 
+/// Remove invalid `\$` JSON escapes that models sometimes add when trying to
+/// preserve shell variables like `$i` or `$(...)` inside bash command strings.
+pub(super) fn repair_invalid_dollar_escapes(raw: &str) -> Option<String> {
+    let bytes = raw.as_bytes();
+    let mut result = String::with_capacity(raw.len());
+    let mut in_string = false;
+    let mut prev_backslash = false;
+    let mut changed = false;
+
+    for (idx, &b) in bytes.iter().enumerate() {
+        if in_string {
+            if prev_backslash {
+                prev_backslash = false;
+                result.push(b as char);
+                continue;
+            }
+            if b == b'\\' {
+                if bytes.get(idx + 1) == Some(&b'$') {
+                    changed = true;
+                    continue;
+                }
+                prev_backslash = true;
+                result.push('\\');
+                continue;
+            }
+            if b == b'"' {
+                in_string = false;
+            }
+            result.push(b as char);
+            continue;
+        }
+
+        if b == b'"' {
+            in_string = true;
+        }
+        result.push(b as char);
+    }
+
+    if changed { Some(result) } else { None }
+}
+
 /// Escape unescaped `"` that appear *inside* JSON string values.
 /// A `"` is treated as a real string terminator only if the next
 /// non-whitespace byte is one of: `,`, `}`, `]`, `:`, or end-of-input.

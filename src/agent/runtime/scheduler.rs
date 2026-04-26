@@ -9,8 +9,8 @@ use crate::agent::tools::ToolRegistry;
 
 use super::REPEATED_SUCCESS_GUIDANCE;
 use super::json_repair::{
-    canonical_tool_args, parse_or_repair_json, preview_text, repair_truncated_json_closure,
-    repair_unescaped_inner_quotes, strip_thinking_tags,
+    canonical_tool_args, parse_or_repair_json, preview_text, repair_invalid_dollar_escapes,
+    repair_truncated_json_closure, repair_unescaped_inner_quotes, strip_thinking_tags,
 };
 
 pub(super) struct PendingToolCall {
@@ -102,6 +102,7 @@ pub(super) fn plan_tool_call(
                     "JSON PARSE ERROR in tool arguments: {error}\n\
                      Fix: ensure all double quotes inside string values are escaped \
                      as \\\", newlines are \\n, and JSON containers are fully closed. \
+                     For bash commands, keep shell variables as $i / $(...) instead of \\\\$i / \\\\$(...). \
                      If multiple JSON objects are present, send exactly one JSON object. \
                      Then retry this tool call."
                 ))
@@ -123,10 +124,49 @@ fn repair_bash_arguments(raw: &str) -> Option<(String, &'static str)> {
         if serde_json::from_str::<serde_json::Value>(&repaired_quotes).is_ok() {
             return Some((repaired_quotes, "unescaped quotes"));
         }
+        if let Some(repaired_combo) = repair_invalid_dollar_escapes(&repaired_quotes)
+            && serde_json::from_str::<serde_json::Value>(&repaired_combo).is_ok()
+        {
+            return Some((repaired_combo, "unescaped quotes + invalid dollar escapes"));
+        }
         if let Some(repaired_combo) = repair_truncated_json_closure(&repaired_quotes)
             && serde_json::from_str::<serde_json::Value>(&repaired_combo).is_ok()
         {
             return Some((repaired_combo, "unescaped quotes + truncated payload"));
+        }
+        if let Some(repaired_dollars) = repair_invalid_dollar_escapes(&repaired_quotes)
+            && let Some(repaired_full) = repair_truncated_json_closure(&repaired_dollars)
+            && serde_json::from_str::<serde_json::Value>(&repaired_full).is_ok()
+        {
+            return Some((
+                repaired_full,
+                "unescaped quotes + invalid dollar escapes + truncated payload",
+            ));
+        }
+    }
+
+    if let Some(repaired_dollars) = repair_invalid_dollar_escapes(raw) {
+        if serde_json::from_str::<serde_json::Value>(&repaired_dollars).is_ok() {
+            return Some((repaired_dollars, "invalid dollar escapes"));
+        }
+        if let Some(repaired_combo) = repair_unescaped_inner_quotes(&repaired_dollars)
+            && serde_json::from_str::<serde_json::Value>(&repaired_combo).is_ok()
+        {
+            return Some((repaired_combo, "invalid dollar escapes + unescaped quotes"));
+        }
+        if let Some(repaired_combo) = repair_truncated_json_closure(&repaired_dollars)
+            && serde_json::from_str::<serde_json::Value>(&repaired_combo).is_ok()
+        {
+            return Some((repaired_combo, "invalid dollar escapes + truncated payload"));
+        }
+        if let Some(repaired_quotes) = repair_unescaped_inner_quotes(&repaired_dollars)
+            && let Some(repaired_full) = repair_truncated_json_closure(&repaired_quotes)
+            && serde_json::from_str::<serde_json::Value>(&repaired_full).is_ok()
+        {
+            return Some((
+                repaired_full,
+                "invalid dollar escapes + unescaped quotes + truncated payload",
+            ));
         }
     }
 

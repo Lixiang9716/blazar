@@ -34,6 +34,24 @@ fn test_tools() -> Vec<ToolSpec> {
     }]
 }
 
+fn deepseek_config() -> OpenAiConfig {
+    OpenAiConfig {
+        provider_type: Some("deepseek".to_owned()),
+        api_key: "test-key".to_owned(),
+        base_url: "https://api.deepseek.com".to_owned(),
+        model: "deepseek-v4-pro".to_owned(),
+        max_tokens: 1024,
+        temperature: 0.2,
+        top_p: Some(0.8),
+        top_k: Some(40.0),
+        frequency_penalty: Some(0.1),
+        enable_thinking: Some(true),
+        thinking_budget: Some(256),
+        system_prompt: Some("System prompt".to_owned()),
+        system_prompt_file: None,
+    }
+}
+
 #[test]
 fn merge_tool_call_fragment_accumulates_partial_fields() {
     let mut calls = Vec::new();
@@ -257,4 +275,58 @@ fn build_request_serializes_messages_tools_and_tool_choice() {
     assert!(has_tools);
     assert_eq!(choice, "auto");
     assert!(msg_count >= 3);
+}
+
+#[test]
+fn build_request_uses_deepseek_thinking_fields_without_tools() {
+    let provider = OpenAiProvider::new(deepseek_config());
+    let request = provider.build_request_for_test(
+        &[ProviderMessage::User {
+            content: "hello".to_owned(),
+        }],
+        &[],
+    );
+
+    assert_eq!(request["model"], "deepseek-v4-pro");
+    assert_eq!(request["thinking"]["type"], "enabled");
+    assert_eq!(request["reasoning_effort"], "high");
+    assert!(request.get("enable_thinking").is_none());
+    assert!(request.get("thinking_budget").is_none());
+}
+
+#[test]
+fn build_request_disables_deepseek_thinking_when_tools_are_available() {
+    let provider = OpenAiProvider::new(deepseek_config());
+    let request = provider.build_request_for_test(
+        &[ProviderMessage::User {
+            content: "inspect Cargo.toml".to_owned(),
+        }],
+        &test_tools(),
+    );
+
+    assert_eq!(request["thinking"]["type"], "disabled");
+    assert!(request.get("reasoning_effort").is_none());
+    assert!(request.get("enable_thinking").is_none());
+    assert!(request.get("thinking_budget").is_none());
+}
+
+#[test]
+fn stream_chunk_deserializes_content_without_id_field() {
+    let chunk = serde_json::from_str::<StreamChunk>(
+        r#"{
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {
+                        "content": "hello"
+                    },
+                    "finish_reason": null
+                }
+            ]
+        }"#,
+    )
+    .expect("stream chunk without id should still deserialize");
+
+    assert_eq!(chunk.choices.len(), 1);
+    assert_eq!(chunk.choices[0].delta.content.as_deref(), Some("hello"));
 }

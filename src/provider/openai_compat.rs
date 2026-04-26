@@ -3,7 +3,7 @@ use std::sync::mpsc::Sender;
 use async_openai::Client;
 use async_openai::config::OpenAIConfig as AsyncOpenAiConfig;
 use futures::StreamExt;
-use log::{info, trace, warn};
+use log::{info, warn};
 use serde_json::{Map, Value, json};
 
 use crate::agent::tools::ToolSpec;
@@ -60,6 +60,14 @@ fn default_enable_thinking() -> Option<bool> {
     Some(false)
 }
 
+fn is_deepseek_backend(config: &OpenAiConfig) -> bool {
+    config
+        .provider_type
+        .as_deref()
+        .is_some_and(|provider| provider.eq_ignore_ascii_case("deepseek"))
+        || config.base_url.contains("api.deepseek.com")
+}
+
 impl OpenAiConfig {
     /// Load from `config/provider.json` relative to `repo_root`.
     ///
@@ -94,7 +102,8 @@ impl OpenAiConfig {
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct StreamChunk {
     #[allow(dead_code)]
-    pub id: String,
+    #[serde(default)]
+    pub id: Option<String>,
     #[serde(default)]
     pub choices: Vec<StreamChoice>,
 }
@@ -304,11 +313,27 @@ impl OpenAiProvider {
         if let Some(fp) = cfg.frequency_penalty {
             obj.insert("frequency_penalty".into(), json!(fp));
         }
-        if let Some(enable) = cfg.enable_thinking {
-            obj.insert("enable_thinking".into(), json!(enable));
-        }
-        if let Some(budget) = cfg.thinking_budget {
-            obj.insert("thinking_budget".into(), json!(budget));
+        if is_deepseek_backend(cfg) {
+            // DeepSeek tool turns require reasoning_content replay, which Blazar
+            // does not yet preserve in provider history, so keep tool-enabled
+            // requests in non-thinking mode until that state is added.
+            let thinking_enabled = cfg.enable_thinking == Some(true) && request_tools.is_none();
+            obj.insert(
+                "thinking".into(),
+                json!({
+                    "type": if thinking_enabled { "enabled" } else { "disabled" }
+                }),
+            );
+            if thinking_enabled {
+                obj.insert("reasoning_effort".into(), json!("high"));
+            }
+        } else {
+            if let Some(enable) = cfg.enable_thinking {
+                obj.insert("enable_thinking".into(), json!(enable));
+            }
+            if let Some(budget) = cfg.thinking_budget {
+                obj.insert("thinking_budget".into(), json!(budget));
+            }
         }
         if let Some(tools) = request_tools {
             obj.insert("tools".into(), json!(tools));
@@ -362,13 +387,20 @@ impl LlmProvider for OpenAiProvider {
                 .map_err(|e| format!("stream error: {e}"))?;
 
             let mut tool_calls: Vec<ToolCall> = Vec::new();
+            let mut event_count: usize = 0;
+            let mut chunk_count: usize = 0;
 
             while let Some(chunk_result) = stream.next().await {
                 let chunk: StreamChunk = match chunk_result {
-                    Ok(c) => c,
+                    Ok(c) => {
+                        chunk_count += 1;
+                        c
+                    }
                     Err(e) => {
-                        trace!("stream: skip unparseable chunk: {e}");
-                        continue;
+                        let msg = format!("{e}");
+                        warn!("stream: provider error: {msg}");
+                        let _ = tx.send(ProviderEvent::Error(msg));
+                        return Ok(());
                     }
                 };
 
@@ -376,24 +408,30 @@ impl LlmProvider for OpenAiProvider {
                     // Emit reasoning content (thinking mode)
                     if let Some(ref reasoning) = choice.delta.reasoning_content
                         && !reasoning.is_empty()
-                        && tx
+                    {
+                        event_count += 1;
+                        if tx
                             .send(ProviderEvent::ThinkingDelta(reasoning.clone()))
                             .is_err()
-                    {
-                        return Ok(());
+                        {
+                            return Ok(());
+                        }
                     }
 
                     // Emit regular content
                     if let Some(ref content) = choice.delta.content
                         && !content.is_empty()
-                        && tx.send(ProviderEvent::TextDelta(content.clone())).is_err()
                     {
-                        return Ok(());
+                        event_count += 1;
+                        if tx.send(ProviderEvent::TextDelta(content.clone())).is_err() {
+                            return Ok(());
+                        }
                     }
 
                     // Accumulate streaming tool calls
                     if let Some(ref delta_tcs) = choice.delta.tool_calls {
                         for dtc in delta_tcs {
+                            event_count += 1;
                             merge_tool_call_fragment(&mut tool_calls, dtc);
                         }
                     }
@@ -411,6 +449,13 @@ impl LlmProvider for OpenAiProvider {
                         }
                     }
                 }
+            }
+
+            if event_count == 0 {
+                warn!(
+                    "stream: completed with 0 events from {chunk_count} chunks — \
+                     possible API issue or empty response"
+                );
             }
 
             let _ = tx.send(ProviderEvent::TurnComplete);

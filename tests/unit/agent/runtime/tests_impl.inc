@@ -1760,6 +1760,85 @@ fn run_turn_repairs_control_chars_and_executes_tool() {
     }));
 }
 
+#[test]
+fn run_turn_repairs_nested_bash_quotes_and_executes_tool() {
+    struct NestedBashQuotesProvider;
+
+    impl LlmProvider for NestedBashQuotesProvider {
+        fn stream_turn(
+            &self,
+            _model: &str,
+            messages: &[ProviderMessage],
+            _tools: &[ToolSpec],
+            tx: Sender<ProviderEvent>,
+        ) {
+            let has_tool_result = messages
+                .iter()
+                .any(|message| matches!(message, ProviderMessage::ToolResult { .. }));
+            if has_tool_result {
+                let _ = tx.send(ProviderEvent::TextDelta("done".into()));
+                let _ = tx.send(ProviderEvent::TurnComplete);
+            } else {
+                let _ = tx.send(ProviderEvent::ToolCall {
+                    call_id: "call-nested-bash".into(),
+                    name: "bash".into(),
+                    arguments: r#"{"command": "for i in {1..5}; do echo "$i" > "\$i"; if (( "\$(cat "\$i")" % 2 == 0 )); then echo 0 > "\$i"; fi; done", "timeout_secs": 10}"#
+                        .into(),
+                });
+                let _ = tx.send(ProviderEvent::TurnComplete);
+            }
+        }
+    }
+
+    struct BashCountingTool {
+        calls: Arc<AtomicU32>,
+    }
+
+    impl Tool for BashCountingTool {
+        fn spec(&self) -> ToolSpec {
+            ToolSpec {
+                name: "bash".into(),
+                description: "count bash-style executions".into(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": true
+                }),
+            }
+        }
+
+        fn execute(&self, _args: serde_json::Value) -> crate::agent::tools::ToolResult {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            crate::agent::tools::ToolResult::success("bash counted")
+        }
+    }
+
+    let counter = Arc::new(AtomicU32::new(0));
+    let mut registry = empty_registry();
+    registry.register(Box::new(BashCountingTool {
+        calls: Arc::clone(&counter),
+    }));
+
+    let (event_tx, _event_rx) = mpsc::channel();
+    let cancel = Arc::new(AtomicBool::new(false));
+    let mut messages = user_messages("test nested bash quotes");
+
+    let outcome = execute_turn(
+        &mut messages,
+        &NestedBashQuotesProvider,
+        "echo",
+        &registry,
+        &ChannelObserver { tx: &event_tx },
+        &cancel,
+    );
+    assert!(matches!(outcome, TurnOutcome::Complete));
+    assert_eq!(counter.load(Ordering::SeqCst), 1);
+    assert!(messages.iter().any(|message| {
+        matches!(message, ProviderMessage::ToolResult { output, is_error, .. }
+                if !*is_error && output.contains(JSON_REPAIR_NOTE))
+    }));
+}
+
 struct TimeoutTool {
     calls: Arc<AtomicU32>,
 }
