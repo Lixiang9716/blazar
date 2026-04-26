@@ -40,6 +40,12 @@ Introduce a trait-based boundary (same spirit as timeline `render_entry` abstrac
 
 `users.rs` only performs layout slicing and delegates each panel render through these abstractions.
 
+Height allocation must be parameterized instead of hard-coded, so layout can adapt by scenario:
+
+- add explicit height parameters/policy for top/input/model panels
+- allow runtime adjustment based on available terminal height
+- keep top panel expandable (especially in command mode) within policy bounds
+
 ## Panel Behavior
 
 ### Top Panel
@@ -53,7 +59,7 @@ Command mode (`StatusMode::CommandList`):
 - render command matches as a vertical list
 - show at most 6 items in viewport
 - support scroll window via Blazar-owned offset state
-- top panel receives more available height in users-area distribution
+- top panel receives more available height in users-area distribution, driven by height policy parameters
 
 ### Input Panel
 
