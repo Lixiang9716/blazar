@@ -1,7 +1,7 @@
+use super::{input_panel::InputPanelRenderer, model_panel::ModelPanelRenderer};
 use crate::chat::app::ChatApp;
 use crate::chat::theme::ChatTheme;
 use crate::chat::users_state::UsersLayoutPolicy;
-use super::{input_panel::InputPanelRenderer, model_panel::ModelPanelRenderer};
 use ratatui_core::{layout::Rect, terminal::Frame};
 
 pub(super) struct UsersPanelRenderContext<'a> {
@@ -17,7 +17,6 @@ pub(super) enum UsersPanelKind {
 }
 
 pub(super) trait UsersPanelRenderer {
-    fn supports(&self, kind: &UsersPanelKind) -> bool;
     fn render(&self, frame: &mut Frame, area: Rect, context: &UsersPanelRenderContext<'_>);
 }
 
@@ -56,10 +55,6 @@ impl UsersPanelRenderRegistry {
 struct TopPanelRenderer;
 
 impl UsersPanelRenderer for TopPanelRenderer {
-    fn supports(&self, kind: &UsersPanelKind) -> bool {
-        matches!(kind, UsersPanelKind::Top)
-    }
-
     fn render(&self, frame: &mut Frame, area: Rect, context: &UsersPanelRenderContext<'_>) {
         super::top_panel::render_top_panel(frame, area, context.app, context.theme, context.policy);
     }

@@ -58,7 +58,9 @@ pub(super) fn render_users_area_with_policy(
     let input_h = policy.input_height.min(area.height);
     let model_h = policy.model_height.min(area.height.saturating_sub(input_h));
     let separator_h = u16::from(
-        input_h > 0 && model_h > 0 && area.height >= input_h.saturating_add(model_h).saturating_add(1),
+        input_h > 0
+            && model_h > 0
+            && area.height >= input_h.saturating_add(model_h).saturating_add(1),
     );
     let remaining_after_input_model = area
         .height
