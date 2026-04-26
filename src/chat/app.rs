@@ -95,6 +95,7 @@ impl ChatApp {
         let display_path = shorten_home(repo_path);
         let branch = detect_branch(repo_path);
         let git_pr_label = infer_pr_label_from_branch(&branch);
+        let workspace_root = PathBuf::from(repo_path);
 
         let timeline = if std::env::var("BLAZAR_DEMO").is_ok() {
             crate::chat::demo::demo_timeline()
@@ -111,7 +112,6 @@ impl ChatApp {
             ]
         };
 
-        let theme = crate::chat::theme::build_theme();
         let mut command_registry = crate::chat::commands::CommandRegistry::new();
         crate::chat::commands::builtins::register_builtin_commands(&mut command_registry).map_err(
             |error| {
@@ -123,43 +123,38 @@ impl ChatApp {
 
         let (provider, model_name) = crate::provider::load_provider(repo_path);
 
-        let workspace_root = PathBuf::from(repo_path);
-        let debug_recorder = DebugRecorder::new(&workspace_root);
-
         Ok(Self {
             messages: vec![ChatMessage {
                 author: Author::Spirit,
                 body: "Spirit: Tell me what you'd like to explore.".to_owned(),
             }],
             timeline,
-            composer: {
-                let mut ta = TextArea::default();
-                ta.set_cursor_line_style(ratatui_core::style::Style::default());
-                ta
-            },
-            should_quit: false,
+            composer: new_composer(),
             display_path,
             branch,
             scroll_offset: u16::MAX, // auto-scroll sentinel
-            show_details: false,
             picker: ModalPicker::command_palette_from_registry(&command_registry),
             command_registry,
+            theme_name: crate::chat::theme::DEFAULT_THEME.to_owned(),
+            theme: crate::chat::theme::build_theme(),
+            agent_runtime: AgentRuntime::new(provider, workspace_root.clone(), model_name.clone())?,
+            debug_recorder: DebugRecorder::new(&workspace_root),
+            workspace_root,
+            model_name,
+            git_pr_label,
+            user_mode: UserMode::Auto,
+            // All remaining fields are zero/empty/false/None defaults.
+            should_quit: false,
+            show_details: false,
             tick_count: 0,
             demo_queue: Vec::new(),
             demo_last_add: None,
             timeline_content_height: Cell::new(0),
             timeline_visible_height: Cell::new(0),
-            theme_name: crate::chat::theme::DEFAULT_THEME.to_owned(),
-            theme,
-            agent_runtime: AgentRuntime::new(provider, workspace_root.clone(), model_name.clone())?,
             agent_state: AgentRuntimeState::default(),
             pending_messages: VecDeque::new(),
-            workspace_root,
-            model_name,
-            user_mode: UserMode::Auto,
             users_status_mode: StatusMode::Normal,
             inline_command_matches: Vec::new(),
-            git_pr_label,
             referenced_files: Vec::new(),
             context_usage: None,
             has_user_sent: false,
@@ -167,7 +162,6 @@ impl ChatApp {
             active_turn_title: None,
             thinking_action_name: None,
             current_turn_has_thinking_entry: false,
-            debug_recorder,
         })
     }
 
@@ -435,7 +429,7 @@ impl ChatApp {
     pub fn submit_composer(&mut self) {
         let text = self.composer_text();
         self.send_message(&text);
-        self.composer = TextArea::default();
+        self.composer = new_composer();
         self.sync_users_status_from_composer();
     }
 
@@ -521,6 +515,12 @@ fn shorten_home(path: &str) -> String {
         return format!("~{rest}");
     }
     path.to_owned()
+}
+
+fn new_composer() -> TextArea<'static> {
+    let mut ta = TextArea::default();
+    ta.set_cursor_line_style(ratatui_core::style::Style::default());
+    ta
 }
 
 pub(crate) fn normalize_slash_query(query: &str) -> String {
