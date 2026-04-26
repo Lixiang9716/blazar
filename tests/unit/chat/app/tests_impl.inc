@@ -1948,3 +1948,10 @@ fn build_pending_turn_parses_runtime_and_local_command_kinds() {
     assert_eq!(discover.dispatch, super::PendingDispatch::DiscoverAgents);
     assert!(!discover.timeline_inserted);
 }
+
+#[test]
+fn agent_runtime_implements_runtime_port_trait() {
+    fn assert_impl<T: crate::chat::runtime_port::AgentRuntimePort>() {}
+    // compile-time check that AgentRuntime implements the runtime port trait
+    assert_impl::<crate::agent::runtime::AgentRuntime>();
+}

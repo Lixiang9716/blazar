@@ -222,6 +222,33 @@ impl Drop for AgentRuntime {
     }
 }
 
+impl crate::chat::runtime_port::AgentRuntimePort for AgentRuntime {
+    fn submit_turn(&self, prompt: &str) -> Result<(), String> {
+        self.submit_turn(prompt)
+    }
+
+    fn set_model(&self, model: &str) -> Result<(), String> {
+        self.set_model(model)
+    }
+
+    fn refresh_acp_agents(&self) -> Result<(), String> {
+        self.refresh_acp_agents()
+    }
+
+    fn cancel(&self) {
+        self.cancel()
+    }
+
+    fn try_recv(&self) -> Option<crate::agent::protocol::AgentEvent> {
+        self.try_recv()
+    }
+
+    #[cfg(test)]
+    fn shutdown_for_test(&mut self) {
+        self.shutdown_for_test()
+    }
+}
+
 /// The main loop running on the background thread.
 fn runtime_loop(
     cmd_rx: Receiver<AgentCommand>,
