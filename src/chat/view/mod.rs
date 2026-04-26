@@ -69,7 +69,7 @@ pub fn render_frame(frame: &mut Frame, app: &mut ChatApp, tick_ms: u64) {
 
     let streaming = app.is_streaming();
     let users_policy = UsersLayoutPolicy::default();
-    let users_height = users::users_area_height(area.height, users_policy);
+    let users_height = users::users_area_height(area.height, users_policy, app);
     let [timeline_area, users_area] = vertical![>=1, ==(users_height)].areas(area);
     timeline::render_timeline(frame, timeline_area, app, &theme);
 
@@ -105,7 +105,7 @@ pub fn render_frame_with_users_policy(
     frame.render_widget(bg_block, area);
 
     let streaming = app.is_streaming();
-    let users_height = users::users_area_height(area.height, users_policy);
+    let users_height = users::users_area_height(area.height, users_policy, app);
     let [timeline_area, users_area] = vertical![>=1, ==(users_height)].areas(area);
     timeline::render_timeline(frame, timeline_area, app, &theme);
 

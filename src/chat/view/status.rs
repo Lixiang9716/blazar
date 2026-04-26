@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use crate::chat::app::ChatApp;
 use crate::chat::theme::ChatTheme;
 use ratatui_core::{
@@ -156,7 +158,12 @@ pub(super) fn render_mode_config_row(
         ),
         _ => "n/a".to_owned(),
     };
-    let right = format!("{} · ctx {context_text}", snapshot.model_name);
+    let debug = app.debug_status_label();
+    let right = if debug.is_empty() {
+        format!("{} · ctx {context_text}", snapshot.model_name)
+    } else {
+        format!("{} · ctx {context_text} · {debug}", snapshot.model_name)
+    };
 
     let available = area.width as usize;
     let left_len = left.width();

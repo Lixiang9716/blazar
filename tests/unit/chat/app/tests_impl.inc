@@ -997,8 +997,8 @@ fn command_mode_scroll_routes_to_users_command_window() {
     app.set_composer_text("/");
     assert_eq!(app.users_status_snapshot().status_mode, StatusMode::CommandList);
     assert!(
-        app.inline_command_matches().len() > 1,
-        "test requires multiple inline command matches"
+        app.inline_command_matches().len() > 6,
+        "test requires the full command list to remain available"
     );
 
     app.timeline_content_height.set(30);
@@ -1006,14 +1006,20 @@ fn command_mode_scroll_routes_to_users_command_window() {
     app.scroll_offset = 5;
     let before = app.users_command_scroll_offset();
 
+    for _ in 0..6 {
+        app.handle_action(InputAction::ScrollDown);
+    }
+
+    assert_eq!(app.users_command_scroll_offset(), before + 6);
+
     app.handle_action(InputAction::ScrollDown);
 
     assert_eq!(app.scroll_offset, 5, "timeline scroll should remain untouched");
-    assert!(app.users_command_scroll_offset() >= before);
+    assert_eq!(app.users_command_scroll_offset(), before + 7);
 
     app.handle_action(InputAction::ScrollUp);
     assert_eq!(app.scroll_offset, 5, "timeline scroll should still remain untouched");
-    assert_eq!(app.users_command_scroll_offset(), before);
+    assert_eq!(app.users_command_scroll_offset(), before + 6);
 }
 
 #[test]

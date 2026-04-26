@@ -26,35 +26,40 @@ fn chat_view_renders_title_bar_and_timeline() {
 }
 
 #[test]
-fn chat_view_renders_status_bar() {
+fn chat_view_renders_model_row() {
     let mut app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
     let lines = render_to_lines_for_test(&mut app, 100, 35);
 
     assert!(
-        lines.iter().any(|line| line.contains("commands")),
-        "status bar should show '/ commands'"
-    );
-    assert!(
-        lines.iter().any(|line| line.contains("refs:-")),
-        "status bar should render refs:- fallback when no file references are known"
+        lines
+            .iter()
+            .any(|line| line.contains("AUTO") && line.contains("echo")),
+        "model row should render mode and model name"
     );
 }
 
 #[test]
-fn status_row_renders_path_branch_pr_and_references() {
+fn top_panel_renders_only_path_and_branch_in_normal_mode() {
     let mut app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
     app.set_pr_label_for_test(Some("PR#42 improve timeline".to_owned()));
     app.set_referenced_files_for_test(vec!["src/chat/view/mod.rs".to_owned()]);
 
-    let lines = render_to_lines_for_test(&mut app, 130, 24);
+    let policy = UsersLayoutPolicy {
+        top_height: 1,
+        input_height: 1,
+        model_height: 2,
+        max_command_window_size: 6,
+    };
+    let lines = render_to_lines_for_test_with_users_policy(&mut app, 130, 24, policy);
+    let users_rows = &lines[lines.len().saturating_sub(5)..];
 
-    assert!(lines.iter().any(|line| line.contains("~/blazar")));
-    assert!(lines.iter().any(|line| line.contains("main")));
-    assert!(lines.iter().any(|line| line.contains("PR#42")));
     assert!(
-        lines
-            .iter()
-            .any(|line| line.contains("src/chat/view/mod.rs"))
+        users_rows[0].contains("~/blazar") && users_rows[0].contains("main"),
+        "normal top panel should show path + branch"
+    );
+    assert!(
+        !users_rows[0].contains("PR#42") && !users_rows[0].contains("src/chat/view/mod.rs"),
+        "normal top panel should not show PR or reference metadata"
     );
 }
 
@@ -112,63 +117,102 @@ fn mode_row_renders_context_ratio_when_available() {
 }
 
 #[test]
-fn slash_renders_inline_command_matches_in_status_row() {
+fn top_panel_renders_vertical_command_window_and_uses_scroll_offset() {
     use blazar::chat::input::InputAction;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     let mut app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
-
     app.handle_action(InputAction::Key(KeyEvent::new(
         KeyCode::Char('/'),
         KeyModifiers::NONE,
     )));
 
-    app.handle_action(InputAction::Key(KeyEvent::new(
-        KeyCode::Char('h'),
-        KeyModifiers::NONE,
-    )));
-    app.handle_action(InputAction::Key(KeyEvent::new(
-        KeyCode::Char('e'),
-        KeyModifiers::NONE,
-    )));
+    let policy = UsersLayoutPolicy {
+        top_height: 4,
+        input_height: 1,
+        model_height: 1,
+        max_command_window_size: 3,
+    };
+    let lines = render_to_lines_for_test_with_users_policy(&mut app, 100, 18, policy);
+    let users_rows = &lines[lines.len().saturating_sub(7)..];
 
-    let lines = render_to_lines_for_test(&mut app, 100, 22);
+    assert!(users_rows[0].contains("~/blazar"));
+    assert!(users_rows[1].contains("/help"));
+    assert!(users_rows[2].contains("/clear"));
+    assert!(users_rows[3].contains("/copy"));
+
+    for _ in 0..6 {
+        app.handle_action(InputAction::ScrollDown);
+    }
+    let scrolled = render_to_lines_for_test_with_users_policy(&mut app, 100, 18, policy);
+    let scrolled_rows = &scrolled[scrolled.len().saturating_sub(7)..];
 
     assert!(
-        lines.iter().any(|line| line.contains("/help")),
-        "status row should render inline slash command matches"
+        scrolled_rows[1].contains("/mcp"),
+        "scroll offset should reveal commands beyond the initial six"
     );
     assert!(
-        lines.iter().all(|line| !line.contains("Commands")),
-        "typing slash should not open command picker overlay"
-    );
-}
-
-#[test]
-fn slash_status_row_normalizes_multiline_query_text() {
-    let mut app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
-    app.set_composer_text("/help\nnext\r\nfinal");
-
-    let lines = render_to_lines_for_test(&mut app, 120, 22);
-    let users_rows = &lines[lines.len().saturating_sub(4)..];
-
-    assert!(
-        users_rows[0].contains("/help next final"),
-        "status row should normalize slash query CR/LF and collapse repeated whitespace"
+        !scrolled_rows[1].contains("/help"),
+        "scrolling should move the first visible command out of view"
     );
 }
 
 #[test]
-fn slash_status_row_and_matcher_share_normalization_for_crlf_queries() {
+fn top_panel_caps_command_window_to_policy_max_items() {
+    use blazar::chat::input::InputAction;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
     let mut app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
-    app.set_composer_text("/help\r\n   ");
+    app.handle_action(InputAction::Key(KeyEvent::new(
+        KeyCode::Char('/'),
+        KeyModifiers::NONE,
+    )));
 
-    let lines = render_to_lines_for_test(&mut app, 120, 22);
-    let users_rows = &lines[lines.len().saturating_sub(4)..];
+    let policy = UsersLayoutPolicy {
+        top_height: 8,
+        input_height: 1,
+        model_height: 1,
+        max_command_window_size: 3,
+    };
+    let lines = render_to_lines_for_test_with_users_policy(&mut app, 100, 18, policy);
+    let users_rows = &lines[lines.len().saturating_sub(7)..];
 
+    assert_eq!(users_rows[0].trim(), "~/blazar · main");
+    assert!(users_rows[1].contains("/help"));
+    assert!(users_rows[2].contains("/clear"));
+    assert!(users_rows[3].contains("/copy"));
     assert!(
-        users_rows[0].contains("/help · /help"),
-        "status row and matcher should use the same normalized slash query"
+        users_rows
+            .iter()
+            .take(4)
+            .all(|line| !line.contains("/init")),
+        "top panel should cap visible commands to the policy max"
+    );
+}
+
+#[test]
+fn default_policy_caps_command_window_to_six_items() {
+    use blazar::chat::input::InputAction;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    let mut app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
+    app.handle_action(InputAction::Key(KeyEvent::new(
+        KeyCode::Char('/'),
+        KeyModifiers::NONE,
+    )));
+
+    let lines = render_to_lines_for_test(&mut app, 100, 18);
+    let users_rows = &lines[lines.len().saturating_sub(10)..];
+
+    assert!(users_rows[1].contains("/help"));
+    assert!(users_rows[2].contains("/clear"));
+    assert!(users_rows[3].contains("/copy"));
+    assert!(users_rows[4].contains("/init"));
+    assert!(users_rows[5].contains("/skills"));
+    assert!(users_rows[6].contains("/model"));
+    assert!(
+        users_rows.iter().all(|line| !line.contains("/mcp")),
+        "default policy should cap the visible window to 6 items"
     );
 }
 

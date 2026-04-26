@@ -314,6 +314,10 @@ impl ChatApp {
         &self.model_name
     }
 
+    pub(crate) fn is_users_command_list_mode(&self) -> bool {
+        self.users_status_mode == StatusMode::CommandList
+    }
+
     pub fn users_status_snapshot(&self) -> UsersStatusSnapshot {
         UsersStatusSnapshot {
             mode: self.user_mode,
@@ -336,7 +340,6 @@ impl ChatApp {
         &self.inline_command_matches
     }
 
-    #[cfg(test)]
     pub(crate) fn users_command_scroll_offset(&self) -> usize {
         self.users_command_scroll_offset
     }
@@ -487,6 +490,7 @@ impl ChatApp {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn normalized_slash_query(&self) -> String {
         normalize_slash_query(&self.composer_text())
     }
@@ -498,10 +502,6 @@ impl ChatApp {
         self.inline_command_matches =
             crate::chat::commands::matcher::ranked_match_names(&normalized_query, &command_specs)
                 .into_iter()
-                .take(
-                    crate::chat::users_state::UsersLayoutPolicy::default().max_command_window_size
-                        as usize,
-                )
                 .map(str::to_owned)
                 .collect();
     }

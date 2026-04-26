@@ -1,11 +1,13 @@
 use crate::chat::app::ChatApp;
 use crate::chat::theme::ChatTheme;
+use crate::chat::users_state::UsersLayoutPolicy;
 use crate::chat::view::{input, status};
 use ratatui_core::{layout::Rect, terminal::Frame};
 
 pub(super) struct UsersPanelRenderContext<'a> {
     pub app: &'a ChatApp,
     pub theme: &'a ChatTheme,
+    pub policy: UsersLayoutPolicy,
 }
 
 pub(super) enum UsersPanelKind {
@@ -63,7 +65,7 @@ impl UsersPanelRenderer for TopPanelRenderer {
     }
 
     fn render(&self, frame: &mut Frame, area: Rect, context: &UsersPanelRenderContext<'_>) {
-        status::render_users_status_row(frame, area, context.app, context.theme);
+        super::top_panel::render_top_panel(frame, area, context.app, context.theme, context.policy);
     }
 }
 
