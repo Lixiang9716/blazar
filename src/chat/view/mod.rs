@@ -5,11 +5,13 @@ mod picker;
 mod status;
 mod streaming;
 mod timeline;
+mod users;
 
 use crate::chat::app::ChatApp;
 use core::cmp;
 use ratatui_core::{
     backend::TestBackend,
+    layout::Rect,
     terminal::{Frame, Terminal},
 };
 use ratatui_macros::vertical;
@@ -57,21 +59,22 @@ pub fn render_frame(frame: &mut Frame, app: &mut ChatApp, tick_ms: u64) {
 
     let streaming = app.is_streaming();
     let users_height = users_height(area.height);
-    let [timeline_zone, users_area] = vertical![>=1, ==(users_height)].areas(area);
-    let streaming_height: u16 = if streaming { 1 } else { 0 };
-
-    let [timeline_area, streaming_area] = vertical![>=1, ==(streaming_height)].areas(timeline_zone);
+    let [timeline_area, users_area] = vertical![>=1, ==(users_height)].areas(area);
     timeline::render_timeline(frame, timeline_area, app, &theme);
 
-    if streaming {
-        streaming::render_streaming_indicator(frame, streaming_area, tick_ms, app, &theme);
+    if streaming && timeline_area.height > 0 {
+        let indicator_area = Rect::new(
+            timeline_area.x,
+            timeline_area
+                .y
+                .saturating_add(timeline_area.height.saturating_sub(1)),
+            timeline_area.width,
+            1,
+        );
+        streaming::render_streaming_indicator(frame, indicator_area, tick_ms, app, &theme);
     }
 
-    let [status_area, users_tail] = vertical![==1, >=0].areas(users_area);
-    let [input_area, mode_area] = vertical![>=0, ==1].areas(users_tail);
-    status::render_users_status_row(frame, status_area, app, &theme);
-    input::render_input(frame, input_area, app, &theme);
-    status::render_mode_config_row(frame, mode_area, app, &theme);
+    users::render_users_area(frame, users_area, app, &theme);
 
     if app.picker.is_visible() {
         picker::render_picker(frame, area, app, &theme);

@@ -391,8 +391,8 @@ fn render_entry_renders_bash_warning_hint_thinking_and_code_block() {
     );
     let thinking_text = lines_text(&render_entry(&thinking, &theme, 18)).join("\n");
     assert!(
-        thinking_text.is_empty(),
-        "thinking entries should not render in timeline"
+        !thinking_text.is_empty() && thinking_text.contains("…"),
+        "thinking entries should render through the dedicated thinking renderer"
     );
 
     let code = TimelineEntry::code_block("rust", "fn main() {}".to_string());

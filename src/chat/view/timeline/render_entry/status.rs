@@ -47,11 +47,25 @@ pub(super) fn render_hint_entry<'a>(
 }
 
 pub(super) fn render_thinking_entry<'a>(
-    _entry: &TimelineEntry,
-    _theme: &ChatTheme,
-    _width: u16,
+    entry: &TimelineEntry,
+    theme: &ChatTheme,
+    width: u16,
 ) -> Vec<Line<'a>> {
-    Vec::new()
+    let mut lines = Vec::new();
+    if entry.body.trim().is_empty() {
+        return lines;
+    }
+
+    for (i, body_line) in entry.body.lines().enumerate() {
+        let prefix = if i == 0 {
+            vec![Span::raw(MARGIN), Span::styled("… ", theme.marker_thinking)]
+        } else {
+            vec![Span::raw(INDENT)]
+        };
+        push_wrapped_lines(&mut lines, body_line, theme.dim_text, prefix, width);
+    }
+
+    lines
 }
 
 pub(super) fn render_code_block_entry<'a>(

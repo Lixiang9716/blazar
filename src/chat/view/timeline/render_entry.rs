@@ -11,6 +11,190 @@ mod tests;
 
 use common::marker_style_for;
 
+pub(super) trait TimelineEntryRenderer {
+    fn render(&self, entry: &TimelineEntry, theme: &ChatTheme, width: u16) -> Vec<Line<'static>>;
+}
+
+trait EntryKindRenderer {
+    fn supports(&self, kind: &EntryKind) -> bool;
+    fn render(
+        &self,
+        entry: &TimelineEntry,
+        theme: &ChatTheme,
+        width: u16,
+        marker_style: Style,
+    ) -> Vec<Line<'static>>;
+}
+
+pub(super) struct EntryRenderRegistry {
+    renderers: Vec<Box<dyn EntryKindRenderer>>,
+}
+
+impl Default for EntryRenderRegistry {
+    fn default() -> Self {
+        Self {
+            renderers: vec![
+                Box::new(MessageRenderer),
+                Box::new(ToolUseRenderer),
+                Box::new(ToolCallRenderer),
+                Box::new(BashRenderer),
+                Box::new(WarningRenderer),
+                Box::new(HintRenderer),
+                Box::new(ThinkingRenderer),
+                Box::new(CodeBlockRenderer),
+            ],
+        }
+    }
+}
+
+impl TimelineEntryRenderer for EntryRenderRegistry {
+    fn render(&self, entry: &TimelineEntry, theme: &ChatTheme, width: u16) -> Vec<Line<'static>> {
+        let marker_style = marker_style_for(entry, theme);
+        self.renderers
+            .iter()
+            .find(|renderer| renderer.supports(&entry.kind))
+            .map(|renderer| renderer.render(entry, theme, width, marker_style))
+            .unwrap_or_default()
+    }
+}
+
+struct MessageRenderer;
+struct ToolUseRenderer;
+struct ToolCallRenderer;
+struct BashRenderer;
+struct WarningRenderer;
+struct HintRenderer;
+struct ThinkingRenderer;
+struct CodeBlockRenderer;
+
+impl EntryKindRenderer for MessageRenderer {
+    fn supports(&self, kind: &EntryKind) -> bool {
+        matches!(kind, EntryKind::Message | EntryKind::Banner)
+    }
+
+    fn render(
+        &self,
+        entry: &TimelineEntry,
+        theme: &ChatTheme,
+        width: u16,
+        marker_style: Style,
+    ) -> Vec<Line<'static>> {
+        message::render_message_entry(entry, theme, width, marker_style)
+    }
+}
+
+impl EntryKindRenderer for ToolUseRenderer {
+    fn supports(&self, kind: &EntryKind) -> bool {
+        matches!(kind, EntryKind::ToolUse { .. })
+    }
+
+    fn render(
+        &self,
+        entry: &TimelineEntry,
+        theme: &ChatTheme,
+        _width: u16,
+        marker_style: Style,
+    ) -> Vec<Line<'static>> {
+        tooling::render_tool_use_entry(entry, theme, marker_style)
+    }
+}
+
+impl EntryKindRenderer for ToolCallRenderer {
+    fn supports(&self, kind: &EntryKind) -> bool {
+        matches!(kind, EntryKind::ToolCall { .. })
+    }
+
+    fn render(
+        &self,
+        entry: &TimelineEntry,
+        theme: &ChatTheme,
+        _width: u16,
+        marker_style: Style,
+    ) -> Vec<Line<'static>> {
+        tooling::render_tool_call_entry(entry, theme, marker_style)
+    }
+}
+
+impl EntryKindRenderer for BashRenderer {
+    fn supports(&self, kind: &EntryKind) -> bool {
+        matches!(kind, EntryKind::Bash { .. })
+    }
+
+    fn render(
+        &self,
+        entry: &TimelineEntry,
+        theme: &ChatTheme,
+        width: u16,
+        marker_style: Style,
+    ) -> Vec<Line<'static>> {
+        tooling::render_bash_entry(entry, theme, width, marker_style)
+    }
+}
+
+impl EntryKindRenderer for WarningRenderer {
+    fn supports(&self, kind: &EntryKind) -> bool {
+        matches!(kind, EntryKind::Warning)
+    }
+
+    fn render(
+        &self,
+        entry: &TimelineEntry,
+        theme: &ChatTheme,
+        width: u16,
+        marker_style: Style,
+    ) -> Vec<Line<'static>> {
+        status::render_warning_entry(entry, theme, width, marker_style)
+    }
+}
+
+impl EntryKindRenderer for HintRenderer {
+    fn supports(&self, kind: &EntryKind) -> bool {
+        matches!(kind, EntryKind::Hint)
+    }
+
+    fn render(
+        &self,
+        entry: &TimelineEntry,
+        theme: &ChatTheme,
+        width: u16,
+        marker_style: Style,
+    ) -> Vec<Line<'static>> {
+        status::render_hint_entry(entry, theme, width, marker_style)
+    }
+}
+
+impl EntryKindRenderer for ThinkingRenderer {
+    fn supports(&self, kind: &EntryKind) -> bool {
+        matches!(kind, EntryKind::Thinking)
+    }
+
+    fn render(
+        &self,
+        entry: &TimelineEntry,
+        theme: &ChatTheme,
+        width: u16,
+        _marker_style: Style,
+    ) -> Vec<Line<'static>> {
+        status::render_thinking_entry(entry, theme, width)
+    }
+}
+
+impl EntryKindRenderer for CodeBlockRenderer {
+    fn supports(&self, kind: &EntryKind) -> bool {
+        matches!(kind, EntryKind::CodeBlock { .. })
+    }
+
+    fn render(
+        &self,
+        entry: &TimelineEntry,
+        theme: &ChatTheme,
+        width: u16,
+        _marker_style: Style,
+    ) -> Vec<Line<'static>> {
+        status::render_code_block_entry(entry, theme, width)
+    }
+}
+
 #[cfg(test)]
 pub(super) fn render_fenced_code<'a>(
     lang: &str,
@@ -21,22 +205,11 @@ pub(super) fn render_fenced_code<'a>(
     message::render_fenced_code(lang, code, theme, text_width)
 }
 
+#[cfg(test)]
 pub(super) fn render_entry<'a>(
     entry: &TimelineEntry,
     theme: &ChatTheme,
     width: u16,
 ) -> Vec<Line<'a>> {
-    let marker_style = marker_style_for(entry, theme);
-
-    match &entry.kind {
-        EntryKind::Message => message::render_message_entry(entry, theme, width, marker_style),
-        EntryKind::Banner => message::render_message_entry(entry, theme, width, marker_style),
-        EntryKind::ToolUse { .. } => tooling::render_tool_use_entry(entry, theme, marker_style),
-        EntryKind::ToolCall { .. } => tooling::render_tool_call_entry(entry, theme, marker_style),
-        EntryKind::Bash { .. } => tooling::render_bash_entry(entry, theme, width, marker_style),
-        EntryKind::Warning => status::render_warning_entry(entry, theme, width, marker_style),
-        EntryKind::Hint => status::render_hint_entry(entry, theme, width, marker_style),
-        EntryKind::Thinking => status::render_thinking_entry(entry, theme, width),
-        EntryKind::CodeBlock { .. } => status::render_code_block_entry(entry, theme, width),
-    }
+    EntryRenderRegistry::default().render(entry, theme, width)
 }

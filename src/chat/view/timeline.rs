@@ -19,7 +19,7 @@ mod text_wrap;
 #[path = "../../../tests/unit/chat/view/timeline/tests.rs"]
 mod tests;
 
-use render_entry::render_entry;
+use render_entry::{EntryRenderRegistry, TimelineEntryRenderer};
 use text_wrap::push_wrapped_lines;
 
 #[cfg(test)]
@@ -34,6 +34,17 @@ const INDENT: &str = "    ";
 const INDENT_WIDTH: u16 = 4;
 
 pub(super) fn render_timeline(frame: &mut Frame, area: Rect, app: &ChatApp, theme: &ChatTheme) {
+    let renderer = EntryRenderRegistry::default();
+    render_timeline_with_renderer(frame, area, app, theme, &renderer);
+}
+
+fn render_timeline_with_renderer(
+    frame: &mut Frame,
+    area: Rect,
+    app: &ChatApp,
+    theme: &ChatTheme,
+    renderer: &dyn TimelineEntryRenderer,
+) {
     let mut lines: Vec<Line> = Vec::new();
     let show_details = app.show_details();
 
@@ -82,11 +93,7 @@ pub(super) fn render_timeline(frame: &mut Frame, area: Rect, app: &ChatApp, them
         }
         // Tool/thinking/etc entries stay within the current assistant turn
 
-        let entry_lines = if entry.kind == EntryKind::Thinking {
-            render_thinking_entry(entry, theme, content_width)
-        } else {
-            render_entry(entry, theme, content_width)
-        };
+        let entry_lines = renderer.render(entry, theme, content_width);
         lines.extend(entry_lines);
 
         // Show expanded details when Ctrl+O is toggled
@@ -155,26 +162,4 @@ pub(super) fn render_timeline(frame: &mut Frame, area: Rect, app: &ChatApp, them
     let paragraph = paragraph.scroll((scroll_offset, 0));
 
     frame.render_widget(paragraph, area);
-}
-
-fn render_thinking_entry<'a>(
-    entry: &TimelineEntry,
-    theme: &ChatTheme,
-    width: u16,
-) -> Vec<Line<'a>> {
-    let mut lines = Vec::new();
-    if entry.body.trim().is_empty() {
-        return lines;
-    }
-
-    for (i, body_line) in entry.body.lines().enumerate() {
-        let prefix = if i == 0 {
-            vec![Span::raw(MARGIN), Span::styled("… ", theme.marker_thinking)]
-        } else {
-            vec![Span::raw(INDENT)]
-        };
-        push_wrapped_lines(&mut lines, body_line, theme.dim_text, prefix, width);
-    }
-
-    lines
 }
