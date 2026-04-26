@@ -369,10 +369,10 @@ impl ChatApp {
             .collect()
     }
 
-    /// Switch the active LLM model by rebuilding the provider and agent runtime.
+    /// Switch the active LLM model through the runtime port boundary.
     ///
     /// Cancels any in-flight turn, reloads config from disk with the new model
-    /// name, and creates a fresh `AgentRuntime`. Conversation history is reset.
+    /// name through the runtime port implementation. Conversation history is reset.
     pub fn set_model(&mut self, model: &str) {
         if self.is_streaming() {
             self.agent_runtime.cancel();
