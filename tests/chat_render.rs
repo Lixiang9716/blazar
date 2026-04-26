@@ -151,7 +151,7 @@ fn mode_row_renders_context_ratio_when_available() {
 }
 
 #[test]
-fn top_panel_renders_vertical_command_window_and_uses_scroll_offset() {
+fn slash_command_window_scroll_changes_visible_items() {
     use blazar::chat::input::InputAction;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
@@ -167,28 +167,27 @@ fn top_panel_renders_vertical_command_window_and_uses_scroll_offset() {
         model_height: 1,
         max_command_window_size: 3,
     };
-    let lines = render_to_lines_for_test_with_users_policy(&mut app, 100, 18, policy);
-    let users_rows = &lines[lines.len().saturating_sub(7)..];
+    let initial = render_to_lines_for_test_with_users_policy(&mut app, 100, 18, policy);
+    let initial_rows = &initial[initial.len().saturating_sub(7)..];
+    let initial_commands: Vec<&str> = initial_rows[1..4].iter().map(|line| line.trim()).collect();
 
-    assert!(users_rows[0].contains("~/blazar"));
-    assert!(users_rows[1].contains("/help"));
-    assert!(users_rows[2].contains("/clear"));
-    assert!(users_rows[3].contains("/copy"));
+    assert_eq!(initial_rows[0].trim(), "~/blazar · main");
+    assert_eq!(initial_commands, vec!["• /help", "• /clear", "• /copy"]);
 
     for _ in 0..6 {
         app.handle_action(InputAction::ScrollDown);
     }
     let scrolled = render_to_lines_for_test_with_users_policy(&mut app, 100, 18, policy);
     let scrolled_rows = &scrolled[scrolled.len().saturating_sub(7)..];
+    let scrolled_commands: Vec<&str> = scrolled_rows[1..4].iter().map(|line| line.trim()).collect();
 
     assert!(
-        scrolled_rows[1].contains("/mcp"),
-        "scroll offset should reveal commands beyond the initial six"
+        initial_commands != scrolled_commands,
+        "scrolling should change the visible command rows"
     );
-    assert!(
-        !scrolled_rows[1].contains("/help"),
-        "scrolling should move the first visible command out of view"
-    );
+    assert_eq!(scrolled_rows[0].trim(), "~/blazar · main");
+    assert_eq!(scrolled_commands[0], "• /mcp");
+    assert!(scrolled_commands.iter().all(|line| !line.contains("/help")));
 }
 
 #[test]

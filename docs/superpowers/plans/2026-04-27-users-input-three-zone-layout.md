@@ -546,8 +546,8 @@ assert!(
 
 Run:
 ```bash
-cargo test --test chat_render slash_ -q
-cargo test --test unit -- chat::app::tests_impl::slash_ -q
+cargo test --quiet slash_ -- --nocapture
+cargo test --quiet --test chat_render slash_ -- --nocapture
 ```
 
 Expected: PASS.
