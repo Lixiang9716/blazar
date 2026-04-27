@@ -51,6 +51,21 @@ fn render_entry_renders_markdown_and_fenced_code_segments() {
 }
 
 #[test]
+fn markdown_body_helper_renders_diff_fence_lines() {
+    let theme = crate::chat::theme::build_theme();
+    let lines = super::markdown_body::render_markdown_block(
+        "```diff\n- old\n+ new\n```",
+        &theme,
+        60,
+        vec![Span::raw("  "), Span::raw("● ")],
+        vec![Span::raw("    ")],
+    );
+    let text = lines_text(&lines).join("\n");
+    assert!(text.contains("- old"));
+    assert!(text.contains("+ new"));
+}
+
+#[test]
 fn render_entry_renders_tool_use_and_tool_call_statuses() {
     let theme = crate::chat::theme::build_theme();
     let tool_use = TimelineEntry::tool_use("Edit", "src/main.rs", 3, 1, "updated");

@@ -1,6 +1,7 @@
 use super::*;
 
 mod common;
+mod markdown_body;
 mod message;
 mod status;
 mod tooling;
@@ -10,6 +11,8 @@ mod tooling;
 mod tests;
 
 use common::marker_style_for;
+#[allow(unused_imports)]
+pub(super) use markdown_body::render_markdown_details_block;
 
 pub(super) trait TimelineEntryRenderer {
     fn render(&self, entry: &TimelineEntry, theme: &ChatTheme, width: u16) -> Vec<Line<'static>>;
