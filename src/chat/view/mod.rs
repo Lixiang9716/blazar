@@ -1,5 +1,7 @@
 //! Chat rendering — each sub-module handles one visual region.
 
+pub mod render;
+
 mod input;
 mod picker;
 mod status;
