@@ -87,7 +87,7 @@ fn assistant_message_body_style_remains_default_after_thinking_color_change() {
     let text_span_style =
         first_body_span_style(&lines).expect("assistant body span should exist");
 
-    assert_ne!(text_span_style, theme.marker_thinking);
+    assert_eq!(text_span_style, theme.body_text);
 }
 
 #[test]
