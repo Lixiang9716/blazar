@@ -92,6 +92,20 @@ impl ChatApp {
                 }
                 self.scroll_offset = u16::MAX;
             }
+            AgentEvent::UsageUpdated {
+                prompt_tokens: _,
+                completion_tokens: _,
+                total_tokens,
+            } => {
+                self.context_usage = Some(ContextUsage {
+                    used_tokens: total_tokens,
+                    max_tokens: self
+                        .context_usage
+                        .map(|usage| usage.max_tokens)
+                        .unwrap_or(0),
+                });
+                self.scroll_offset = u16::MAX;
+            }
             AgentEvent::ToolCallStarted {
                 call_id,
                 tool_name,

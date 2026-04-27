@@ -30,6 +30,14 @@ pub enum AgentCommand {
 }
 
 /// Events sent from the agent runtime back to the UI thread.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AgentUsage {
+    pub prompt_tokens: u32,
+    pub completion_tokens: u32,
+    pub total_tokens: u32,
+}
+
+/// Events sent from the agent runtime back to the UI thread.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AgentEvent {
     /// A new turn has started processing.
@@ -38,6 +46,12 @@ pub enum AgentEvent {
     TextDelta { text: String },
     /// A chunk of chain-of-thought reasoning (thinking mode).
     ThinkingDelta { text: String },
+    /// Updated provider token usage for the current turn.
+    UsageUpdated {
+        prompt_tokens: u32,
+        completion_tokens: u32,
+        total_tokens: u32,
+    },
     /// A tool call is about to execute.
     ToolCallStarted {
         call_id: String,

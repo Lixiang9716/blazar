@@ -2431,6 +2431,8 @@ impl crate::agent::runtime::turn::TurnObserver for CancellingObserver {
 
     fn on_thinking_delta(&self, _text: &str) {}
 
+    fn on_usage(&self, _usage: crate::provider::ProviderUsage) {}
+
     fn on_tool_call_started(
         &self,
         call_id: &str,

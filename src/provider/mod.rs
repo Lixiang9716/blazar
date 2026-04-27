@@ -34,6 +34,14 @@ pub enum ProviderMessage {
 }
 
 /// Events emitted by a provider during a single turn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProviderUsage {
+    pub prompt_tokens: u32,
+    pub completion_tokens: u32,
+    pub total_tokens: u32,
+}
+
+/// Events emitted by a provider during a single turn.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProviderEvent {
     /// A chunk of generated text.
@@ -46,6 +54,8 @@ pub enum ProviderEvent {
         name: String,
         arguments: String,
     },
+    /// Updated provider token usage for the current turn.
+    Usage(ProviderUsage),
     /// The provider finished generating.
     TurnComplete,
     /// The provider encountered an error.

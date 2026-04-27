@@ -14,6 +14,7 @@ pub(crate) struct ToolCallStartMetadata {
 pub(crate) trait TurnObserver {
     fn on_text_delta(&self, text: &str);
     fn on_thinking_delta(&self, text: &str);
+    fn on_usage(&self, usage: crate::provider::ProviderUsage);
     fn on_tool_call_started(
         &self,
         call_id: &str,
@@ -41,6 +42,14 @@ impl TurnObserver for ChannelObserver<'_> {
     fn on_thinking_delta(&self, text: &str) {
         let _ = self.tx.send(AgentEvent::ThinkingDelta {
             text: text.to_owned(),
+        });
+    }
+
+    fn on_usage(&self, usage: crate::provider::ProviderUsage) {
+        let _ = self.tx.send(AgentEvent::UsageUpdated {
+            prompt_tokens: usage.prompt_tokens,
+            completion_tokens: usage.completion_tokens,
+            total_tokens: usage.total_tokens,
         });
     }
 
@@ -87,6 +96,7 @@ pub(crate) struct SilentObserver;
 impl TurnObserver for SilentObserver {
     fn on_text_delta(&self, _text: &str) {}
     fn on_thinking_delta(&self, _text: &str) {}
+    fn on_usage(&self, _usage: crate::provider::ProviderUsage) {}
 
     fn on_tool_call_started(
         &self,

@@ -208,6 +208,7 @@ fn echo_provider_streams_full_response() {
         match event {
             ProviderEvent::TextDelta(chunk) => text.push_str(&chunk),
             ProviderEvent::ThinkingDelta(_) => {}
+            ProviderEvent::Usage(_) => {}
             ProviderEvent::TurnComplete => {
                 completed = true;
                 break;
