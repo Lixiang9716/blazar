@@ -112,7 +112,7 @@ fn render_markdown_block_with_mode_and_text_style<'a>(
                 for mut md_line in md_lines {
                     if let Some(style) = text_style_override {
                         for span in &mut md_line.spans {
-                            span.style = style;
+                            span.style = span.style.patch(style);
                         }
                     }
                     let mut result_spans = if is_first_line {

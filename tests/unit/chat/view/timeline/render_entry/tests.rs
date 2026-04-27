@@ -34,6 +34,14 @@ fn first_body_span_style(lines: &[Line<'_>]) -> Option<Style> {
         .map(|span| span.style)
 }
 
+fn span_style_containing(lines: &[Line<'_>], needle: &str) -> Option<Style> {
+    lines
+        .iter()
+        .flat_map(|line| line.spans.iter())
+        .find(|span| span.content.contains(needle))
+        .map(|span| span.style)
+}
+
 #[test]
 fn render_entry_handles_user_and_empty_assistant_messages() {
     let theme = crate::chat::theme::build_theme();
@@ -81,6 +89,21 @@ fn thinking_entry_body_uses_streaming_highlight_style() {
     let text_span_style = first_body_span_style(&lines).expect("thinking body span should exist");
 
     assert_eq!(text_span_style, theme.marker_thinking);
+}
+
+#[test]
+fn thinking_entry_preserves_inline_markdown_styles_under_highlight() {
+    let theme = crate::chat::theme::build_theme();
+    let assistant_lines = render_entry(&TimelineEntry::response("**strong**"), &theme, 70);
+    let thinking_lines = render_entry(&TimelineEntry::thinking("**strong**"), &theme, 70);
+
+    let assistant_style = span_style_containing(&assistant_lines, "strong")
+        .expect("assistant markdown span should exist");
+    let thinking_style = span_style_containing(&thinking_lines, "strong")
+        .expect("thinking markdown span should exist");
+
+    assert_ne!(assistant_style, theme.body_text);
+    assert_eq!(thinking_style, assistant_style.patch(theme.marker_thinking));
 }
 
 #[test]
