@@ -209,6 +209,27 @@ fn tool_use_body_renders_markdown_but_header_stays_structured() {
 }
 
 #[test]
+fn tool_use_body_preserves_plain_line_boundaries() {
+    let theme = crate::chat::theme::build_theme();
+    let entry = TimelineEntry::tool_use("Read", "Cargo.toml", 0, 0, "line-a\nline-b");
+    let lines = lines_text(&render_entry(&entry, &theme, 120));
+
+    let line_a_idx = lines
+        .iter()
+        .position(|line| line.contains("line-a"))
+        .expect("first tool-use line should render");
+    let line_b_idx = lines
+        .iter()
+        .position(|line| line.contains("line-b"))
+        .expect("second tool-use line should render");
+
+    assert_ne!(
+        line_a_idx, line_b_idx,
+        "line-oriented tool-use content should preserve source line boundaries"
+    );
+}
+
+#[test]
 fn tool_descriptor_maps_status_and_semantic_summary() {
     let running = TimelineEntry::tool_call(
         "call-1",
@@ -489,6 +510,56 @@ fn bash_body_renders_markdown_without_literal_fences() {
     assert!(
         !bash_text.contains("```"),
         "bash body should render markdown fences via shared helper"
+    );
+}
+
+#[test]
+fn bash_body_preserves_plain_line_boundaries() {
+    let theme = crate::chat::theme::build_theme();
+    let bash_entry = TimelineEntry::bash("echo hello", "alpha\nbeta");
+    let lines = lines_text(&render_entry(&bash_entry, &theme, 120));
+
+    let alpha_idx = lines
+        .iter()
+        .position(|line| line.contains("alpha"))
+        .expect("alpha line should be rendered");
+    let beta_idx = lines
+        .iter()
+        .position(|line| line.contains("beta"))
+        .expect("beta line should be rendered");
+
+    assert_ne!(
+        alpha_idx, beta_idx,
+        "line-oriented bash output should keep each source line on a separate rendered line"
+    );
+}
+
+#[test]
+fn tool_call_preview_preserves_plain_line_boundaries() {
+    let theme = crate::chat::theme::build_theme();
+    let entry = TimelineEntry::tool_call(
+        "c-line-preserve",
+        "bash",
+        ToolKind::Local,
+        r#"{"command":"cargo test"}"#,
+        "line-1\nline-2\nline-3",
+        r#"{"command":"cargo test"}"#,
+        ToolCallStatus::Success,
+    );
+    let lines = lines_text(&render_entry(&entry, &theme, 120));
+
+    let line1_idx = lines
+        .iter()
+        .position(|line| line.contains("line-1"))
+        .expect("first preview line should be rendered");
+    let line2_idx = lines
+        .iter()
+        .position(|line| line.contains("line-2"))
+        .expect("second preview line should be rendered");
+
+    assert_ne!(
+        line1_idx, line2_idx,
+        "line-oriented tool previews should keep line breaks instead of flattening into one line"
     );
 }
 

@@ -52,7 +52,7 @@ pub(super) fn render_tool_descriptor<'a>(
         preview_text.push_str("\n```");
     }
 
-    let preview = super::super::markdown_body::render_markdown_block(
+    let preview = super::super::markdown_body::render_markdown_block_preserve_lines(
         &preview_text,
         theme,
         width,

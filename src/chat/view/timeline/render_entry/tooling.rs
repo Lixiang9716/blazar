@@ -34,7 +34,7 @@ pub(super) fn render_tool_use_entry<'a>(
         }
         lines.push(Line::from(spans));
 
-        lines.extend(super::markdown_body::render_markdown_block(
+        lines.extend(super::markdown_body::render_markdown_block_preserve_lines(
             &entry.body,
             theme,
             width,
@@ -114,7 +114,7 @@ pub(super) fn render_bash_entry<'a>(
         ]));
     }
     let output_body = shown.join("\n");
-    lines.extend(super::markdown_body::render_markdown_block(
+    lines.extend(super::markdown_body::render_markdown_block_preserve_lines(
         &output_body,
         theme,
         width.saturating_sub(2),

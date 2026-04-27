@@ -88,6 +88,42 @@ fn ctrl_o_details_path_keeps_full_tool_result_text() {
 }
 
 #[test]
+fn ctrl_o_details_path_preserves_plain_line_boundaries() {
+    let mut app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
+
+    app.apply_agent_event_for_test(AgentEvent::ToolCallStarted {
+        call_id: "call-1".into(),
+        tool_name: "read_file".into(),
+        kind: ToolKind::Local,
+        arguments: "{\"path\":\"Cargo.toml\"}".into(),
+        batch_id: 0,
+        replay_index: 0,
+        normalized_claims: Vec::new(),
+    });
+    app.apply_agent_event_for_test(AgentEvent::ToolCallCompleted {
+        call_id: "call-1".into(),
+        output: "first-line\nsecond-line".into(),
+        is_error: false,
+    });
+
+    app.handle_action(InputAction::ToggleDetails);
+    let lines = render_to_lines_for_test(&mut app, 120, 35);
+
+    let first_idx = lines
+        .iter()
+        .position(|line| line.contains("first-line"))
+        .expect("first detail line should render");
+    let second_idx = lines
+        .iter()
+        .position(|line| line.contains("second-line"))
+        .expect("second detail line should render");
+    assert_ne!(
+        first_idx, second_idx,
+        "expanded details should preserve line-oriented content boundaries"
+    );
+}
+
+#[test]
 fn expanded_details_render_diff_markdown_content() {
     let mut app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
 

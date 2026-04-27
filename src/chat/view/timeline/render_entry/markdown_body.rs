@@ -2,12 +2,53 @@ use super::super::markdown::{MdSegment, normalize_markdown_paragraphs, split_cod
 use super::fenced_code::render_fenced_code;
 use super::*;
 
+#[derive(Clone, Copy)]
+enum MarkdownTextMode {
+    NormalizeParagraphs,
+    PreserveLines,
+}
+
 pub(super) fn render_markdown_block<'a>(
     text: &str,
     theme: &ChatTheme,
     width: u16,
     first_prefix: Vec<Span<'a>>,
     cont_prefix: Vec<Span<'a>>,
+) -> Vec<Line<'a>> {
+    render_markdown_block_with_mode(
+        text,
+        theme,
+        width,
+        first_prefix,
+        cont_prefix,
+        MarkdownTextMode::NormalizeParagraphs,
+    )
+}
+
+pub(super) fn render_markdown_block_preserve_lines<'a>(
+    text: &str,
+    theme: &ChatTheme,
+    width: u16,
+    first_prefix: Vec<Span<'a>>,
+    cont_prefix: Vec<Span<'a>>,
+) -> Vec<Line<'a>> {
+    render_markdown_block_with_mode(
+        text,
+        theme,
+        width,
+        first_prefix,
+        cont_prefix,
+        MarkdownTextMode::PreserveLines,
+    )
+}
+
+fn render_markdown_block_with_mode<'a>(
+    text: &str,
+    theme: &ChatTheme,
+    width: u16,
+    first_prefix: Vec<Span<'a>>,
+    cont_prefix: Vec<Span<'a>>,
+    text_mode: MarkdownTextMode,
 ) -> Vec<Line<'a>> {
     let body = text.trim();
     if body.is_empty() {
@@ -25,13 +66,27 @@ pub(super) fn render_markdown_block<'a>(
     for segment in &segments {
         match segment {
             MdSegment::Text(text) => {
-                let trimmed_seg = text.trim();
-                if trimmed_seg.is_empty() {
+                let rendered_text = match text_mode {
+                    MarkdownTextMode::NormalizeParagraphs => {
+                        let trimmed_seg = text.trim();
+                        if trimmed_seg.is_empty() {
+                            continue;
+                        }
+                        normalize_markdown_paragraphs(trimmed_seg)
+                    }
+                    MarkdownTextMode::PreserveLines => {
+                        let trimmed_seg = text.trim_matches('\n');
+                        if trimmed_seg.trim().is_empty() {
+                            continue;
+                        }
+                        trimmed_seg.to_owned()
+                    }
+                };
+                if rendered_text.is_empty() {
                     continue;
                 }
-                let normalized = normalize_markdown_paragraphs(trimmed_seg);
                 let md_lines =
-                    rat_skin.parse(ratskin::RatSkin::parse_text(&normalized), text_width);
+                    rat_skin.parse(ratskin::RatSkin::parse_text(&rendered_text), text_width);
                 for md_line in md_lines {
                     let mut result_spans = if is_first_line {
                         is_first_line = false;
@@ -68,5 +123,5 @@ pub(in super::super) fn render_markdown_details_block<'a>(
     width: u16,
     prefix: Vec<Span<'a>>,
 ) -> Vec<Line<'a>> {
-    render_markdown_block(text, theme, width, prefix.clone(), prefix)
+    render_markdown_block_preserve_lines(text, theme, width, prefix.clone(), prefix)
 }
