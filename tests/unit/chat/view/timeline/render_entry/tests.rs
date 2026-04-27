@@ -51,6 +51,49 @@ fn render_entry_renders_markdown_and_fenced_code_segments() {
 }
 
 #[test]
+fn assistant_message_uses_shared_markdown_body_renderer() {
+    let theme = crate::chat::theme::build_theme();
+    let entry = TimelineEntry::response("## heading\n```diff\n- a\n+ b\n```");
+    let text = lines_text(&render_entry(&entry, &theme, 70)).join("\n");
+    assert!(text.contains("heading"));
+    assert!(text.contains("- a"));
+    assert!(text.contains("+ b"));
+}
+
+#[test]
+fn user_message_remains_plain_text() {
+    let theme = crate::chat::theme::build_theme();
+    let entry = TimelineEntry::user_message("**literal** not markdown");
+    let text = lines_text(&render_entry(&entry, &theme, 70)).join("\n");
+    assert!(
+        text.contains("**literal**"),
+        "user message should remain plain text"
+    );
+}
+
+#[test]
+fn code_block_entry_uses_shared_markdown_body_renderer() {
+    let theme = crate::chat::theme::build_theme();
+    let entry = TimelineEntry::code_block("diff", "- old\n+ new");
+    let text = lines_text(&render_entry(&entry, &theme, 70)).join("\n");
+    assert!(text.contains("- old"));
+    assert!(text.contains("+ new"));
+}
+
+#[test]
+fn warning_entry_renders_markdown_fence_without_literal_backticks() {
+    let theme = crate::chat::theme::build_theme();
+    let entry = TimelineEntry::warning("```diff\n- old\n+ new\n```");
+    let text = lines_text(&render_entry(&entry, &theme, 70)).join("\n");
+    assert!(text.contains("- old"));
+    assert!(text.contains("+ new"));
+    assert!(
+        !text.contains("```"),
+        "warning entries should render markdown fences via shared helper"
+    );
+}
+
+#[test]
 fn markdown_body_helper_renders_diff_fence_lines() {
     let theme = crate::chat::theme::build_theme();
     let lines = super::markdown_body::render_markdown_block(
