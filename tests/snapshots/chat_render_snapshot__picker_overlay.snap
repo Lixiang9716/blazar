@@ -1,0 +1,25 @@
+---
+source: tests/chat_render_snapshot.rs
+assertion_line: 22
+expression: "lines.join(\"\\n\")"
+---
+  ● Describe a task to get started.                         
+                                                            
+  Blazar #1                                                 
+  ● Tell me what you'd like to explore.                     
+                                                            
+                                                            
+                                                            
+                                                            
+  ╭ Commands ──────────────────────────────────────╮        
+  │› /help  Show available commands and shortcuts  │        
+  │  /clear  Clear the conversation history        │        
+  │  /copy  Copy the last response to the clipboard│        
+  │  /init  Generate a blazar-instructions.md file │        
+  │  /skills  List loaded skills and their status  │        
+  │  /model  Switch the active model               │        
+~/│  ▼ more                                        │        
+──│↑↓ navigate · enter select · esc cancel  (1/24) │────────
+> ╰────────────────────────────────────────────────╯        
+────────────────────────────────────────────────────────────
+AUTO                                          echo · ctx n/a

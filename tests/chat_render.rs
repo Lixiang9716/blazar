@@ -360,6 +360,19 @@ fn picker_navigation_reaches_later_commands() {
 }
 
 #[test]
+fn picker_overlay_renders_via_registry_slot() {
+    let mut app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
+    app.picker.open();
+
+    let lines = render_to_lines_for_test(&mut app, 100, 35);
+
+    assert!(
+        lines.iter().any(|line| line.contains("navigate")),
+        "picker overlay footer should render via the picker registry slot"
+    );
+}
+
+#[test]
 fn closing_picker_routes_typing_back_to_composer() {
     use blazar::chat::input::InputAction;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};

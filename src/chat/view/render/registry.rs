@@ -1,13 +1,16 @@
-use super::contracts::{RenderCtx, RenderError, RenderRegistry, RenderSlot, RenderUnit};
+#[cfg(test)]
+use super::contracts::{RenderCtx, RenderError};
+use super::contracts::{RenderRegistry, RenderSlot, RenderUnit};
 use super::units::{
+    picker::PickerRenderUnit,
     timeline::TimelineRenderUnit,
     users::{
         UsersInputModelSeparatorRenderUnit, UsersInputRenderUnit, UsersModelRenderUnit,
         UsersTopInputSeparatorRenderUnit, UsersTopRenderUnit,
     },
 };
-use crate::chat::view;
-use ratatui_core::{layout::Rect, terminal::Frame};
+#[cfg(test)]
+use ratatui_core::terminal::Frame;
 
 #[cfg(test)]
 #[path = "../../../../tests/unit/chat/view/render_registry/tests.rs"]
@@ -20,7 +23,7 @@ pub(crate) struct DefaultRenderRegistry {
     users_model: UsersModelRenderUnit,
     users_top_input_separator: UsersTopInputSeparatorRenderUnit,
     users_input_model_separator: UsersInputModelSeparatorRenderUnit,
-    picker_overlay: PickerOverlayRenderUnit,
+    picker_overlay: PickerRenderUnit,
 }
 
 impl DefaultRenderRegistry {
@@ -39,7 +42,7 @@ impl Default for DefaultRenderRegistry {
             users_model: UsersModelRenderUnit,
             users_top_input_separator: UsersTopInputSeparatorRenderUnit,
             users_input_model_separator: UsersInputModelSeparatorRenderUnit,
-            picker_overlay: PickerOverlayRenderUnit,
+            picker_overlay: PickerRenderUnit,
         }
     }
 }
@@ -55,19 +58,5 @@ impl RenderRegistry for DefaultRenderRegistry {
             RenderSlot::UsersInputModelSeparator => Some(&self.users_input_model_separator),
             RenderSlot::PickerOverlay => Some(&self.picker_overlay),
         }
-    }
-}
-
-struct PickerOverlayRenderUnit;
-
-impl RenderUnit for PickerOverlayRenderUnit {
-    fn render(
-        &self,
-        frame: &mut Frame,
-        area: Rect,
-        ctx: &mut RenderCtx<'_>,
-    ) -> Result<(), RenderError> {
-        view::render_picker_overlay_slot(frame, area, ctx);
-        Ok(())
     }
 }
