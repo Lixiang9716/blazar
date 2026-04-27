@@ -159,6 +159,62 @@ fn extract_usage_from_chunk(chunk: &StreamChunk) -> Option<crate::provider::Prov
         })
 }
 
+fn emit_chunk_events(
+    tx: &Sender<ProviderEvent>,
+    chunk: &StreamChunk,
+    tool_calls: &mut Vec<ToolCall>,
+    event_count: &mut usize,
+) -> bool {
+    if let Some(usage) = extract_usage_from_chunk(chunk) {
+        let _ = tx.send(ProviderEvent::Usage(usage));
+    }
+
+    for choice in &chunk.choices {
+        if let Some(ref reasoning) = choice.delta.reasoning_content
+            && !reasoning.is_empty()
+        {
+            *event_count += 1;
+            if tx
+                .send(ProviderEvent::ThinkingDelta(reasoning.clone()))
+                .is_err()
+            {
+                return false;
+            }
+        }
+
+        if let Some(ref content) = choice.delta.content
+            && !content.is_empty()
+        {
+            *event_count += 1;
+            if tx.send(ProviderEvent::TextDelta(content.clone())).is_err() {
+                return false;
+            }
+        }
+
+        if let Some(ref delta_tcs) = choice.delta.tool_calls {
+            for dtc in delta_tcs {
+                *event_count += 1;
+                merge_tool_call_fragment(tool_calls, dtc);
+            }
+        }
+
+        if let Some(ref reason) = choice.finish_reason
+            && reason == "tool_calls"
+            && !tool_calls.is_empty()
+        {
+            for tool_call in tool_calls.drain(..) {
+                let _ = tx.send(ProviderEvent::ToolCall {
+                    call_id: tool_call.id,
+                    name: tool_call.function.name,
+                    arguments: tool_call.function.arguments,
+                });
+            }
+        }
+    }
+
+    true
+}
+
 // ── Tool call types (used by build_request and tests) ──────────────
 
 /// A tool call accumulated from streamed fragments.
@@ -425,54 +481,8 @@ impl LlmProvider for OpenAiProvider {
                     }
                 };
 
-                if let Some(usage) = extract_usage_from_chunk(&chunk) {
-                    let _ = tx.send(ProviderEvent::Usage(usage));
-                }
-
-                for choice in &chunk.choices {
-                    // Emit reasoning content (thinking mode)
-                    if let Some(ref reasoning) = choice.delta.reasoning_content
-                        && !reasoning.is_empty()
-                    {
-                        event_count += 1;
-                        if tx
-                            .send(ProviderEvent::ThinkingDelta(reasoning.clone()))
-                            .is_err()
-                        {
-                            return Ok(());
-                        }
-                    }
-
-                    // Emit regular content
-                    if let Some(ref content) = choice.delta.content
-                        && !content.is_empty()
-                    {
-                        event_count += 1;
-                        if tx.send(ProviderEvent::TextDelta(content.clone())).is_err() {
-                            return Ok(());
-                        }
-                    }
-
-                    // Accumulate streaming tool calls
-                    if let Some(ref delta_tcs) = choice.delta.tool_calls {
-                        for dtc in delta_tcs {
-                            event_count += 1;
-                            merge_tool_call_fragment(&mut tool_calls, dtc);
-                        }
-                    }
-
-                    if let Some(ref reason) = choice.finish_reason
-                        && reason == "tool_calls"
-                        && !tool_calls.is_empty()
-                    {
-                        for tool_call in tool_calls.drain(..) {
-                            let _ = tx.send(ProviderEvent::ToolCall {
-                                call_id: tool_call.id,
-                                name: tool_call.function.name,
-                                arguments: tool_call.function.arguments,
-                            });
-                        }
-                    }
+                if !emit_chunk_events(&tx, &chunk, &mut tool_calls, &mut event_count) {
+                    return Ok(());
                 }
             }
 

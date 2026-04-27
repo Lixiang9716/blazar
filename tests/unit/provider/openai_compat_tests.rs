@@ -361,7 +361,22 @@ fn usage_chunk_emits_provider_usage_event() {
     }))
     .expect("chunk should parse");
 
-    let usage = extract_usage_from_chunk(&chunk).expect("usage should exist");
+    let (tx, rx) = std::sync::mpsc::channel();
+    let mut tool_calls = Vec::new();
+    let mut event_count = 0;
 
-    assert_eq!(usage.total_tokens, 120);
+    assert!(emit_chunk_events(
+        &tx,
+        &chunk,
+        &mut tool_calls,
+        &mut event_count
+    ));
+    assert_eq!(
+        rx.recv().expect("usage event should be emitted"),
+        ProviderEvent::Usage(crate::provider::ProviderUsage {
+            prompt_tokens: 100,
+            completion_tokens: 20,
+            total_tokens: 120,
+        })
+    );
 }
