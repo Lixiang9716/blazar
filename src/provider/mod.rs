@@ -10,6 +10,7 @@ use std::sync::mpsc::Sender;
 pub struct ModelInfo {
     pub id: String,
     pub description: String,
+    pub context_length: Option<u32>,
 }
 
 /// Conversation history replayed into a provider pass.
@@ -34,6 +35,14 @@ pub enum ProviderMessage {
 }
 
 /// Events emitted by a provider during a single turn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProviderUsage {
+    pub prompt_tokens: u32,
+    pub completion_tokens: u32,
+    pub total_tokens: u32,
+}
+
+/// Events emitted by a provider during a single turn.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProviderEvent {
     /// A chunk of generated text.
@@ -46,6 +55,8 @@ pub enum ProviderEvent {
         name: String,
         arguments: String,
     },
+    /// Updated provider token usage for the current turn.
+    Usage(ProviderUsage),
     /// The provider finished generating.
     TurnComplete,
     /// The provider encountered an error.
@@ -102,8 +113,73 @@ pub fn load_provider(repo_root: &str) -> (Box<dyn LlmProvider>, String) {
     }
 }
 
+#[cfg(test)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AvailableModelsTestBehavior {
+    Return(Vec<ModelInfo>),
+    DelayedReturn {
+        models: Vec<ModelInfo>,
+        delay: std::time::Duration,
+    },
+    Panic(&'static str),
+}
+
+#[cfg(test)]
+thread_local! {
+    static AVAILABLE_MODELS_TEST_BEHAVIOR: std::cell::RefCell<Option<AvailableModelsTestBehavior>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+pub(crate) struct AvailableModelsTestBehaviorGuard;
+
+#[cfg(test)]
+impl Drop for AvailableModelsTestBehaviorGuard {
+    fn drop(&mut self) {
+        AVAILABLE_MODELS_TEST_BEHAVIOR.with(|behavior| {
+            *behavior.borrow_mut() = None;
+        });
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn current_available_models_behavior_for_test() -> Option<AvailableModelsTestBehavior> {
+    AVAILABLE_MODELS_TEST_BEHAVIOR.with(|slot| slot.borrow().clone())
+}
+
+#[cfg(test)]
+pub(crate) fn set_available_models_behavior_for_current_thread_for_test(
+    behavior: Option<AvailableModelsTestBehavior>,
+) -> AvailableModelsTestBehaviorGuard {
+    AVAILABLE_MODELS_TEST_BEHAVIOR.with(|slot| {
+        *slot.borrow_mut() = behavior;
+    });
+    AvailableModelsTestBehaviorGuard
+}
+
+#[cfg(test)]
+pub(crate) fn with_available_models_behavior_for_test<T>(
+    behavior: AvailableModelsTestBehavior,
+    f: impl FnOnce() -> T,
+) -> T {
+    let _reset = set_available_models_behavior_for_current_thread_for_test(Some(behavior));
+    f()
+}
+
 /// Return models available from the configured provider.
 pub fn available_models(repo_root: &str) -> Vec<ModelInfo> {
+    #[cfg(test)]
+    if let Some(behavior) = AVAILABLE_MODELS_TEST_BEHAVIOR.with(|slot| slot.borrow().clone()) {
+        return match behavior {
+            AvailableModelsTestBehavior::Return(models) => models,
+            AvailableModelsTestBehavior::DelayedReturn { models, delay } => {
+                std::thread::sleep(delay);
+                models
+            }
+            AvailableModelsTestBehavior::Panic(message) => panic!("{message}"),
+        };
+    }
+
     let repo_root = repo_root.to_owned();
     std::thread::spawn(move || {
         let (provider, _) = load_provider(&repo_root);
@@ -111,4 +187,25 @@ pub fn available_models(repo_root: &str) -> Vec<ModelInfo> {
     })
     .join()
     .unwrap_or_default()
+}
+
+pub fn resolve_model_context_length_from_models(
+    models: &[ModelInfo],
+    model_id: &str,
+) -> Option<u32> {
+    models
+        .iter()
+        .find(|model| model.id == model_id)
+        .and_then(|model| model.context_length)
+}
+
+pub fn resolve_model_context_length(repo_root: &str, model_id: &str) -> Option<u32> {
+    let models = available_models(repo_root);
+    resolve_model_context_length_from_models(&models, model_id)
+}
+
+pub fn configured_max_tokens(repo_root: &str) -> Option<u32> {
+    openai_compat::OpenAiConfig::load(repo_root)
+        .ok()
+        .map(|cfg| cfg.max_tokens)
 }

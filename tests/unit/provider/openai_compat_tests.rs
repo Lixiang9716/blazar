@@ -1,5 +1,6 @@
 use super::*;
 use crate::agent::tools::ToolSpec;
+use async_openai::types::models::Model;
 use serde_json::json;
 
 fn test_config() -> OpenAiConfig {
@@ -50,6 +51,30 @@ fn deepseek_config() -> OpenAiConfig {
         system_prompt: Some("System prompt".to_owned()),
         system_prompt_file: None,
     }
+}
+
+fn test_provider() -> OpenAiProvider {
+    OpenAiProvider::new(test_config())
+}
+
+fn sample_messages() -> Vec<ProviderMessage> {
+    vec![ProviderMessage::User {
+        content: "hello".to_owned(),
+    }]
+}
+
+#[test]
+fn openai_compat_model_mapping_leaves_context_length_unknown() {
+    let info = map_openai_model_info(Model {
+        id: "gpt-4o-mini".into(),
+        object: "model".into(),
+        created: 0,
+        owned_by: "openai".into(),
+    });
+
+    assert_eq!(info.id, "gpt-4o-mini");
+    assert_eq!(info.description, "gpt-4o-mini");
+    assert_eq!(info.context_length, None);
 }
 
 #[test]
@@ -311,6 +336,14 @@ fn build_request_disables_deepseek_thinking_when_tools_are_available() {
 }
 
 #[test]
+fn build_request_sets_stream_include_usage() {
+    let provider = test_provider();
+    let req = provider.build_request_for_test(&sample_messages(), &[]);
+
+    assert_eq!(req["stream_options"]["include_usage"], json!(true));
+}
+
+#[test]
 fn stream_chunk_deserializes_content_without_id_field() {
     let chunk = serde_json::from_str::<StreamChunk>(
         r#"{
@@ -329,4 +362,36 @@ fn stream_chunk_deserializes_content_without_id_field() {
 
     assert_eq!(chunk.choices.len(), 1);
     assert_eq!(chunk.choices[0].delta.content.as_deref(), Some("hello"));
+}
+
+#[test]
+fn usage_chunk_emits_provider_usage_event() {
+    let chunk: StreamChunk = serde_json::from_value(json!({
+        "choices": [],
+        "usage": {
+            "prompt_tokens": 100,
+            "completion_tokens": 20,
+            "total_tokens": 120
+        }
+    }))
+    .expect("chunk should parse");
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    let mut tool_calls = Vec::new();
+    let mut event_count = 0;
+
+    assert!(emit_chunk_events(
+        &tx,
+        &chunk,
+        &mut tool_calls,
+        &mut event_count
+    ));
+    assert_eq!(
+        rx.recv().expect("usage event should be emitted"),
+        ProviderEvent::Usage(crate::provider::ProviderUsage {
+            prompt_tokens: 100,
+            completion_tokens: 20,
+            total_tokens: 120,
+        })
+    );
 }

@@ -635,6 +635,52 @@ fn run_turn_completes_with_echo_provider() {
 }
 
 #[test]
+fn run_turn_relays_provider_usage_into_agent_usage_updated_event() {
+    struct UsageProvider;
+
+    impl LlmProvider for UsageProvider {
+        fn stream_turn(
+            &self,
+            _model: &str,
+            _messages: &[ProviderMessage],
+            _tools: &[ToolSpec],
+            tx: Sender<ProviderEvent>,
+        ) {
+            let _ = tx.send(ProviderEvent::Usage(crate::provider::ProviderUsage {
+                prompt_tokens: 120,
+                completion_tokens: 30,
+                total_tokens: 150,
+            }));
+            let _ = tx.send(ProviderEvent::TurnComplete);
+        }
+    }
+
+    let (event_tx, event_rx) = mpsc::channel();
+    let cancel = Arc::new(AtomicBool::new(false));
+    let mut messages = user_messages("hi");
+
+    let outcome = execute_turn(
+        &mut messages,
+        &UsageProvider,
+        "echo",
+        &empty_registry(),
+        &ChannelObserver { tx: &event_tx },
+        &cancel,
+    );
+
+    assert!(matches!(outcome, TurnOutcome::Complete));
+    let events: Vec<_> = event_rx.try_iter().collect();
+    assert!(events.iter().any(|event| matches!(
+        event,
+        AgentEvent::UsageUpdated(crate::agent::protocol::AgentUsage {
+            prompt_tokens: 120,
+            completion_tokens: 30,
+            total_tokens: 150,
+        })
+    )));
+}
+
+#[test]
 fn run_turn_stops_on_cancel_flag() {
     use std::sync::Barrier;
 
@@ -2430,6 +2476,8 @@ impl crate::agent::runtime::turn::TurnObserver for CancellingObserver {
     fn on_text_delta(&self, _text: &str) {}
 
     fn on_thinking_delta(&self, _text: &str) {}
+
+    fn on_usage(&self, _usage: crate::provider::ProviderUsage) {}
 
     fn on_tool_call_started(
         &self,

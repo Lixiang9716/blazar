@@ -268,6 +268,9 @@ pub(super) fn stream_provider_pass(
                 ProviderEvent::ThinkingDelta(text) => {
                     observer.on_thinking_delta(&text);
                 }
+                ProviderEvent::Usage(usage) => {
+                    observer.on_usage(usage);
+                }
                 ProviderEvent::ToolCall {
                     call_id,
                     name,

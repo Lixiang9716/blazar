@@ -68,6 +68,14 @@ fn is_deepseek_backend(config: &OpenAiConfig) -> bool {
         || config.base_url.contains("api.deepseek.com")
 }
 
+fn map_openai_model_info(model: async_openai::types::models::Model) -> super::ModelInfo {
+    super::ModelInfo {
+        description: model.id.clone(),
+        id: model.id,
+        context_length: None,
+    }
+}
+
 impl OpenAiConfig {
     /// Load from `config/provider.json` relative to `repo_root`.
     ///
@@ -106,6 +114,15 @@ pub struct StreamChunk {
     pub id: Option<String>,
     #[serde(default)]
     pub choices: Vec<StreamChoice>,
+    #[serde(default)]
+    pub usage: Option<CompletionUsage>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct CompletionUsage {
+    pub prompt_tokens: u32,
+    pub completion_tokens: u32,
+    pub total_tokens: u32,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -137,6 +154,73 @@ pub struct DeltaToolCall {
 pub struct DeltaFunction {
     pub name: Option<String>,
     pub arguments: Option<String>,
+}
+
+fn extract_usage_from_chunk(chunk: &StreamChunk) -> Option<crate::provider::ProviderUsage> {
+    chunk
+        .usage
+        .as_ref()
+        .map(|usage| crate::provider::ProviderUsage {
+            prompt_tokens: usage.prompt_tokens,
+            completion_tokens: usage.completion_tokens,
+            total_tokens: usage.total_tokens,
+        })
+}
+
+fn emit_chunk_events(
+    tx: &Sender<ProviderEvent>,
+    chunk: &StreamChunk,
+    tool_calls: &mut Vec<ToolCall>,
+    event_count: &mut usize,
+) -> bool {
+    if let Some(usage) = extract_usage_from_chunk(chunk) {
+        let _ = tx.send(ProviderEvent::Usage(usage));
+    }
+
+    for choice in &chunk.choices {
+        if let Some(ref reasoning) = choice.delta.reasoning_content
+            && !reasoning.is_empty()
+        {
+            *event_count += 1;
+            if tx
+                .send(ProviderEvent::ThinkingDelta(reasoning.clone()))
+                .is_err()
+            {
+                return false;
+            }
+        }
+
+        if let Some(ref content) = choice.delta.content
+            && !content.is_empty()
+        {
+            *event_count += 1;
+            if tx.send(ProviderEvent::TextDelta(content.clone())).is_err() {
+                return false;
+            }
+        }
+
+        if let Some(ref delta_tcs) = choice.delta.tool_calls {
+            for dtc in delta_tcs {
+                *event_count += 1;
+                merge_tool_call_fragment(tool_calls, dtc);
+            }
+        }
+
+        if let Some(ref reason) = choice.finish_reason
+            && reason == "tool_calls"
+            && !tool_calls.is_empty()
+        {
+            for tool_call in tool_calls.drain(..) {
+                let _ = tx.send(ProviderEvent::ToolCall {
+                    call_id: tool_call.id,
+                    name: tool_call.function.name,
+                    arguments: tool_call.function.arguments,
+                });
+            }
+        }
+    }
+
+    true
 }
 
 // ── Tool call types (used by build_request and tests) ──────────────
@@ -301,6 +385,7 @@ impl OpenAiProvider {
         obj.insert("model".into(), json!(model));
         obj.insert("messages".into(), json!(request_messages));
         obj.insert("stream".into(), json!(true));
+        obj.insert("stream_options".into(), json!({ "include_usage": true }));
         obj.insert("max_tokens".into(), json!(cfg.max_tokens));
         obj.insert("temperature".into(), json!(cfg.temperature));
 
@@ -404,50 +489,8 @@ impl LlmProvider for OpenAiProvider {
                     }
                 };
 
-                for choice in &chunk.choices {
-                    // Emit reasoning content (thinking mode)
-                    if let Some(ref reasoning) = choice.delta.reasoning_content
-                        && !reasoning.is_empty()
-                    {
-                        event_count += 1;
-                        if tx
-                            .send(ProviderEvent::ThinkingDelta(reasoning.clone()))
-                            .is_err()
-                        {
-                            return Ok(());
-                        }
-                    }
-
-                    // Emit regular content
-                    if let Some(ref content) = choice.delta.content
-                        && !content.is_empty()
-                    {
-                        event_count += 1;
-                        if tx.send(ProviderEvent::TextDelta(content.clone())).is_err() {
-                            return Ok(());
-                        }
-                    }
-
-                    // Accumulate streaming tool calls
-                    if let Some(ref delta_tcs) = choice.delta.tool_calls {
-                        for dtc in delta_tcs {
-                            event_count += 1;
-                            merge_tool_call_fragment(&mut tool_calls, dtc);
-                        }
-                    }
-
-                    if let Some(ref reason) = choice.finish_reason
-                        && reason == "tool_calls"
-                        && !tool_calls.is_empty()
-                    {
-                        for tool_call in tool_calls.drain(..) {
-                            let _ = tx.send(ProviderEvent::ToolCall {
-                                call_id: tool_call.id,
-                                name: tool_call.function.name,
-                                arguments: tool_call.function.arguments,
-                            });
-                        }
-                    }
+                if !emit_chunk_events(&tx, &chunk, &mut tool_calls, &mut event_count) {
+                    return Ok(());
                 }
             }
 
@@ -476,14 +519,8 @@ impl LlmProvider for OpenAiProvider {
                 .await
                 .map_err(|e| format!("list_models error: {e}"))
         })?;
-        let mut models: Vec<super::ModelInfo> = resp
-            .data
-            .into_iter()
-            .map(|m| super::ModelInfo {
-                description: m.id.clone(),
-                id: m.id,
-            })
-            .collect();
+        let mut models: Vec<super::ModelInfo> =
+            resp.data.into_iter().map(map_openai_model_info).collect();
         models.sort_by(|a, b| a.id.cmp(&b.id));
         Ok(models)
     }

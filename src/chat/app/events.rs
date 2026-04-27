@@ -22,6 +22,11 @@ impl ChatApp {
     }
 
     #[doc(hidden)]
+    pub fn set_model_context_max_tokens_for_test(&mut self, max_tokens: Option<u32>) {
+        self.model_context_max_tokens = max_tokens;
+    }
+
+    #[doc(hidden)]
     pub fn set_pr_label_for_test(&mut self, pr_label: Option<String>) {
         self.git_pr_label = pr_label;
     }
@@ -90,6 +95,21 @@ impl ChatApp {
                 if let Some(last) = self.timeline.last_mut() {
                     last.body.push_str(&text);
                 }
+                self.scroll_offset = u16::MAX;
+            }
+            AgentEvent::UsageUpdated(crate::agent::protocol::AgentUsage {
+                prompt_tokens: _,
+                completion_tokens: _,
+                total_tokens,
+            }) => {
+                let resolved_max = self
+                    .model_context_max_tokens
+                    .or(self.config_max_tokens)
+                    .unwrap_or(0);
+                self.context_usage = Some(ContextUsage {
+                    used_tokens: total_tokens,
+                    max_tokens: resolved_max,
+                });
                 self.scroll_offset = u16::MAX;
             }
             AgentEvent::ToolCallStarted {
