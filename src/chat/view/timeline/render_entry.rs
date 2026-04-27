@@ -11,7 +11,6 @@ mod tooling;
 mod tests;
 
 use common::marker_style_for;
-#[allow(unused_imports)]
 pub(super) use markdown_body::render_markdown_details_block;
 
 pub(super) trait TimelineEntryRenderer {

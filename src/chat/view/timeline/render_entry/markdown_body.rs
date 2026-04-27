@@ -1,7 +1,6 @@
 use super::super::markdown::{MdSegment, normalize_markdown_paragraphs, split_code_fences};
 use super::*;
 
-#[allow(dead_code)]
 pub(super) fn render_markdown_block<'a>(
     text: &str,
     theme: &ChatTheme,
@@ -62,7 +61,6 @@ pub(super) fn render_markdown_block<'a>(
     lines
 }
 
-#[allow(dead_code)]
 pub(in super::super) fn render_markdown_details_block<'a>(
     text: &str,
     theme: &ChatTheme,

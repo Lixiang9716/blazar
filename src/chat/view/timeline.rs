@@ -19,7 +19,7 @@ mod text_wrap;
 #[path = "../../../tests/unit/chat/view/timeline/tests.rs"]
 mod tests;
 
-use render_entry::{EntryRenderRegistry, TimelineEntryRenderer};
+use render_entry::{EntryRenderRegistry, TimelineEntryRenderer, render_markdown_details_block};
 use text_wrap::push_wrapped_lines;
 
 #[cfg(test)]
@@ -104,12 +104,12 @@ fn render_timeline_with_renderer(
         // Show expanded details when Ctrl+O is toggled
         if show_details && !entry.details.is_empty() {
             lines.push(Line::from(""));
-            for detail_line in entry.details.lines() {
-                lines.push(Line::from(vec![
-                    Span::raw(INDENT),
-                    Span::styled(detail_line.to_owned(), theme.dim_text),
-                ]));
-            }
+            lines.extend(render_markdown_details_block(
+                &entry.details,
+                theme,
+                content_width,
+                vec![Span::raw(INDENT)],
+            ));
         }
 
         lines.push(Line::from("")); // blank separator
