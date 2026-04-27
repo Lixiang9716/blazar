@@ -124,11 +124,19 @@ pub fn available_models(repo_root: &str) -> Vec<ModelInfo> {
     .unwrap_or_default()
 }
 
-pub fn resolve_model_context_length(repo_root: &str, model_id: &str) -> Option<u32> {
-    available_models(repo_root)
-        .into_iter()
+pub fn resolve_model_context_length_from_models(
+    models: &[ModelInfo],
+    model_id: &str,
+) -> Option<u32> {
+    models
+        .iter()
         .find(|model| model.id == model_id)
         .and_then(|model| model.context_length)
+}
+
+pub fn resolve_model_context_length(repo_root: &str, model_id: &str) -> Option<u32> {
+    let models = available_models(repo_root);
+    resolve_model_context_length_from_models(&models, model_id)
 }
 
 pub fn configured_max_tokens(repo_root: &str) -> Option<u32> {

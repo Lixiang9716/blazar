@@ -196,6 +196,41 @@ fn chat_app_set_model_calls_runtime_port_set_model() {
     assert_eq!(probe.last_set_model().as_deref(), Some("new-model"));
 }
 
+#[test]
+fn set_model_refreshes_max_token_sources_after_successful_switch() {
+    let fake = FakeRuntime::with_events(vec![]);
+    let mut app =
+        ChatApp::new_with_runtime_for_test(env!("CARGO_MANIFEST_DIR"), Box::new(fake), "echo")
+            .expect("init");
+    app.model_context_max_tokens = None;
+    app.config_max_tokens = Some(8192);
+    app.workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("missing-provider-root");
+
+    app.set_model("switched-model");
+
+    assert_eq!(app.config_max_tokens, None);
+    assert_eq!(app.model_context_max_tokens, None);
+
+    app.apply_agent_event_for_test(AgentEvent::UsageUpdated(
+        crate::agent::protocol::AgentUsage {
+            prompt_tokens: 50,
+            completion_tokens: 10,
+            total_tokens: 60,
+        },
+    ));
+
+    assert_eq!(
+        app.users_status_snapshot()
+            .context_usage
+            .expect("usage snapshot should be present")
+            .max_tokens,
+        0
+    );
+}
+
 struct RuntimeProbeCommand {
     spec: crate::chat::commands::CommandSpec,
 }
