@@ -1,4 +1,4 @@
-use super::markdown_body::render_markdown_block;
+use super::markdown_body::{render_markdown_block, render_markdown_block_with_text_style};
 use super::*;
 
 pub(super) fn render_warning_entry<'a>(
@@ -40,12 +40,13 @@ pub(super) fn render_thinking_entry<'a>(
     theme: &ChatTheme,
     width: u16,
 ) -> Vec<Line<'a>> {
-    render_markdown_block(
+    render_markdown_block_with_text_style(
         &entry.body,
         theme,
         width,
         vec![Span::raw(MARGIN), Span::styled("… ", theme.marker_thinking)],
         vec![Span::raw(INDENT)],
+        theme.marker_thinking,
     )
 }
 

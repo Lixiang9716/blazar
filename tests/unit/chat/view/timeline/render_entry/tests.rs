@@ -25,7 +25,12 @@ fn first_line_marker_style(lines: &[Line<'_>]) -> Option<Style> {
 fn first_body_span_style(lines: &[Line<'_>]) -> Option<Style> {
     lines
         .first()
-        .and_then(|line| line.spans.iter().skip(2).find(|span| !span.content.is_empty()))
+        .and_then(|line| {
+            line.spans
+                .iter()
+                .skip(2)
+                .find(|span| !span.content.is_empty())
+        })
         .map(|span| span.style)
 }
 
@@ -84,8 +89,7 @@ fn assistant_message_body_style_remains_default_after_thinking_color_change() {
     let entry = TimelineEntry::response("normal assistant text");
     let lines = render_entry(&entry, &theme, 70);
 
-    let text_span_style =
-        first_body_span_style(&lines).expect("assistant body span should exist");
+    let text_span_style = first_body_span_style(&lines).expect("assistant body span should exist");
 
     assert_eq!(text_span_style, theme.body_text);
 }
