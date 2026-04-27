@@ -33,7 +33,12 @@ const MARGIN: &str = "  ";
 const INDENT: &str = "    ";
 const INDENT_WIDTH: u16 = 4;
 
-pub(super) fn render_timeline(frame: &mut Frame, area: Rect, app: &ChatApp, theme: &ChatTheme) {
+pub(in crate::chat::view) fn render_timeline(
+    frame: &mut Frame,
+    area: Rect,
+    app: &ChatApp,
+    theme: &ChatTheme,
+) {
     let renderer = EntryRenderRegistry::default();
     render_timeline_with_renderer(frame, area, app, theme, &renderer);
 }

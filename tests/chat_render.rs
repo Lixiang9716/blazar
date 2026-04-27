@@ -83,13 +83,13 @@ fn render_frame_dispatches_slots_without_direct_module_calls() {
     impl Default for ProbeRegistry {
         fn default() -> Self {
             Self {
-                timeline: SlotTextUnit("timeline dispatched"),
-                users_top: SlotTextUnit("Blazar"),
-                users_input: SlotTextUnit("> dispatch input"),
-                users_model: SlotTextUnit("AUTO"),
-                users_top_input_separator: SlotTextUnit("─"),
-                users_input_model_separator: SlotTextUnit("─"),
-                picker_overlay: SlotTextUnit("picker dispatched"),
+                timeline: SlotTextUnit("slot:timeline"),
+                users_top: SlotTextUnit("slot:users-top"),
+                users_input: SlotTextUnit("slot:users-input"),
+                users_model: SlotTextUnit("slot:users-model"),
+                users_top_input_separator: SlotTextUnit("slot:users-top-input-separator"),
+                users_input_model_separator: SlotTextUnit("slot:users-input-model-separator"),
+                picker_overlay: SlotTextUnit("slot:picker-overlay"),
             }
         }
     }
@@ -118,9 +118,9 @@ fn render_frame_dispatches_slots_without_direct_module_calls() {
     );
     let text = lines.join("\n");
 
-    assert!(text.contains("timeline dispatched"));
-    assert!(text.contains("Blazar"));
-    assert!(text.contains("AUTO"));
+    assert!(text.contains("slot:timeline"));
+    assert!(text.contains("slot:users-top"));
+    assert!(text.contains("slot:users-model"));
 }
 
 #[test]

@@ -1,19 +1,12 @@
-mod input_panel;
-mod model_panel;
-mod panels;
-mod top_panel;
+pub(in crate::chat::view) mod input_panel;
+pub(in crate::chat::view) mod model_panel;
+pub(in crate::chat::view) mod panels;
+pub(in crate::chat::view) mod top_panel;
 
 use crate::chat::app::ChatApp;
-use crate::chat::theme::ChatTheme;
 use crate::chat::users_state::UsersLayoutPolicy;
-use crate::chat::view::render::contracts::{RenderCtx, RenderError, RenderSlot};
-use panels::{UsersPanelKind, UsersPanelRenderContext, UsersPanelRenderRegistry};
-use ratatui_core::{
-    layout::Rect,
-    terminal::Frame,
-    text::{Line, Span},
-};
-use ratatui_widgets::paragraph::Paragraph;
+use crate::chat::view::render::contracts::RenderSlot;
+use ratatui_core::layout::Rect;
 
 #[derive(Debug, Clone, Copy)]
 pub(in crate::chat::view) struct PlannedUsersSlot {
@@ -109,43 +102,4 @@ pub(in crate::chat::view) fn plan_users_slots(
     }
 
     slots
-}
-
-pub(in crate::chat::view) fn render_planned_users_slot(
-    frame: &mut Frame,
-    slot: RenderSlot,
-    area: Rect,
-    ctx: &mut RenderCtx<'_>,
-) -> Result<(), RenderError> {
-    let context = UsersPanelRenderContext {
-        app: ctx.app(),
-        theme: ctx.theme(),
-        policy: ctx.users_policy(),
-    };
-    let registry = UsersPanelRenderRegistry::default();
-
-    match slot {
-        RenderSlot::UsersTop => registry.render(UsersPanelKind::Top, frame, area, &context),
-        RenderSlot::UsersInput => registry.render(UsersPanelKind::Input, frame, area, &context),
-        RenderSlot::UsersModel => registry.render(UsersPanelKind::Model, frame, area, &context),
-        RenderSlot::UsersTopInputSeparator | RenderSlot::UsersInputModelSeparator => {
-            render_separator(frame, area, ctx.theme());
-        }
-        _ => return Err(RenderError::ComponentError("unsupported users slot")),
-    }
-
-    Ok(())
-}
-
-fn render_separator(frame: &mut Frame, area: Rect, theme: &ChatTheme) {
-    if area.width == 0 || area.height == 0 {
-        return;
-    }
-
-    let separator = Paragraph::new(Line::from(Span::styled(
-        "─".repeat(area.width as usize),
-        theme.status_bar,
-    )))
-    .style(theme.status_bar);
-    frame.render_widget(separator, area);
 }

@@ -180,14 +180,6 @@ fn render_slot_error_fallback(
     frame.render_widget(fallback, area);
 }
 
-pub(in crate::chat::view) fn render_timeline_slot(
-    frame: &mut Frame,
-    area: Rect,
-    ctx: &mut RenderCtx<'_>,
-) {
-    timeline::render_timeline(frame, area, ctx.app(), ctx.theme());
-}
-
 pub(in crate::chat::view) fn render_picker_overlay_slot(
     frame: &mut Frame,
     area: Rect,

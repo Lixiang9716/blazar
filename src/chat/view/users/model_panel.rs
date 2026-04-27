@@ -1,12 +1,11 @@
-use crate::chat::view::status;
+use crate::chat::{app::ChatApp, theme::ChatTheme, view::status};
 use ratatui_core::{layout::Rect, terminal::Frame};
 
-use super::panels::{UsersPanelRenderContext, UsersPanelRenderer};
-
-pub(super) struct ModelPanelRenderer;
-
-impl UsersPanelRenderer for ModelPanelRenderer {
-    fn render(&self, frame: &mut Frame, area: Rect, context: &UsersPanelRenderContext<'_>) {
-        status::render_mode_config_row(frame, area, context.app, context.theme);
-    }
+pub(in crate::chat::view) fn render_model_panel(
+    frame: &mut Frame,
+    area: Rect,
+    app: &ChatApp,
+    theme: &ChatTheme,
+) {
+    status::render_mode_config_row(frame, area, app, theme);
 }
