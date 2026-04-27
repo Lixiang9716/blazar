@@ -1,8 +1,20 @@
 use blazar::chat::app::ChatApp;
 use blazar::chat::users_state::UsersLayoutPolicy;
-use blazar::chat::view::render_to_lines_for_test_with_users_policy;
+use blazar::chat::view::render::contracts::{
+    RenderCtx, RenderError, RenderRegistry, RenderSlot, RenderUnit,
+};
 use blazar::chat::view::{render_frame, render_to_lines_for_test};
-use ratatui_core::{backend::TestBackend, style::Color, terminal::Terminal};
+use blazar::chat::view::{
+    render_to_lines_for_test_with_registry, render_to_lines_for_test_with_users_policy,
+};
+use ratatui_core::{
+    backend::TestBackend,
+    layout::Rect,
+    style::Color,
+    terminal::{Frame, Terminal},
+    text::Line,
+};
+use ratatui_widgets::paragraph::Paragraph;
 
 const REPO_ROOT: &str = env!("CARGO_MANIFEST_DIR");
 
@@ -36,6 +48,79 @@ fn chat_view_renders_model_row() {
             .any(|line| line.contains("AUTO") && line.contains("echo")),
         "model row should render mode and model name"
     );
+}
+
+#[test]
+fn render_frame_dispatches_slots_without_direct_module_calls() {
+    struct SlotTextUnit(&'static str);
+
+    impl RenderUnit for SlotTextUnit {
+        fn render(
+            &self,
+            frame: &mut Frame,
+            area: Rect,
+            _ctx: &mut RenderCtx<'_>,
+        ) -> Result<(), RenderError> {
+            if area.width == 0 || area.height == 0 {
+                return Ok(());
+            }
+
+            frame.render_widget(Paragraph::new(Line::from(self.0)), area);
+            Ok(())
+        }
+    }
+
+    struct ProbeRegistry {
+        timeline: SlotTextUnit,
+        users_top: SlotTextUnit,
+        users_input: SlotTextUnit,
+        users_model: SlotTextUnit,
+        users_top_input_separator: SlotTextUnit,
+        users_input_model_separator: SlotTextUnit,
+        picker_overlay: SlotTextUnit,
+    }
+
+    impl Default for ProbeRegistry {
+        fn default() -> Self {
+            Self {
+                timeline: SlotTextUnit("timeline dispatched"),
+                users_top: SlotTextUnit("Blazar"),
+                users_input: SlotTextUnit("> dispatch input"),
+                users_model: SlotTextUnit("AUTO"),
+                users_top_input_separator: SlotTextUnit("─"),
+                users_input_model_separator: SlotTextUnit("─"),
+                picker_overlay: SlotTextUnit("picker dispatched"),
+            }
+        }
+    }
+
+    impl RenderRegistry for ProbeRegistry {
+        fn resolve(&self, slot: RenderSlot) -> Option<&dyn RenderUnit> {
+            match slot {
+                RenderSlot::Timeline => Some(&self.timeline),
+                RenderSlot::UsersTop => Some(&self.users_top),
+                RenderSlot::UsersInput => Some(&self.users_input),
+                RenderSlot::UsersModel => Some(&self.users_model),
+                RenderSlot::UsersTopInputSeparator => Some(&self.users_top_input_separator),
+                RenderSlot::UsersInputModelSeparator => Some(&self.users_input_model_separator),
+                RenderSlot::PickerOverlay => Some(&self.picker_overlay),
+            }
+        }
+    }
+
+    let mut app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
+    let lines = render_to_lines_for_test_with_registry(
+        &mut app,
+        100,
+        24,
+        UsersLayoutPolicy::default(),
+        &ProbeRegistry::default(),
+    );
+    let text = lines.join("\n");
+
+    assert!(text.contains("timeline dispatched"));
+    assert!(text.contains("Blazar"));
+    assert!(text.contains("AUTO"));
 }
 
 #[test]

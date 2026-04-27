@@ -1,5 +1,9 @@
 use super::*;
+use crate::chat::app::ChatApp;
+use crate::chat::users_state::UsersLayoutPolicy;
 use ratatui_core::{backend::TestBackend, layout::Rect, terminal::Terminal};
+
+const REPO_ROOT: &str = env!("CARGO_MANIFEST_DIR");
 
 #[test]
 fn default_registry_resolves_every_required_slot() {
@@ -34,7 +38,7 @@ fn render_unit_uses_render_ctx_reference() {
             &self,
             _frame: &mut Frame,
             _area: Rect,
-            _ctx: &RenderCtx<'_>,
+            _ctx: &mut RenderCtx<'_>,
         ) -> Result<(), RenderError> {
             Ok(())
         }
@@ -42,12 +46,14 @@ fn render_unit_uses_render_ctx_reference() {
 
     let backend = TestBackend::new(1, 1);
     let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
-    let ctx = RenderCtx::default();
+    let mut app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
+    let theme = app.theme().clone();
+    let mut ctx = RenderCtx::new(&mut app, theme, 0, UsersLayoutPolicy::default());
 
     terminal
         .draw(|frame| {
             NoopRenderUnit
-                .render(frame, Rect::new(0, 0, 1, 1), &ctx)
+                .render(frame, Rect::new(0, 0, 1, 1), &mut ctx)
                 .expect("render unit should accept render ctx reference");
         })
         .expect("frame should render");
@@ -65,12 +71,14 @@ fn registry_returns_explicit_error_for_missing_slot() {
 
     let backend = TestBackend::new(1, 1);
     let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
-    let ctx = RenderCtx::default();
+    let mut app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
+    let theme = app.theme().clone();
+    let mut ctx = RenderCtx::new(&mut app, theme, 0, UsersLayoutPolicy::default());
 
     terminal
         .draw(|frame| {
             let err = EmptyRegistry
-                .render_slot(RenderSlot::Timeline, frame, Rect::new(0, 0, 1, 1), &ctx)
+                .render_slot(RenderSlot::Timeline, frame, Rect::new(0, 0, 1, 1), &mut ctx)
                 .expect_err("missing slots should return a registry error");
 
             assert!(matches!(

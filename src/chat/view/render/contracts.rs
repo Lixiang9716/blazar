@@ -1,6 +1,8 @@
 //! Contracts for renderable chat view slots.
 
-use core::marker::PhantomData;
+use crate::chat::app::ChatApp;
+use crate::chat::theme::ChatTheme;
+use crate::chat::users_state::UsersLayoutPolicy;
 use ratatui_core::{layout::Rect, terminal::Frame};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -28,22 +30,46 @@ impl RenderSlot {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
 pub struct RenderCtx<'a> {
-    _marker: PhantomData<&'a ()>,
+    app: &'a mut ChatApp,
+    theme: ChatTheme,
+    tick_ms: u64,
+    users_policy: UsersLayoutPolicy,
 }
 
 impl<'a> RenderCtx<'a> {
-    pub const fn new() -> Self {
+    pub fn new(
+        app: &'a mut ChatApp,
+        theme: ChatTheme,
+        tick_ms: u64,
+        users_policy: UsersLayoutPolicy,
+    ) -> Self {
         Self {
-            _marker: PhantomData,
+            app,
+            theme,
+            tick_ms,
+            users_policy,
         }
     }
-}
 
-impl Default for RenderCtx<'_> {
-    fn default() -> Self {
-        Self::new()
+    pub fn app(&self) -> &ChatApp {
+        self.app
+    }
+
+    pub fn app_mut(&mut self) -> &mut ChatApp {
+        self.app
+    }
+
+    pub fn theme(&self) -> &ChatTheme {
+        &self.theme
+    }
+
+    pub const fn tick_ms(&self) -> u64 {
+        self.tick_ms
+    }
+
+    pub const fn users_policy(&self) -> UsersLayoutPolicy {
+        self.users_policy
     }
 }
 
@@ -54,8 +80,12 @@ pub enum RenderError {
 }
 
 pub trait RenderUnit {
-    fn render(&self, frame: &mut Frame, area: Rect, ctx: &RenderCtx<'_>)
-    -> Result<(), RenderError>;
+    fn render(
+        &self,
+        frame: &mut Frame,
+        area: Rect,
+        ctx: &mut RenderCtx<'_>,
+    ) -> Result<(), RenderError>;
 }
 
 pub trait RenderRegistry {
@@ -66,7 +96,7 @@ pub trait RenderRegistry {
         slot: RenderSlot,
         frame: &mut Frame,
         area: Rect,
-        ctx: &RenderCtx<'_>,
+        ctx: &mut RenderCtx<'_>,
     ) -> Result<(), RenderError> {
         let unit = self
             .resolve(slot)

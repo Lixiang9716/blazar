@@ -1,6 +1,5 @@
-#![cfg_attr(not(test), allow(dead_code))]
-
 use super::contracts::{RenderCtx, RenderError, RenderRegistry, RenderSlot, RenderUnit};
+use crate::chat::view::{self, users};
 use ratatui_core::{layout::Rect, terminal::Frame};
 
 #[cfg(test)]
@@ -60,29 +59,81 @@ struct UsersTopInputSeparatorRenderUnit;
 struct UsersInputModelSeparatorRenderUnit;
 struct PickerOverlayRenderUnit;
 
-macro_rules! impl_noop_render_unit {
-    ($($unit:ty),+ $(,)?) => {
-        $(
-            impl RenderUnit for $unit {
-                fn render(
-                    &self,
-                    _frame: &mut Frame,
-                    _area: Rect,
-                    _ctx: &RenderCtx<'_>,
-                ) -> Result<(), RenderError> {
-                    Ok(())
-                }
-            }
-        )+
-    };
+impl RenderUnit for TimelineRenderUnit {
+    fn render(
+        &self,
+        frame: &mut Frame,
+        area: Rect,
+        ctx: &mut RenderCtx<'_>,
+    ) -> Result<(), RenderError> {
+        view::render_timeline_slot(frame, area, ctx);
+        Ok(())
+    }
 }
 
-impl_noop_render_unit!(
-    TimelineRenderUnit,
-    UsersTopRenderUnit,
-    UsersInputRenderUnit,
-    UsersModelRenderUnit,
-    UsersTopInputSeparatorRenderUnit,
-    UsersInputModelSeparatorRenderUnit,
-    PickerOverlayRenderUnit,
-);
+impl RenderUnit for UsersTopRenderUnit {
+    fn render(
+        &self,
+        frame: &mut Frame,
+        area: Rect,
+        ctx: &mut RenderCtx<'_>,
+    ) -> Result<(), RenderError> {
+        users::render_planned_users_slot(frame, RenderSlot::UsersTop, area, ctx)
+    }
+}
+
+impl RenderUnit for UsersInputRenderUnit {
+    fn render(
+        &self,
+        frame: &mut Frame,
+        area: Rect,
+        ctx: &mut RenderCtx<'_>,
+    ) -> Result<(), RenderError> {
+        users::render_planned_users_slot(frame, RenderSlot::UsersInput, area, ctx)
+    }
+}
+
+impl RenderUnit for UsersModelRenderUnit {
+    fn render(
+        &self,
+        frame: &mut Frame,
+        area: Rect,
+        ctx: &mut RenderCtx<'_>,
+    ) -> Result<(), RenderError> {
+        users::render_planned_users_slot(frame, RenderSlot::UsersModel, area, ctx)
+    }
+}
+
+impl RenderUnit for UsersTopInputSeparatorRenderUnit {
+    fn render(
+        &self,
+        frame: &mut Frame,
+        area: Rect,
+        ctx: &mut RenderCtx<'_>,
+    ) -> Result<(), RenderError> {
+        users::render_planned_users_slot(frame, RenderSlot::UsersTopInputSeparator, area, ctx)
+    }
+}
+
+impl RenderUnit for UsersInputModelSeparatorRenderUnit {
+    fn render(
+        &self,
+        frame: &mut Frame,
+        area: Rect,
+        ctx: &mut RenderCtx<'_>,
+    ) -> Result<(), RenderError> {
+        users::render_planned_users_slot(frame, RenderSlot::UsersInputModelSeparator, area, ctx)
+    }
+}
+
+impl RenderUnit for PickerOverlayRenderUnit {
+    fn render(
+        &self,
+        frame: &mut Frame,
+        area: Rect,
+        ctx: &mut RenderCtx<'_>,
+    ) -> Result<(), RenderError> {
+        view::render_picker_overlay_slot(frame, area, ctx);
+        Ok(())
+    }
+}
