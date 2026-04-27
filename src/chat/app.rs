@@ -493,7 +493,15 @@ impl ChatApp {
         let request_id = self.active_model_metadata_refresh_id;
         let tx = self.model_metadata_refresh_tx.clone();
         let repo_root = self.workspace_root.to_string_lossy().into_owned();
+        #[cfg(test)]
+        let available_models_behavior =
+            crate::provider::current_available_models_behavior_for_test();
         self.model_metadata_refresh_handle = Some(std::thread::spawn(move || {
+            #[cfg(test)]
+            let _available_models_behavior =
+                crate::provider::set_available_models_behavior_for_current_thread_for_test(
+                    available_models_behavior,
+                );
             let result = ModelMetadataRefreshResult {
                 request_id,
                 available_models: crate::provider::available_models(&repo_root),

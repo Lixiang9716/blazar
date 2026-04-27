@@ -125,29 +125,36 @@ pub enum AvailableModelsTestBehavior {
 }
 
 #[cfg(test)]
-fn available_models_test_lock() -> &'static std::sync::Mutex<()> {
-    static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
-    LOCK.get_or_init(|| std::sync::Mutex::new(()))
+thread_local! {
+    static AVAILABLE_MODELS_TEST_BEHAVIOR: std::cell::RefCell<Option<AvailableModelsTestBehavior>> =
+        const { std::cell::RefCell::new(None) };
 }
 
 #[cfg(test)]
-fn available_models_test_behavior() -> &'static std::sync::Mutex<Option<AvailableModelsTestBehavior>>
-{
-    static BEHAVIOR: std::sync::OnceLock<std::sync::Mutex<Option<AvailableModelsTestBehavior>>> =
-        std::sync::OnceLock::new();
-    BEHAVIOR.get_or_init(|| std::sync::Mutex::new(None))
-}
+pub(crate) struct AvailableModelsTestBehaviorGuard;
 
 #[cfg(test)]
-struct AvailableModelsTestOverrideReset;
-
-#[cfg(test)]
-impl Drop for AvailableModelsTestOverrideReset {
+impl Drop for AvailableModelsTestBehaviorGuard {
     fn drop(&mut self) {
-        *available_models_test_behavior()
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+        AVAILABLE_MODELS_TEST_BEHAVIOR.with(|behavior| {
+            *behavior.borrow_mut() = None;
+        });
     }
+}
+
+#[cfg(test)]
+pub(crate) fn current_available_models_behavior_for_test() -> Option<AvailableModelsTestBehavior> {
+    AVAILABLE_MODELS_TEST_BEHAVIOR.with(|slot| slot.borrow().clone())
+}
+
+#[cfg(test)]
+pub(crate) fn set_available_models_behavior_for_current_thread_for_test(
+    behavior: Option<AvailableModelsTestBehavior>,
+) -> AvailableModelsTestBehaviorGuard {
+    AVAILABLE_MODELS_TEST_BEHAVIOR.with(|slot| {
+        *slot.borrow_mut() = behavior;
+    });
+    AvailableModelsTestBehaviorGuard
 }
 
 #[cfg(test)]
@@ -155,24 +162,14 @@ pub(crate) fn with_available_models_behavior_for_test<T>(
     behavior: AvailableModelsTestBehavior,
     f: impl FnOnce() -> T,
 ) -> T {
-    let _serial = available_models_test_lock()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    *available_models_test_behavior()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(behavior);
-    let _reset = AvailableModelsTestOverrideReset;
+    let _reset = set_available_models_behavior_for_current_thread_for_test(Some(behavior));
     f()
 }
 
 /// Return models available from the configured provider.
 pub fn available_models(repo_root: &str) -> Vec<ModelInfo> {
     #[cfg(test)]
-    if let Some(behavior) = available_models_test_behavior()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .clone()
-    {
+    if let Some(behavior) = AVAILABLE_MODELS_TEST_BEHAVIOR.with(|slot| slot.borrow().clone()) {
         return match behavior {
             AvailableModelsTestBehavior::Return(models) => models,
             AvailableModelsTestBehavior::DelayedReturn { models, delay } => {
