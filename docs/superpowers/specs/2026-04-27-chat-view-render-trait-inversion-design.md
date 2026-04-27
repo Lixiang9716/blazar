@@ -31,6 +31,7 @@ Three explicit layers:
    - Computes layout slots.
    - Builds render context.
    - Dispatches render calls to abstract registry interface.
+   - Retains orchestration-local layout helpers and frame-level behavior (for example streaming indicators and picker visibility checks), while delegating slot rendering through contracts.
 2. **Contract layer** (new, e.g. `src/chat/view/render/contracts.rs`)
    - Defines shared trait(s), context, slot identity, and error types.
    - Defines registry abstraction used by orchestrator.
@@ -50,11 +51,11 @@ Define a common contract similar to:
 - `RenderRegistry`: abstraction that resolves `RenderSlot` to `RenderUnit`.
 - `RenderError`: typed failures (`RegistryMissingSlot`, `ContextMismatch`, `ComponentError`).
 
-Upper-layer code (`render_frame*`) only references `RenderRegistry` + contracts.
+Upper-layer dispatch code (`render_frame*`) references `RenderRegistry` + contracts for slot rendering. Layout planning and other orchestration-only frame concerns may remain local to `view/mod.rs`.
 
 ## 4. Data Flow
 
-1. Orchestrator computes layout areas for timeline/users/input/status/picker.
+1. Orchestrator computes layout areas for the timeline, users sub-slots (top/input/status plus separators), and picker overlay.
 2. Orchestrator creates one `RenderCtx` from `ChatApp` and frame-level inputs.
 3. For each slot, orchestrator dispatches via `RenderRegistry`.
 4. Each component renders internally; complex components may sub-dispatch locally, but still present one top-level contract to orchestration.
@@ -115,10 +116,10 @@ After each phase run repository quality gates.
 
 ## 8. Acceptance Criteria
 
-1. `view/mod.rs` depends on render contracts and registry abstraction only.
-2. Concrete render module calls are removed from orchestrator dispatch logic.
-3. All top-level chat surfaces render through registered `RenderUnit` implementations.
-4. Existing semantics remain intact aside from explicitly accepted minor UI improvements.
+1. `view/mod.rs` routes slot rendering through render contracts and the registry abstraction, without direct concrete renderer calls in orchestrator dispatch.
+2. Required slot coverage includes the timeline, users top/input/status sub-slots, separator rows, and picker overlay.
+3. Missing slot registrations surface explicit typed errors instead of silent no-ops.
+4. Existing semantics remain intact aside from explicitly accepted minor UI improvements, with regression coverage kept green.
 5. Repository quality gates remain green.
 
 ## 9. Risks and Mitigations
