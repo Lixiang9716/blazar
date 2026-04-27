@@ -1,4 +1,4 @@
-use super::descriptor::{EntryDescriptor, ResultMode, StatusVisual};
+use super::descriptor::{EntryDescriptor, StatusVisual};
 use super::*;
 use crate::chat::view::timeline::render_entry::common::tool_badge;
 
@@ -17,6 +17,7 @@ pub(super) fn render_tool_descriptor<'a>(
     descriptor: &EntryDescriptor,
     entry: &TimelineEntry,
     theme: &ChatTheme,
+    width: u16,
     _marker_style: Style,
 ) -> Vec<Line<'a>> {
     let mut lines = Vec::new();
@@ -45,19 +46,20 @@ pub(super) fn render_tool_descriptor<'a>(
         ]));
     }
 
-    let preview_style = match descriptor.result_mode {
-        ResultMode::Diff => theme.diff_add,
-        ResultMode::Markdown => theme.dim_text,
-        ResultMode::Code => theme.code_block,
-        ResultMode::Plain => theme.dim_text,
-    };
-
-    for preview_line in &descriptor.preview_lines {
-        lines.push(Line::from(vec![
-            Span::raw(INDENT),
-            Span::styled(preview_line.clone(), preview_style),
-        ]));
+    let mut preview_text = descriptor.preview_lines.join("\n");
+    if preview_text.trim_start().starts_with("```") && preview_text.matches("```").count() % 2 == 1
+    {
+        preview_text.push_str("\n```");
     }
+
+    let preview = super::super::markdown_body::render_markdown_block(
+        &preview_text,
+        theme,
+        width,
+        vec![Span::raw(INDENT)],
+        vec![Span::raw(INDENT)],
+    );
+    lines.extend(preview);
 
     lines
 }

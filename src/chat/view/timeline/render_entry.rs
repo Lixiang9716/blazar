@@ -95,10 +95,10 @@ impl EntryKindRenderer for ToolUseRenderer {
         &self,
         entry: &TimelineEntry,
         theme: &ChatTheme,
-        _width: u16,
+        width: u16,
         marker_style: Style,
     ) -> Vec<Line<'static>> {
-        tooling::render_tool_use_entry(entry, theme, marker_style)
+        tooling::render_tool_use_entry(entry, theme, width, marker_style)
     }
 }
 
@@ -111,10 +111,10 @@ impl EntryKindRenderer for ToolCallRenderer {
         &self,
         entry: &TimelineEntry,
         theme: &ChatTheme,
-        _width: u16,
+        width: u16,
         marker_style: Style,
     ) -> Vec<Line<'static>> {
-        tooling::render_tool_call_entry(entry, theme, marker_style)
+        tooling::render_tool_call_entry(entry, theme, width, marker_style)
     }
 }
 

@@ -191,6 +191,24 @@ fn render_entry_renders_tool_use_and_tool_call_statuses() {
 }
 
 #[test]
+fn tool_use_body_renders_markdown_but_header_stays_structured() {
+    let theme = crate::chat::theme::build_theme();
+    let entry = TimelineEntry::tool_use("Edit", "src/main.rs", 2, 1, "```diff\n- old\n+ new\n```");
+    let lines = render_entry(&entry, &theme, 70);
+    let text = lines_text(&lines).join("\n");
+    assert!(text.contains("Edit"));
+    assert!(text.contains("src/main.rs"));
+    assert!(text.contains("+2"));
+    assert!(text.contains("-1"));
+    assert!(text.contains("- old"));
+    assert!(text.contains("+ new"));
+    assert!(
+        !text.contains("```"),
+        "tool use body should render markdown fences via shared helper"
+    );
+}
+
+#[test]
 fn tool_descriptor_maps_status_and_semantic_summary() {
     let running = TimelineEntry::tool_call(
         "call-1",

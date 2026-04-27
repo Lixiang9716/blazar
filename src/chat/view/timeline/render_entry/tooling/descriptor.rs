@@ -48,7 +48,7 @@ pub(crate) fn tool_descriptor(entry: &TimelineEntry) -> Option<EntryDescriptor> 
         ToolCallStatus::Error => StatusVisual::ErrorX,
     };
 
-    let preview_source = preview_source_text(status, entry);
+    let preview_source = tool_result_source_text(entry);
     let subtitle = if arguments.trim().is_empty() {
         extract_tool_subtitle_from_details(tool_name, &entry.details)
     } else {
@@ -67,6 +67,14 @@ pub(crate) fn tool_descriptor(entry: &TimelineEntry) -> Option<EntryDescriptor> 
         preview_lines: build_preview_lines(preview_source.as_ref()),
         result_mode: infer_result_mode(tool_name, preview_source.as_ref()),
     })
+}
+
+pub(crate) fn tool_result_source_text<'a>(entry: &'a TimelineEntry) -> Cow<'a, str> {
+    let EntryKind::ToolCall { status, .. } = &entry.kind else {
+        return Cow::Borrowed(&entry.body);
+    };
+
+    preview_source_text(status, entry)
 }
 
 fn preview_source_text<'a>(status: &ToolCallStatus, entry: &'a TimelineEntry) -> Cow<'a, str> {
