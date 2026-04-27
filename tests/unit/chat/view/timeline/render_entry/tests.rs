@@ -22,6 +22,13 @@ fn first_line_marker_style(lines: &[Line<'_>]) -> Option<Style> {
         .map(|span| span.style)
 }
 
+fn first_body_span_style(lines: &[Line<'_>]) -> Option<Style> {
+    lines
+        .first()
+        .and_then(|line| line.spans.iter().skip(2).find(|span| !span.content.is_empty()))
+        .map(|span| span.style)
+}
+
 #[test]
 fn render_entry_handles_user_and_empty_assistant_messages() {
     let theme = crate::chat::theme::build_theme();
@@ -58,6 +65,29 @@ fn assistant_message_uses_shared_markdown_body_renderer() {
     assert!(text.contains("heading"));
     assert!(text.contains("- a"));
     assert!(text.contains("+ b"));
+}
+
+#[test]
+fn thinking_entry_body_uses_streaming_highlight_style() {
+    let theme = crate::chat::theme::build_theme();
+    let thinking = TimelineEntry::thinking("streaming reasoning text");
+    let lines = render_entry(&thinking, &theme, 70);
+
+    let text_span_style = first_body_span_style(&lines).expect("thinking body span should exist");
+
+    assert_eq!(text_span_style, theme.marker_thinking);
+}
+
+#[test]
+fn assistant_message_body_style_remains_default_after_thinking_color_change() {
+    let theme = crate::chat::theme::build_theme();
+    let entry = TimelineEntry::response("normal assistant text");
+    let lines = render_entry(&entry, &theme, 70);
+
+    let text_span_style =
+        first_body_span_style(&lines).expect("assistant body span should exist");
+
+    assert_ne!(text_span_style, theme.marker_thinking);
 }
 
 #[test]
