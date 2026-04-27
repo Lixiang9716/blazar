@@ -11,7 +11,7 @@ use unicode_width::UnicodeWidthStr;
 use crate::chat::users_state::UserMode;
 
 // Shared behavior contract for the users model panel.
-pub(super) fn render_mode_config_row(
+pub(in crate::chat::view) fn render_mode_config_row(
     frame: &mut Frame,
     area: Rect,
     app: &ChatApp,

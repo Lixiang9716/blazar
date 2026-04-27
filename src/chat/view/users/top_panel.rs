@@ -10,7 +10,7 @@ use ratatui_core::{
 use ratatui_widgets::paragraph::Paragraph;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-pub(super) fn render_top_panel(
+pub(in crate::chat::view) fn render_top_panel(
     frame: &mut Frame,
     area: Rect,
     app: &ChatApp,

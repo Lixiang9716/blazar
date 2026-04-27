@@ -14,7 +14,7 @@ use ratatui_widgets::paragraph::Paragraph;
 use tui_overlay::{Anchor, Backdrop, Overlay, Slide};
 use tui_widget_list::{ListBuilder, ListView};
 
-pub(super) fn render_picker(
+pub(in crate::chat::view) fn render_picker(
     frame: &mut Frame,
     full_area: Rect,
     app: &mut ChatApp,

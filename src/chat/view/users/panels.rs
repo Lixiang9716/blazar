@@ -1,61 +1,20 @@
-use super::{input_panel::InputPanelRenderer, model_panel::ModelPanelRenderer};
-use crate::chat::app::ChatApp;
 use crate::chat::theme::ChatTheme;
-use crate::chat::users_state::UsersLayoutPolicy;
-use ratatui_core::{layout::Rect, terminal::Frame};
+use ratatui_core::{
+    layout::Rect,
+    terminal::Frame,
+    text::{Line, Span},
+};
+use ratatui_widgets::paragraph::Paragraph;
 
-pub(super) struct UsersPanelRenderContext<'a> {
-    pub app: &'a ChatApp,
-    pub theme: &'a ChatTheme,
-    pub policy: UsersLayoutPolicy,
-}
-
-pub(super) enum UsersPanelKind {
-    Top,
-    Input,
-    Model,
-}
-
-pub(super) trait UsersPanelRenderer {
-    fn render(&self, frame: &mut Frame, area: Rect, context: &UsersPanelRenderContext<'_>);
-}
-
-pub(super) struct UsersPanelRenderRegistry {
-    top: TopPanelRenderer,
-    input: InputPanelRenderer,
-    model: ModelPanelRenderer,
-}
-
-impl Default for UsersPanelRenderRegistry {
-    fn default() -> Self {
-        Self {
-            top: TopPanelRenderer,
-            input: InputPanelRenderer,
-            model: ModelPanelRenderer,
-        }
+pub(in crate::chat::view) fn render_separator(frame: &mut Frame, area: Rect, theme: &ChatTheme) {
+    if area.width == 0 || area.height == 0 {
+        return;
     }
-}
 
-impl UsersPanelRenderRegistry {
-    pub(super) fn render(
-        &self,
-        kind: UsersPanelKind,
-        frame: &mut Frame,
-        area: Rect,
-        context: &UsersPanelRenderContext<'_>,
-    ) {
-        match kind {
-            UsersPanelKind::Top => self.top.render(frame, area, context),
-            UsersPanelKind::Input => self.input.render(frame, area, context),
-            UsersPanelKind::Model => self.model.render(frame, area, context),
-        }
-    }
-}
-
-struct TopPanelRenderer;
-
-impl UsersPanelRenderer for TopPanelRenderer {
-    fn render(&self, frame: &mut Frame, area: Rect, context: &UsersPanelRenderContext<'_>) {
-        super::top_panel::render_top_panel(frame, area, context.app, context.theme, context.policy);
-    }
+    let separator = Paragraph::new(Line::from(Span::styled(
+        "─".repeat(area.width as usize),
+        theme.status_bar,
+    )))
+    .style(theme.status_bar);
+    frame.render_widget(separator, area);
 }

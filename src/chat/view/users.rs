@@ -1,25 +1,18 @@
-mod input_panel;
-mod model_panel;
-mod panels;
-mod top_panel;
+pub(in crate::chat::view) mod input_panel;
+pub(in crate::chat::view) mod model_panel;
+pub(in crate::chat::view) mod panels;
+pub(in crate::chat::view) mod top_panel;
 
 use crate::chat::app::ChatApp;
-use crate::chat::theme::ChatTheme;
 use crate::chat::users_state::UsersLayoutPolicy;
-use panels::{UsersPanelKind, UsersPanelRenderContext, UsersPanelRenderRegistry};
-use ratatui_core::{
-    layout::Rect,
-    terminal::Frame,
-    text::{Line, Span},
-};
-use ratatui_widgets::paragraph::Paragraph;
+use crate::chat::view::render::contracts::RenderSlot;
+use ratatui_core::layout::Rect;
 
-const USERS_LAYOUT_POLICY: UsersLayoutPolicy = UsersLayoutPolicy {
-    top_height: 1,
-    input_height: 1,
-    model_height: 1,
-    max_command_window_size: 6,
-};
+#[derive(Debug, Clone, Copy)]
+pub(in crate::chat::view) struct PlannedUsersSlot {
+    pub kind: RenderSlot,
+    pub area: Rect,
+}
 
 pub(super) fn users_area_height(
     total_height: u16,
@@ -39,22 +32,13 @@ pub(super) fn users_area_height(
     expanded_height.min(total_height.saturating_sub(1))
 }
 
-pub(super) fn render_users_area(frame: &mut Frame, area: Rect, app: &ChatApp, theme: &ChatTheme) {
-    render_users_area_with_policy(frame, area, app, theme, USERS_LAYOUT_POLICY);
-}
-
-pub(super) fn render_users_area_with_policy(
-    frame: &mut Frame,
+pub(in crate::chat::view) fn plan_users_slots(
     area: Rect,
-    app: &ChatApp,
-    theme: &ChatTheme,
     policy: UsersLayoutPolicy,
-) {
-    let context = UsersPanelRenderContext { app, theme, policy };
-    let registry = UsersPanelRenderRegistry::default();
+    app: &ChatApp,
+) -> Vec<PlannedUsersSlot> {
+    let mut slots = Vec::with_capacity(5);
 
-    // Keep input/model visible first, then allocate separators around the input
-    // row when there is enough room; any leftover height stays with top.
     let input_h = policy.input_height.min(area.height);
     let model_h = policy.model_height.min(area.height.saturating_sub(input_h));
     let separator_input_model_h = u16::from(
@@ -87,31 +71,35 @@ pub(super) fn render_users_area_with_policy(
     let model_area = Rect::new(area.x, y, area.width, model_h);
 
     if top_area.height > 0 {
-        registry.render(UsersPanelKind::Top, frame, top_area, &context);
+        slots.push(PlannedUsersSlot {
+            kind: RenderSlot::UsersTop,
+            area: top_area,
+        });
     }
     if input_area.height > 0 {
-        registry.render(UsersPanelKind::Input, frame, input_area, &context);
+        slots.push(PlannedUsersSlot {
+            kind: RenderSlot::UsersInput,
+            area: input_area,
+        });
     }
     if separator_top_input_area.height > 0 {
-        render_separator(frame, separator_top_input_area, theme);
+        slots.push(PlannedUsersSlot {
+            kind: RenderSlot::UsersTopInputSeparator,
+            area: separator_top_input_area,
+        });
     }
     if separator_input_model_area.height > 0 {
-        render_separator(frame, separator_input_model_area, theme);
+        slots.push(PlannedUsersSlot {
+            kind: RenderSlot::UsersInputModelSeparator,
+            area: separator_input_model_area,
+        });
     }
     if model_area.height > 0 {
-        registry.render(UsersPanelKind::Model, frame, model_area, &context);
-    }
-}
-
-fn render_separator(frame: &mut Frame, area: Rect, theme: &ChatTheme) {
-    if area.width == 0 || area.height == 0 {
-        return;
+        slots.push(PlannedUsersSlot {
+            kind: RenderSlot::UsersModel,
+            area: model_area,
+        });
     }
 
-    let separator = Paragraph::new(Line::from(Span::styled(
-        "─".repeat(area.width as usize),
-        theme.status_bar,
-    )))
-    .style(theme.status_bar);
-    frame.render_widget(separator, area);
+    slots
 }

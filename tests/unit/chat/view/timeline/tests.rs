@@ -1,4 +1,7 @@
 use super::*;
+use crate::chat::users_state::UsersLayoutPolicy;
+use crate::chat::view::render::contracts::{RenderCtx, RenderUnit};
+use ratatui_core::{backend::TestBackend, terminal::Terminal};
 
 #[test]
 fn timeline_renders_banner_and_thinking_entries() {
@@ -37,6 +40,77 @@ fn timeline_hides_banner_after_first_user_message_and_renders_thinking() {
     assert!(
         text.contains("reasoning"),
         "thinking text should render as a timeline entry"
+    );
+}
+
+#[test]
+fn timeline_render_unit_preserves_existing_timeline_output() {
+    fn seed_timeline(app: &mut crate::chat::app::ChatApp) {
+        use crate::agent::protocol::AgentEvent;
+
+        app.send_message("hello from render unit");
+        app.apply_agent_event_for_test(AgentEvent::ThinkingDelta {
+            text: "reasoning".into(),
+        });
+        app.apply_agent_event_for_test(AgentEvent::TextDelta {
+            text: "response body".into(),
+        });
+    }
+
+    fn render_with_timeline_function(app: &mut crate::chat::app::ChatApp) -> Vec<String> {
+        let backend = TestBackend::new(72, 12);
+        let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
+        let theme = app.theme().clone();
+
+        terminal
+            .draw(|frame| render_timeline(frame, frame.area(), app, &theme))
+            .expect("timeline should render");
+
+        terminal
+            .backend()
+            .buffer()
+            .content()
+            .chunks(72)
+            .map(|row| row.iter().map(|cell| cell.symbol()).collect::<String>())
+            .collect()
+    }
+
+    fn render_with_timeline_unit(app: &mut crate::chat::app::ChatApp) -> Vec<String> {
+        let backend = TestBackend::new(72, 12);
+        let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
+        let theme = app.theme().clone();
+        let mut ctx = RenderCtx::new(app, theme, 0, UsersLayoutPolicy::default());
+        let unit = crate::chat::view::render::units::timeline::TimelineRenderUnit;
+
+        terminal
+            .draw(|frame| {
+                unit.render(frame, frame.area(), &mut ctx)
+                    .expect("timeline render unit should render");
+            })
+            .expect("timeline should render");
+
+        terminal
+            .backend()
+            .buffer()
+            .content()
+            .chunks(72)
+            .map(|row| row.iter().map(|cell| cell.symbol()).collect::<String>())
+            .collect()
+    }
+
+    let mut direct_app = crate::chat::app::ChatApp::new_for_test(env!("CARGO_MANIFEST_DIR"))
+        .expect("app should initialize");
+    seed_timeline(&mut direct_app);
+    let direct_lines = render_with_timeline_function(&mut direct_app);
+
+    let mut unit_app = crate::chat::app::ChatApp::new_for_test(env!("CARGO_MANIFEST_DIR"))
+        .expect("app should initialize");
+    seed_timeline(&mut unit_app);
+    let unit_lines = render_with_timeline_unit(&mut unit_app);
+
+    assert_eq!(
+        unit_lines, direct_lines,
+        "timeline render unit should preserve current timeline rendering output"
     );
 }
 
