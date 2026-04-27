@@ -103,6 +103,23 @@ fn new_test_app() -> ChatApp {
     ChatApp::new_for_test(env!("CARGO_MANIFEST_DIR")).expect("test app should initialize")
 }
 
+fn create_provider_config_repo(config_body: &str, name_prefix: &str) -> std::path::PathBuf {
+    let base = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target");
+    std::fs::create_dir_all(&base).expect("target dir should exist");
+    let unique = format!(
+        "{name_prefix}-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock should be monotonic")
+            .as_nanos()
+    );
+    let repo_path = base.join(unique);
+    std::fs::create_dir_all(repo_path.join("config")).expect("create config dir");
+    std::fs::write(repo_path.join("config/provider.json"), config_body)
+        .expect("write provider config");
+    repo_path
+}
+
 #[derive(Clone)]
 struct FakeRuntime {
     events: std::sync::Arc<std::sync::Mutex<VecDeque<crate::agent::protocol::AgentEvent>>>,
@@ -197,22 +214,89 @@ fn chat_app_set_model_calls_runtime_port_set_model() {
 }
 
 #[test]
-fn set_model_refreshes_max_token_sources_after_successful_switch() {
+fn chat_app_init_uses_config_fallback_without_model_listing_cache() {
+    let repo_path = create_provider_config_repo(
+        r#"{
+  "api_key": "test-key",
+  "base_url": "https://example.com/v1",
+  "model": "Qwen/Qwen3-8B",
+  "max_tokens": 4096
+}"#,
+        "chat-app-init-config-fallback",
+    );
     let fake = FakeRuntime::with_events(vec![]);
-    let mut app =
-        ChatApp::new_with_runtime_for_test(env!("CARGO_MANIFEST_DIR"), Box::new(fake), "echo")
-            .expect("init");
-    app.model_context_max_tokens = None;
-    app.config_max_tokens = Some(8192);
-    app.workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("fixtures")
-        .join("missing-provider-root");
+    let repo_str = repo_path.to_string_lossy().to_string();
 
-    app.set_model("switched-model");
+    crate::provider::with_available_models_behavior_for_test(
+        crate::provider::AvailableModelsTestBehavior::Panic(
+            "startup should not list provider models",
+        ),
+        || {
+            let mut app = ChatApp::new_with_runtime_for_test(&repo_str, Box::new(fake), "echo")
+                .expect("init should succeed without model listing");
 
-    assert_eq!(app.config_max_tokens, None);
-    assert_eq!(app.model_context_max_tokens, None);
+            assert!(app.available_models.is_empty());
+            assert_eq!(app.config_max_tokens, Some(4096));
+            assert_eq!(app.model_context_max_tokens, None);
+
+            app.apply_agent_event_for_test(AgentEvent::UsageUpdated(
+                crate::agent::protocol::AgentUsage {
+                    prompt_tokens: 50,
+                    completion_tokens: 10,
+                    total_tokens: 60,
+                },
+            ));
+
+            assert_eq!(
+                app.users_status_snapshot().context_usage,
+                Some(ContextUsage {
+                    used_tokens: 60,
+                    max_tokens: 4096,
+                })
+            );
+        },
+    );
+
+    std::fs::remove_dir_all(&repo_path).expect("cleanup scratch repo");
+}
+
+#[test]
+fn set_model_refreshes_max_token_sources_after_successful_switch() {
+    let repo_path = create_provider_config_repo(
+        r#"{
+  "api_key": "test-key",
+  "base_url": "https://example.com/v1",
+  "model": "Qwen/Qwen3-8B",
+  "max_tokens": 4096
+}"#,
+        "chat-app-model-refresh",
+    );
+    let fake = FakeRuntime::with_events(vec![]);
+    let repo_str = repo_path.to_string_lossy().to_string();
+    let mut app = ChatApp::new_with_runtime_for_test(&repo_str, Box::new(fake), "echo")
+        .expect("init");
+    app.available_models = vec![crate::provider::ModelInfo {
+        id: "switched-model".to_owned(),
+        description: "stale entry".to_owned(),
+        context_length: Some(1024),
+    }];
+    app.model_context_max_tokens = Some(1024);
+
+    crate::provider::with_available_models_behavior_for_test(
+        crate::provider::AvailableModelsTestBehavior::Return(vec![
+            crate::provider::ModelInfo {
+                id: "switched-model".to_owned(),
+                description: "fresh entry".to_owned(),
+                context_length: Some(65536),
+            },
+        ]),
+        || app.set_model("switched-model"),
+    );
+
+    assert_eq!(app.config_max_tokens, Some(4096));
+    assert_eq!(app.available_models.len(), 1);
+    assert_eq!(app.available_models[0].description, "fresh entry");
+    assert_eq!(app.model_context_max_tokens, Some(65536));
 
     app.apply_agent_event_for_test(AgentEvent::UsageUpdated(
         crate::agent::protocol::AgentUsage {
@@ -227,8 +311,10 @@ fn set_model_refreshes_max_token_sources_after_successful_switch() {
             .context_usage
             .expect("usage snapshot should be present")
             .max_tokens,
-        0
+        65536
     );
+
+    std::fs::remove_dir_all(&repo_path).expect("cleanup scratch repo");
 }
 
 struct RuntimeProbeCommand {

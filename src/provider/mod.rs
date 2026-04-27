@@ -113,8 +113,68 @@ pub fn load_provider(repo_root: &str) -> (Box<dyn LlmProvider>, String) {
     }
 }
 
+#[cfg(test)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AvailableModelsTestBehavior {
+    Return(Vec<ModelInfo>),
+    Panic(&'static str),
+}
+
+#[cfg(test)]
+fn available_models_test_lock() -> &'static std::sync::Mutex<()> {
+    static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    LOCK.get_or_init(|| std::sync::Mutex::new(()))
+}
+
+#[cfg(test)]
+fn available_models_test_behavior() -> &'static std::sync::Mutex<Option<AvailableModelsTestBehavior>>
+{
+    static BEHAVIOR: std::sync::OnceLock<std::sync::Mutex<Option<AvailableModelsTestBehavior>>> =
+        std::sync::OnceLock::new();
+    BEHAVIOR.get_or_init(|| std::sync::Mutex::new(None))
+}
+
+#[cfg(test)]
+struct AvailableModelsTestOverrideReset;
+
+#[cfg(test)]
+impl Drop for AvailableModelsTestOverrideReset {
+    fn drop(&mut self) {
+        *available_models_test_behavior()
+            .lock()
+            .expect("available models test behavior mutex poisoned") = None;
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn with_available_models_behavior_for_test<T>(
+    behavior: AvailableModelsTestBehavior,
+    f: impl FnOnce() -> T,
+) -> T {
+    let _serial = available_models_test_lock()
+        .lock()
+        .expect("available models test lock poisoned");
+    *available_models_test_behavior()
+        .lock()
+        .expect("available models test behavior mutex poisoned") = Some(behavior);
+    let _reset = AvailableModelsTestOverrideReset;
+    f()
+}
+
 /// Return models available from the configured provider.
 pub fn available_models(repo_root: &str) -> Vec<ModelInfo> {
+    #[cfg(test)]
+    if let Some(behavior) = available_models_test_behavior()
+        .lock()
+        .expect("available models test behavior mutex poisoned")
+        .clone()
+    {
+        return match behavior {
+            AvailableModelsTestBehavior::Return(models) => models,
+            AvailableModelsTestBehavior::Panic(message) => panic!("{message}"),
+        };
+    }
+
     let repo_root = repo_root.to_owned();
     std::thread::spawn(move || {
         let (provider, _) = load_provider(&repo_root);

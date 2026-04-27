@@ -126,12 +126,7 @@ impl ChatApp {
         )?;
 
         let (provider, model_name) = crate::provider::load_provider(repo_path);
-        let available_models = crate::provider::available_models(repo_path);
         let config_max_tokens = crate::provider::configured_max_tokens(repo_path);
-        let model_context_max_tokens = crate::provider::resolve_model_context_length_from_models(
-            &available_models,
-            &model_name,
-        );
         let runtime = AgentRuntime::new(provider, workspace_root.clone(), model_name.clone())?;
 
         Ok(Self {
@@ -152,8 +147,8 @@ impl ChatApp {
             debug_recorder: DebugRecorder::new(&workspace_root),
             workspace_root,
             model_name,
-            available_models,
-            model_context_max_tokens,
+            available_models: Vec::new(),
+            model_context_max_tokens: None,
             config_max_tokens,
             git_pr_label,
             user_mode: UserMode::Auto,
@@ -432,6 +427,7 @@ impl ChatApp {
 
     fn refresh_max_token_sources(&mut self, model: &str) {
         let repo_root = self.workspace_root.to_string_lossy();
+        self.available_models = crate::provider::available_models(&repo_root);
         self.config_max_tokens = crate::provider::configured_max_tokens(&repo_root);
         self.model_context_max_tokens = crate::provider::resolve_model_context_length_from_models(
             &self.available_models,
