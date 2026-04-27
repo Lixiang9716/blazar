@@ -51,6 +51,64 @@ fn render_entry_renders_markdown_and_fenced_code_segments() {
 }
 
 #[test]
+fn assistant_message_uses_shared_markdown_body_renderer() {
+    let theme = crate::chat::theme::build_theme();
+    let entry = TimelineEntry::response("## heading\n```diff\n- a\n+ b\n```");
+    let text = lines_text(&render_entry(&entry, &theme, 70)).join("\n");
+    assert!(text.contains("heading"));
+    assert!(text.contains("- a"));
+    assert!(text.contains("+ b"));
+}
+
+#[test]
+fn user_message_remains_plain_text() {
+    let theme = crate::chat::theme::build_theme();
+    let entry = TimelineEntry::user_message("**literal** not markdown");
+    let text = lines_text(&render_entry(&entry, &theme, 70)).join("\n");
+    assert!(
+        text.contains("**literal**"),
+        "user message should remain plain text"
+    );
+}
+
+#[test]
+fn code_block_entry_uses_shared_markdown_body_renderer() {
+    let theme = crate::chat::theme::build_theme();
+    let entry = TimelineEntry::code_block("diff", "- old\n+ new");
+    let text = lines_text(&render_entry(&entry, &theme, 70)).join("\n");
+    assert!(text.contains("- old"));
+    assert!(text.contains("+ new"));
+}
+
+#[test]
+fn warning_entry_renders_markdown_fence_without_literal_backticks() {
+    let theme = crate::chat::theme::build_theme();
+    let entry = TimelineEntry::warning("```diff\n- old\n+ new\n```");
+    let text = lines_text(&render_entry(&entry, &theme, 70)).join("\n");
+    assert!(text.contains("- old"));
+    assert!(text.contains("+ new"));
+    assert!(
+        !text.contains("```"),
+        "warning entries should render markdown fences via shared helper"
+    );
+}
+
+#[test]
+fn markdown_body_helper_renders_diff_fence_lines() {
+    let theme = crate::chat::theme::build_theme();
+    let lines = super::markdown_body::render_markdown_block(
+        "```diff\n- old\n+ new\n```",
+        &theme,
+        60,
+        vec![Span::raw("  "), Span::raw("● ")],
+        vec![Span::raw("    ")],
+    );
+    let text = lines_text(&lines).join("\n");
+    assert!(text.contains("- old"));
+    assert!(text.contains("+ new"));
+}
+
+#[test]
 fn render_entry_renders_tool_use_and_tool_call_statuses() {
     let theme = crate::chat::theme::build_theme();
     let tool_use = TimelineEntry::tool_use("Edit", "src/main.rs", 3, 1, "updated");
@@ -130,6 +188,45 @@ fn render_entry_renders_tool_use_and_tool_call_statuses() {
     let acp_agent_text = lines_text(&render_entry(&acp_agent, &theme, 70)).join("\n");
     assert!(acp_agent_text.contains("configured_reviewer"));
     assert!(acp_agent_text.contains("(ACP)"));
+}
+
+#[test]
+fn tool_use_body_renders_markdown_but_header_stays_structured() {
+    let theme = crate::chat::theme::build_theme();
+    let entry = TimelineEntry::tool_use("Edit", "src/main.rs", 2, 1, "```diff\n- old\n+ new\n```");
+    let lines = render_entry(&entry, &theme, 70);
+    let text = lines_text(&lines).join("\n");
+    assert!(text.contains("Edit"));
+    assert!(text.contains("src/main.rs"));
+    assert!(text.contains("+2"));
+    assert!(text.contains("-1"));
+    assert!(text.contains("- old"));
+    assert!(text.contains("+ new"));
+    assert!(
+        !text.contains("```"),
+        "tool use body should render markdown fences via shared helper"
+    );
+}
+
+#[test]
+fn tool_use_body_preserves_plain_line_boundaries() {
+    let theme = crate::chat::theme::build_theme();
+    let entry = TimelineEntry::tool_use("Read", "Cargo.toml", 0, 0, "line-a\nline-b");
+    let lines = lines_text(&render_entry(&entry, &theme, 120));
+
+    let line_a_idx = lines
+        .iter()
+        .position(|line| line.contains("line-a"))
+        .expect("first tool-use line should render");
+    let line_b_idx = lines
+        .iter()
+        .position(|line| line.contains("line-b"))
+        .expect("second tool-use line should render");
+
+    assert_ne!(
+        line_a_idx, line_b_idx,
+        "line-oriented tool-use content should preserve source line boundaries"
+    );
 }
 
 #[test]
@@ -399,6 +496,71 @@ fn render_entry_renders_bash_warning_hint_thinking_and_code_block() {
     let code_text = lines_text(&render_entry(&code, &theme, 50)).join("\n");
     assert!(code_text.contains("rust"));
     assert!(code_text.contains("fn main() {}"));
+}
+
+#[test]
+fn bash_body_renders_markdown_without_literal_fences() {
+    let theme = crate::chat::theme::build_theme();
+    let bash_entry = TimelineEntry::bash("echo hello", "```diff\n- old\n+ new\n```");
+    let bash_text = lines_text(&render_entry(&bash_entry, &theme, 70)).join("\n");
+
+    assert!(bash_text.contains("$ echo hello"));
+    assert!(bash_text.contains("- old"));
+    assert!(bash_text.contains("+ new"));
+    assert!(
+        !bash_text.contains("```"),
+        "bash body should render markdown fences via shared helper"
+    );
+}
+
+#[test]
+fn bash_body_preserves_plain_line_boundaries() {
+    let theme = crate::chat::theme::build_theme();
+    let bash_entry = TimelineEntry::bash("echo hello", "alpha\nbeta");
+    let lines = lines_text(&render_entry(&bash_entry, &theme, 120));
+
+    let alpha_idx = lines
+        .iter()
+        .position(|line| line.contains("alpha"))
+        .expect("alpha line should be rendered");
+    let beta_idx = lines
+        .iter()
+        .position(|line| line.contains("beta"))
+        .expect("beta line should be rendered");
+
+    assert_ne!(
+        alpha_idx, beta_idx,
+        "line-oriented bash output should keep each source line on a separate rendered line"
+    );
+}
+
+#[test]
+fn tool_call_preview_preserves_plain_line_boundaries() {
+    let theme = crate::chat::theme::build_theme();
+    let entry = TimelineEntry::tool_call(
+        "c-line-preserve",
+        "bash",
+        ToolKind::Local,
+        r#"{"command":"cargo test"}"#,
+        "line-1\nline-2\nline-3",
+        r#"{"command":"cargo test"}"#,
+        ToolCallStatus::Success,
+    );
+    let lines = lines_text(&render_entry(&entry, &theme, 120));
+
+    let line1_idx = lines
+        .iter()
+        .position(|line| line.contains("line-1"))
+        .expect("first preview line should be rendered");
+    let line2_idx = lines
+        .iter()
+        .position(|line| line.contains("line-2"))
+        .expect("second preview line should be rendered");
+
+    assert_ne!(
+        line1_idx, line2_idx,
+        "line-oriented tool previews should keep line breaks instead of flattening into one line"
+    );
 }
 
 #[test]

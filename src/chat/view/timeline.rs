@@ -104,12 +104,13 @@ fn render_timeline_with_renderer(
         // Show expanded details when Ctrl+O is toggled
         if show_details && !entry.details.is_empty() {
             lines.push(Line::from(""));
-            for detail_line in entry.details.lines() {
-                lines.push(Line::from(vec![
-                    Span::raw(INDENT),
-                    Span::styled(detail_line.to_owned(), theme.dim_text),
-                ]));
-            }
+            let detail_lines = render_entry::render_markdown_details_block(
+                &entry.details,
+                theme,
+                content_width,
+                vec![Span::raw(INDENT)],
+            );
+            lines.extend(detail_lines);
         }
 
         lines.push(Line::from("")); // blank separator

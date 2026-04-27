@@ -1,6 +1,8 @@
 use super::*;
 
 mod common;
+mod fenced_code;
+mod markdown_body;
 mod message;
 mod status;
 mod tooling;
@@ -10,6 +12,7 @@ mod tooling;
 mod tests;
 
 use common::marker_style_for;
+pub(super) use markdown_body::render_markdown_details_block;
 
 pub(super) trait TimelineEntryRenderer {
     fn render(&self, entry: &TimelineEntry, theme: &ChatTheme, width: u16) -> Vec<Line<'static>>;
@@ -92,10 +95,10 @@ impl EntryKindRenderer for ToolUseRenderer {
         &self,
         entry: &TimelineEntry,
         theme: &ChatTheme,
-        _width: u16,
+        width: u16,
         marker_style: Style,
     ) -> Vec<Line<'static>> {
-        tooling::render_tool_use_entry(entry, theme, marker_style)
+        tooling::render_tool_use_entry(entry, theme, width, marker_style)
     }
 }
 
@@ -108,10 +111,10 @@ impl EntryKindRenderer for ToolCallRenderer {
         &self,
         entry: &TimelineEntry,
         theme: &ChatTheme,
-        _width: u16,
+        width: u16,
         marker_style: Style,
     ) -> Vec<Line<'static>> {
-        tooling::render_tool_call_entry(entry, theme, marker_style)
+        tooling::render_tool_call_entry(entry, theme, width, marker_style)
     }
 }
 
@@ -202,7 +205,7 @@ pub(super) fn render_fenced_code<'a>(
     theme: &ChatTheme,
     text_width: u16,
 ) -> Vec<Line<'a>> {
-    message::render_fenced_code(lang, code, theme, text_width)
+    fenced_code::render_fenced_code(lang, code, theme, text_width)
 }
 
 #[cfg(test)]

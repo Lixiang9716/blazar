@@ -7,6 +7,7 @@ pub(crate) use descriptor::tool_descriptor;
 pub(super) fn render_tool_use_entry<'a>(
     entry: &TimelineEntry,
     theme: &ChatTheme,
+    width: u16,
     marker_style: Style,
 ) -> Vec<Line<'a>> {
     let mut lines = Vec::new();
@@ -33,14 +34,13 @@ pub(super) fn render_tool_use_entry<'a>(
         }
         lines.push(Line::from(spans));
 
-        if !entry.body.is_empty() {
-            for desc_line in entry.body.lines() {
-                lines.push(Line::from(vec![
-                    Span::raw(INDENT),
-                    Span::styled(desc_line.to_owned(), theme.dim_text),
-                ]));
-            }
-        }
+        lines.extend(super::markdown_body::render_markdown_block_preserve_lines(
+            &entry.body,
+            theme,
+            width,
+            vec![Span::raw(INDENT)],
+            vec![Span::raw(INDENT)],
+        ));
     }
 
     lines
@@ -49,13 +49,14 @@ pub(super) fn render_tool_use_entry<'a>(
 pub(super) fn render_tool_call_entry<'a>(
     entry: &TimelineEntry,
     theme: &ChatTheme,
+    width: u16,
     marker_style: Style,
 ) -> Vec<Line<'a>> {
     let Some(descriptor) = tool_descriptor(entry) else {
         return Vec::new();
     };
 
-    renderer::render_tool_descriptor(&descriptor, entry, theme, marker_style)
+    renderer::render_tool_descriptor(&descriptor, entry, theme, width, marker_style)
 }
 
 pub(super) fn render_bash_entry<'a>(
@@ -112,13 +113,14 @@ pub(super) fn render_bash_entry<'a>(
             ),
         ]));
     }
-    for output_line in shown {
-        lines.push(Line::from(vec![
-            Span::raw(INDENT),
-            Span::raw("  "),
-            Span::styled((*output_line).to_owned(), theme.dim_text),
-        ]));
-    }
+    let output_body = shown.join("\n");
+    lines.extend(super::markdown_body::render_markdown_block_preserve_lines(
+        &output_body,
+        theme,
+        width.saturating_sub(2),
+        vec![Span::raw(INDENT), Span::raw("  ")],
+        vec![Span::raw(INDENT), Span::raw("  ")],
+    ));
 
     lines
 }
