@@ -106,6 +106,15 @@ pub struct StreamChunk {
     pub id: Option<String>,
     #[serde(default)]
     pub choices: Vec<StreamChoice>,
+    #[serde(default)]
+    pub usage: Option<CompletionUsage>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct CompletionUsage {
+    pub prompt_tokens: u32,
+    pub completion_tokens: u32,
+    pub total_tokens: u32,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -137,6 +146,17 @@ pub struct DeltaToolCall {
 pub struct DeltaFunction {
     pub name: Option<String>,
     pub arguments: Option<String>,
+}
+
+fn extract_usage_from_chunk(chunk: &StreamChunk) -> Option<crate::provider::ProviderUsage> {
+    chunk
+        .usage
+        .as_ref()
+        .map(|usage| crate::provider::ProviderUsage {
+            prompt_tokens: usage.prompt_tokens,
+            completion_tokens: usage.completion_tokens,
+            total_tokens: usage.total_tokens,
+        })
 }
 
 // ── Tool call types (used by build_request and tests) ──────────────
@@ -301,6 +321,7 @@ impl OpenAiProvider {
         obj.insert("model".into(), json!(model));
         obj.insert("messages".into(), json!(request_messages));
         obj.insert("stream".into(), json!(true));
+        obj.insert("stream_options".into(), json!({ "include_usage": true }));
         obj.insert("max_tokens".into(), json!(cfg.max_tokens));
         obj.insert("temperature".into(), json!(cfg.temperature));
 
@@ -403,6 +424,10 @@ impl LlmProvider for OpenAiProvider {
                         return Ok(());
                     }
                 };
+
+                if let Some(usage) = extract_usage_from_chunk(&chunk) {
+                    let _ = tx.send(ProviderEvent::Usage(usage));
+                }
 
                 for choice in &chunk.choices {
                     // Emit reasoning content (thinking mode)
