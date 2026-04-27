@@ -261,7 +261,7 @@ fn chat_app_init_uses_config_fallback_without_model_listing_cache() {
 }
 
 #[test]
-fn set_model_refreshes_max_token_sources_after_successful_switch() {
+fn set_model_does_not_block_on_async_metadata_refresh() {
     let repo_path = create_provider_config_repo(
         r#"{
   "api_key": "test-key",
@@ -270,6 +270,60 @@ fn set_model_refreshes_max_token_sources_after_successful_switch() {
   "max_tokens": 4096
 }"#,
         "chat-app-model-refresh",
+    );
+    let repo_str = repo_path.to_string_lossy().to_string();
+
+    crate::provider::with_available_models_behavior_for_test(
+        crate::provider::AvailableModelsTestBehavior::DelayedReturn {
+            models: vec![crate::provider::ModelInfo {
+                id: "switched-model".to_owned(),
+                description: "fresh entry".to_owned(),
+                context_length: Some(65536),
+            }],
+            delay: Duration::from_millis(600),
+        },
+        || {
+            let (result_tx, result_rx) = std::sync::mpsc::channel();
+            let repo_for_thread = repo_str.clone();
+            let handle = std::thread::spawn(move || {
+                let fake = FakeRuntime::with_events(vec![]);
+                let mut app =
+                    ChatApp::new_with_runtime_for_test(&repo_for_thread, Box::new(fake), "echo")
+                        .expect("init");
+                app.set_model("switched-model");
+                result_tx
+                    .send((
+                        app.available_models.is_empty(),
+                        app.model_context_max_tokens,
+                        app.config_max_tokens,
+                    ))
+                    .expect("send set_model result");
+            });
+
+            let (models_empty, model_context_max_tokens, config_max_tokens) = result_rx
+                .recv_timeout(Duration::from_millis(250))
+                .expect("set_model should return before provider listing completes");
+            handle.join().expect("set_model thread should join");
+
+            assert!(models_empty);
+            assert_eq!(model_context_max_tokens, None);
+            assert_eq!(config_max_tokens, Some(4096));
+        },
+    );
+
+    std::fs::remove_dir_all(&repo_path).expect("cleanup scratch repo");
+}
+
+#[test]
+fn async_metadata_refresh_result_is_applied_on_tick() {
+    let repo_path = create_provider_config_repo(
+        r#"{
+  "api_key": "test-key",
+  "base_url": "https://example.com/v1",
+  "model": "Qwen/Qwen3-8B",
+  "max_tokens": 4096
+}"#,
+        "chat-app-async-model-refresh",
     );
     let fake = FakeRuntime::with_events(vec![]);
     let repo_str = repo_path.to_string_lossy().to_string();
@@ -282,17 +336,30 @@ fn set_model_refreshes_max_token_sources_after_successful_switch() {
     }];
     app.model_context_max_tokens = Some(1024);
 
-    crate::provider::with_available_models_behavior_for_test(
-        crate::provider::AvailableModelsTestBehavior::Return(vec![
-            crate::provider::ModelInfo {
+    let refreshed = crate::provider::with_available_models_behavior_for_test(
+        crate::provider::AvailableModelsTestBehavior::DelayedReturn {
+            models: vec![crate::provider::ModelInfo {
                 id: "switched-model".to_owned(),
                 description: "fresh entry".to_owned(),
                 context_length: Some(65536),
-            },
-        ]),
-        || app.set_model("switched-model"),
+            }],
+            delay: Duration::from_millis(50),
+        },
+        || {
+            app.set_model("switched-model");
+            assert_eq!(app.available_models[0].description, "stale entry");
+            assert_eq!(app.model_context_max_tokens, Some(1024));
+            wait_until(TEST_WAIT_TIMEOUT, || {
+                app.tick();
+                app.available_models
+                    .iter()
+                    .any(|model| model.description == "fresh entry")
+                    && app.model_context_max_tokens == Some(65536)
+            })
+        },
     );
 
+    assert!(refreshed, "tick should apply async metadata refresh result");
     assert_eq!(app.config_max_tokens, Some(4096));
     assert_eq!(app.available_models.len(), 1);
     assert_eq!(app.available_models[0].description, "fresh entry");
@@ -312,6 +379,177 @@ fn set_model_refreshes_max_token_sources_after_successful_switch() {
             .expect("usage snapshot should be present")
             .max_tokens,
         65536
+    );
+
+    std::fs::remove_dir_all(&repo_path).expect("cleanup scratch repo");
+}
+
+#[test]
+fn tick_periodically_refreshes_model_metadata_for_long_lived_sessions() {
+    let repo_path = create_provider_config_repo(
+        r#"{
+  "api_key": "test-key",
+  "base_url": "https://example.com/v1",
+  "model": "Qwen/Qwen3-8B",
+  "max_tokens": 4096
+}"#,
+        "chat-app-periodic-model-refresh",
+    );
+    let fake = FakeRuntime::with_events(vec![]);
+    let repo_str = repo_path.to_string_lossy().to_string();
+    let mut app = ChatApp::new_with_runtime_for_test(&repo_str, Box::new(fake), "echo")
+        .expect("init");
+    app.model_name = "periodic-model".to_owned();
+    app.model_metadata_refresh_interval = Duration::ZERO;
+
+    crate::provider::with_available_models_behavior_for_test(
+        crate::provider::AvailableModelsTestBehavior::DelayedReturn {
+            models: vec![crate::provider::ModelInfo {
+                id: "periodic-model".to_owned(),
+                description: "periodic entry".to_owned(),
+                context_length: Some(32768),
+            }],
+            delay: Duration::from_millis(50),
+        },
+        || {
+            app.tick();
+            assert!(app.available_models.is_empty());
+            assert_eq!(app.model_context_max_tokens, None);
+
+            let refreshed = wait_until(TEST_WAIT_TIMEOUT, || {
+                app.tick();
+                app.available_models
+                    .iter()
+                    .any(|model| model.description == "periodic entry")
+                    && app.model_context_max_tokens == Some(32768)
+            });
+            assert!(
+                refreshed,
+                "periodic tick refresh should populate metadata for the active model"
+            );
+        },
+    );
+
+    std::fs::remove_dir_all(&repo_path).expect("cleanup scratch repo");
+}
+
+#[test]
+fn timed_out_metadata_refresh_allows_periodic_retry() {
+    let repo_path = create_provider_config_repo(
+        r#"{
+  "api_key": "test-key",
+  "base_url": "https://example.com/v1",
+  "model": "Qwen/Qwen3-8B",
+  "max_tokens": 4096
+}"#,
+        "chat-app-refresh-timeout-retry",
+    );
+    let fake = FakeRuntime::with_events(vec![]);
+    let repo_str = repo_path.to_string_lossy().to_string();
+    let mut app = ChatApp::new_with_runtime_for_test(&repo_str, Box::new(fake), "echo")
+        .expect("init");
+    app.model_name = "retry-model".to_owned();
+    app.model_metadata_refresh_interval = Duration::ZERO;
+    app.model_metadata_refresh_timeout = Duration::from_millis(10);
+
+    crate::provider::with_available_models_behavior_for_test(
+        crate::provider::AvailableModelsTestBehavior::DelayedReturn {
+            models: vec![crate::provider::ModelInfo {
+                id: "retry-model".to_owned(),
+                description: "stalled entry".to_owned(),
+                context_length: Some(1024),
+            }],
+            delay: Duration::from_secs(5),
+        },
+        || {
+            app.tick();
+            std::thread::sleep(Duration::from_millis(25));
+        },
+    );
+
+    let retry_start = Instant::now();
+    let recovered = crate::provider::with_available_models_behavior_for_test(
+        crate::provider::AvailableModelsTestBehavior::DelayedReturn {
+            models: vec![crate::provider::ModelInfo {
+                id: "retry-model".to_owned(),
+                description: "retry entry".to_owned(),
+                context_length: Some(24576),
+            }],
+            delay: Duration::from_millis(5),
+        },
+        || {
+            wait_until(TEST_WAIT_TIMEOUT, || {
+                app.tick();
+                app.available_models
+                    .iter()
+                    .any(|model| model.description == "retry entry")
+                    && app.model_context_max_tokens == Some(24576)
+            })
+        },
+    );
+
+    assert!(
+        recovered,
+        "timed out in-flight refresh should not block a later periodic retry"
+    );
+    assert!(
+        retry_start.elapsed() < Duration::from_secs(1),
+        "retry should recover before the stalled worker finishes"
+    );
+
+    std::fs::remove_dir_all(&repo_path).expect("cleanup scratch repo");
+}
+
+#[test]
+fn failed_metadata_refresh_allows_periodic_retry() {
+    let repo_path = create_provider_config_repo(
+        r#"{
+  "api_key": "test-key",
+  "base_url": "https://example.com/v1",
+  "model": "Qwen/Qwen3-8B",
+  "max_tokens": 4096
+}"#,
+        "chat-app-refresh-failure-retry",
+    );
+    let fake = FakeRuntime::with_events(vec![]);
+    let repo_str = repo_path.to_string_lossy().to_string();
+    let mut app = ChatApp::new_with_runtime_for_test(&repo_str, Box::new(fake), "echo")
+        .expect("init");
+    app.model_name = "failure-retry-model".to_owned();
+    app.model_metadata_refresh_interval = Duration::ZERO;
+    app.model_metadata_refresh_timeout = Duration::from_millis(10);
+
+    crate::provider::with_available_models_behavior_for_test(
+        crate::provider::AvailableModelsTestBehavior::Panic("simulated async refresh failure"),
+        || {
+            app.tick();
+            std::thread::sleep(Duration::from_millis(25));
+        },
+    );
+
+    let recovered = crate::provider::with_available_models_behavior_for_test(
+        crate::provider::AvailableModelsTestBehavior::DelayedReturn {
+            models: vec![crate::provider::ModelInfo {
+                id: "failure-retry-model".to_owned(),
+                description: "failure retry entry".to_owned(),
+                context_length: Some(28672),
+            }],
+            delay: Duration::from_millis(5),
+        },
+        || {
+            wait_until(TEST_WAIT_TIMEOUT, || {
+                app.tick();
+                app.available_models
+                    .iter()
+                    .any(|model| model.description == "failure retry entry")
+                    && app.model_context_max_tokens == Some(28672)
+            })
+        },
+    );
+
+    assert!(
+        recovered,
+        "failed async refresh should not block a later periodic retry"
     );
 
     std::fs::remove_dir_all(&repo_path).expect("cleanup scratch repo");

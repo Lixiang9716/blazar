@@ -117,6 +117,10 @@ pub fn load_provider(repo_root: &str) -> (Box<dyn LlmProvider>, String) {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AvailableModelsTestBehavior {
     Return(Vec<ModelInfo>),
+    DelayedReturn {
+        models: Vec<ModelInfo>,
+        delay: std::time::Duration,
+    },
     Panic(&'static str),
 }
 
@@ -142,7 +146,7 @@ impl Drop for AvailableModelsTestOverrideReset {
     fn drop(&mut self) {
         *available_models_test_behavior()
             .lock()
-            .expect("available models test behavior mutex poisoned") = None;
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
     }
 }
 
@@ -153,10 +157,10 @@ pub(crate) fn with_available_models_behavior_for_test<T>(
 ) -> T {
     let _serial = available_models_test_lock()
         .lock()
-        .expect("available models test lock poisoned");
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     *available_models_test_behavior()
         .lock()
-        .expect("available models test behavior mutex poisoned") = Some(behavior);
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(behavior);
     let _reset = AvailableModelsTestOverrideReset;
     f()
 }
@@ -166,11 +170,15 @@ pub fn available_models(repo_root: &str) -> Vec<ModelInfo> {
     #[cfg(test)]
     if let Some(behavior) = available_models_test_behavior()
         .lock()
-        .expect("available models test behavior mutex poisoned")
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
         .clone()
     {
         return match behavior {
             AvailableModelsTestBehavior::Return(models) => models,
+            AvailableModelsTestBehavior::DelayedReturn { models, delay } => {
+                std::thread::sleep(delay);
+                models
+            }
             AvailableModelsTestBehavior::Panic(message) => panic!("{message}"),
         };
     }
