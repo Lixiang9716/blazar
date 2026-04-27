@@ -517,6 +517,7 @@ impl LlmProvider for OpenAiProvider {
             .map(|m| super::ModelInfo {
                 description: m.id.clone(),
                 id: m.id,
+                context_length: None,
             })
             .collect();
         models.sort_by(|a, b| a.id.cmp(&b.id));

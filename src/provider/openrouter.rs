@@ -15,7 +15,7 @@ use super::openai_compat::{
     OpenAiConfig, ToolChoice, determine_tool_choice, render_system_prompt,
     truncate_provider_messages,
 };
-use super::{LlmProvider, ModelInfo, ProviderEvent, ProviderMessage};
+use super::{LlmProvider, ModelInfo, ProviderEvent, ProviderMessage, ProviderUsage};
 
 // ── Provider ───────────────────────────────────────────────────────
 
@@ -43,6 +43,46 @@ impl OpenRouterProvider {
             config,
             client,
             runtime,
+        }
+    }
+}
+
+fn context_length_to_u32(value: f64) -> Option<u32> {
+    if value.is_finite() && value >= 0.0 && value <= u32::MAX as f64 {
+        Some(value as u32)
+    } else {
+        None
+    }
+}
+
+fn handle_stream_event(tx: &Sender<ProviderEvent>, event: StreamEvent) -> bool {
+    match event {
+        StreamEvent::ContentDelta(text) => tx.send(ProviderEvent::TextDelta(text)).is_ok(),
+        StreamEvent::ReasoningDelta(text) => tx.send(ProviderEvent::ThinkingDelta(text)).is_ok(),
+        StreamEvent::ReasoningDetailsDelta(_) => true,
+        StreamEvent::Done {
+            tool_calls, usage, ..
+        } => {
+            if let Some(usage) = usage {
+                let _ = tx.send(ProviderEvent::Usage(ProviderUsage {
+                    prompt_tokens: usage.prompt_tokens,
+                    completion_tokens: usage.completion_tokens,
+                    total_tokens: usage.total_tokens,
+                }));
+            }
+            for tc in tool_calls {
+                let _ = tx.send(ProviderEvent::ToolCall {
+                    call_id: tc.id().to_owned(),
+                    name: tc.name().to_owned(),
+                    arguments: tc.arguments_json().to_owned(),
+                });
+            }
+            let _ = tx.send(ProviderEvent::TurnComplete);
+            false
+        }
+        StreamEvent::Error(error) => {
+            let _ = tx.send(ProviderEvent::Error(format!("{error}")));
+            false
         }
     }
 }
@@ -81,35 +121,8 @@ impl LlmProvider for OpenRouterProvider {
                 .map_err(|e| format!("stream error: {e}"))?;
 
             while let Some(event) = stream.next().await {
-                match event {
-                    StreamEvent::ContentDelta(text) => {
-                        if tx.send(ProviderEvent::TextDelta(text)).is_err() {
-                            return Ok(());
-                        }
-                    }
-                    StreamEvent::ReasoningDelta(text) => {
-                        if tx.send(ProviderEvent::ThinkingDelta(text)).is_err() {
-                            return Ok(());
-                        }
-                    }
-                    StreamEvent::ReasoningDetailsDelta(_) => {
-                        // Structured reasoning details — skip for now
-                    }
-                    StreamEvent::Done { tool_calls, .. } => {
-                        for tc in tool_calls {
-                            let _ = tx.send(ProviderEvent::ToolCall {
-                                call_id: tc.id().to_owned(),
-                                name: tc.name().to_owned(),
-                                arguments: tc.arguments_json().to_owned(),
-                            });
-                        }
-                        let _ = tx.send(ProviderEvent::TurnComplete);
-                        return Ok(());
-                    }
-                    StreamEvent::Error(e) => {
-                        let _ = tx.send(ProviderEvent::Error(format!("{e}")));
-                        return Ok(());
-                    }
+                if !handle_stream_event(&tx, event) {
+                    return Ok(());
                 }
             }
 
@@ -138,6 +151,7 @@ impl LlmProvider for OpenRouterProvider {
             .map(|m| ModelInfo {
                 description: m.name.clone(),
                 id: m.id,
+                context_length: context_length_to_u32(m.context_length),
             })
             .collect();
         result.sort_by(|a, b| a.id.cmp(&b.id));
@@ -280,10 +294,12 @@ fn build_or_messages(config: &OpenAiConfig, messages: &[ProviderMessage]) -> Vec
 
 #[cfg(test)]
 mod tests {
-    use super::{build_chat_request, build_or_messages, collect_tool_calls};
+    use super::{build_chat_request, build_or_messages, collect_tool_calls, handle_stream_event};
     use crate::agent::tools::ToolSpec;
-    use crate::provider::ProviderMessage;
     use crate::provider::openai_compat::OpenAiConfig;
+    use crate::provider::{ProviderEvent, ProviderMessage, ProviderUsage};
+    use openrouter_rs::types::completion::ResponseUsage;
+    use openrouter_rs::types::stream::StreamEvent;
     use serde_json::json;
 
     fn test_config() -> OpenAiConfig {
@@ -423,6 +439,39 @@ mod tests {
         assert!(
             request.is_ok(),
             "request should build without tool metadata"
+        );
+    }
+
+    #[test]
+    fn done_event_emits_usage_before_turn_complete() {
+        let (tx, rx) = std::sync::mpsc::channel();
+
+        assert!(!handle_stream_event(
+            &tx,
+            StreamEvent::Done {
+                tool_calls: vec![],
+                finish_reason: None,
+                usage: Some(ResponseUsage {
+                    prompt_tokens: 11,
+                    completion_tokens: 7,
+                    total_tokens: 18,
+                }),
+                id: "resp-1".into(),
+                model: "openai/gpt-4o-mini".into(),
+            }
+        ));
+
+        assert_eq!(
+            rx.recv().expect("usage event should be emitted"),
+            ProviderEvent::Usage(ProviderUsage {
+                prompt_tokens: 11,
+                completion_tokens: 7,
+                total_tokens: 18,
+            })
+        );
+        assert_eq!(
+            rx.recv().expect("turn completion should follow usage"),
+            ProviderEvent::TurnComplete
         );
     }
 }

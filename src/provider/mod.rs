@@ -10,6 +10,7 @@ use std::sync::mpsc::Sender;
 pub struct ModelInfo {
     pub id: String,
     pub description: String,
+    pub context_length: Option<u32>,
 }
 
 /// Conversation history replayed into a provider pass.
