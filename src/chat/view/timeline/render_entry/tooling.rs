@@ -113,13 +113,14 @@ pub(super) fn render_bash_entry<'a>(
             ),
         ]));
     }
-    for output_line in shown {
-        lines.push(Line::from(vec![
-            Span::raw(INDENT),
-            Span::raw("  "),
-            Span::styled((*output_line).to_owned(), theme.dim_text),
-        ]));
-    }
+    let output_body = shown.join("\n");
+    lines.extend(super::markdown_body::render_markdown_block(
+        &output_body,
+        theme,
+        width.saturating_sub(2),
+        vec![Span::raw(INDENT), Span::raw("  ")],
+        vec![Span::raw(INDENT), Span::raw("  ")],
+    ));
 
     lines
 }

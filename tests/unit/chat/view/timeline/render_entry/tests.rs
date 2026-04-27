@@ -478,6 +478,21 @@ fn render_entry_renders_bash_warning_hint_thinking_and_code_block() {
 }
 
 #[test]
+fn bash_body_renders_markdown_without_literal_fences() {
+    let theme = crate::chat::theme::build_theme();
+    let bash_entry = TimelineEntry::bash("echo hello", "```diff\n- old\n+ new\n```");
+    let bash_text = lines_text(&render_entry(&bash_entry, &theme, 70)).join("\n");
+
+    assert!(bash_text.contains("$ echo hello"));
+    assert!(bash_text.contains("- old"));
+    assert!(bash_text.contains("+ new"));
+    assert!(
+        !bash_text.contains("```"),
+        "bash body should render markdown fences via shared helper"
+    );
+}
+
+#[test]
 fn extract_tool_subtitle_handles_known_keys_fallbacks_and_truncation() {
     assert_eq!(
         extract_tool_subtitle("read_file", r#"{"path":"src/main.rs"}"#),
