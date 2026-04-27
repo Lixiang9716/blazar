@@ -1,4 +1,5 @@
 use super::super::markdown::{MdSegment, normalize_markdown_paragraphs, split_code_fences};
+use super::fenced_code::render_fenced_code;
 use super::*;
 
 pub(super) fn render_markdown_block<'a>(
@@ -43,7 +44,7 @@ pub(super) fn render_markdown_block<'a>(
                 }
             }
             MdSegment::Code { lang, body: code } => {
-                let code_lines = super::message::render_fenced_code(lang, code, theme, text_width);
+                let code_lines = render_fenced_code(lang, code, theme, text_width);
                 for code_line in code_lines {
                     let mut result_spans = if is_first_line {
                         is_first_line = false;

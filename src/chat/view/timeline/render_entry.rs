@@ -1,6 +1,7 @@
 use super::*;
 
 mod common;
+mod fenced_code;
 mod markdown_body;
 mod message;
 mod status;
@@ -204,7 +205,7 @@ pub(super) fn render_fenced_code<'a>(
     theme: &ChatTheme,
     text_width: u16,
 ) -> Vec<Line<'a>> {
-    message::render_fenced_code(lang, code, theme, text_width)
+    fenced_code::render_fenced_code(lang, code, theme, text_width)
 }
 
 #[cfg(test)]

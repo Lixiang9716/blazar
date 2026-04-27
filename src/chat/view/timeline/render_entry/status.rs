@@ -1,5 +1,5 @@
 use super::super::text_wrap::push_wrapped_lines;
-use super::message::render_fenced_code;
+use super::fenced_code::render_fenced_code;
 use super::*;
 
 pub(super) fn render_warning_entry<'a>(
