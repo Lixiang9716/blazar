@@ -278,11 +278,13 @@ fn metadata_test_helpers_update_users_status_snapshot() {
 #[test]
 fn agent_usage_updated_event_updates_users_context_snapshot() {
     let mut app = new_test_app();
-    app.apply_agent_event_for_test(AgentEvent::UsageUpdated {
-        prompt_tokens: 120,
-        completion_tokens: 30,
-        total_tokens: 150,
-    });
+    app.apply_agent_event_for_test(AgentEvent::UsageUpdated(
+        crate::agent::protocol::AgentUsage {
+            prompt_tokens: 120,
+            completion_tokens: 30,
+            total_tokens: 150,
+        },
+    ));
 
     let snapshot = app.users_status_snapshot();
     assert_eq!(

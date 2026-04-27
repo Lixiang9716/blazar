@@ -92,11 +92,11 @@ impl ChatApp {
                 }
                 self.scroll_offset = u16::MAX;
             }
-            AgentEvent::UsageUpdated {
+            AgentEvent::UsageUpdated(crate::agent::protocol::AgentUsage {
                 prompt_tokens: _,
                 completion_tokens: _,
                 total_tokens,
-            } => {
+            }) => {
                 self.context_usage = Some(ContextUsage {
                     used_tokens: total_tokens,
                     max_tokens: self

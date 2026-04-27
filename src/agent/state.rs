@@ -74,7 +74,7 @@ impl AgentRuntimeState {
                 // Thinking deltas don't accumulate in state — only in timeline.
                 false
             }
-            AgentEvent::UsageUpdated { .. } => false,
+            AgentEvent::UsageUpdated(_) => false,
             AgentEvent::ToolCallStarted {
                 call_id,
                 tool_name,

@@ -47,11 +47,7 @@ pub enum AgentEvent {
     /// A chunk of chain-of-thought reasoning (thinking mode).
     ThinkingDelta { text: String },
     /// Updated provider token usage for the current turn.
-    UsageUpdated {
-        prompt_tokens: u32,
-        completion_tokens: u32,
-        total_tokens: u32,
-    },
+    UsageUpdated(AgentUsage),
     /// A tool call is about to execute.
     ToolCallStarted {
         call_id: String,

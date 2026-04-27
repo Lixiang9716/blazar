@@ -1,7 +1,7 @@
 use std::sync::mpsc::Sender;
 
 use super::RuntimeErrorKind;
-use crate::agent::protocol::AgentEvent;
+use crate::agent::protocol::{AgentEvent, AgentUsage};
 use crate::agent::tools::ToolKind;
 
 pub(crate) struct ToolCallStartMetadata {
@@ -46,11 +46,11 @@ impl TurnObserver for ChannelObserver<'_> {
     }
 
     fn on_usage(&self, usage: crate::provider::ProviderUsage) {
-        let _ = self.tx.send(AgentEvent::UsageUpdated {
+        let _ = self.tx.send(AgentEvent::UsageUpdated(AgentUsage {
             prompt_tokens: usage.prompt_tokens,
             completion_tokens: usage.completion_tokens,
             total_tokens: usage.total_tokens,
-        });
+        }));
     }
 
     fn on_tool_call_started(
