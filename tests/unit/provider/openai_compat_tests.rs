@@ -1,6 +1,6 @@
 use super::*;
 use crate::agent::tools::ToolSpec;
-use crate::provider::ModelInfo;
+use async_openai::types::models::Model;
 use serde_json::json;
 
 fn test_config() -> OpenAiConfig {
@@ -64,13 +64,17 @@ fn sample_messages() -> Vec<ProviderMessage> {
 }
 
 #[test]
-fn model_info_carries_context_length_when_available() {
-    let info = ModelInfo {
-        id: "openai/gpt-4o-mini".into(),
-        description: "gpt-4o-mini".into(),
-        context_length: Some(128000),
-    };
-    assert_eq!(info.context_length, Some(128000));
+fn openai_compat_model_mapping_leaves_context_length_unknown() {
+    let info = map_openai_model_info(Model {
+        id: "gpt-4o-mini".into(),
+        object: "model".into(),
+        created: 0,
+        owned_by: "openai".into(),
+    });
+
+    assert_eq!(info.id, "gpt-4o-mini");
+    assert_eq!(info.description, "gpt-4o-mini");
+    assert_eq!(info.context_length, None);
 }
 
 #[test]

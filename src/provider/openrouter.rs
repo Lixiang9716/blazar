@@ -55,6 +55,14 @@ fn context_length_to_u32(value: f64) -> Option<u32> {
     }
 }
 
+fn map_openrouter_model_info(model: openrouter_rs::api::models::Model) -> ModelInfo {
+    ModelInfo {
+        description: model.name.clone(),
+        id: model.id,
+        context_length: context_length_to_u32(model.context_length),
+    }
+}
+
 fn handle_stream_event(tx: &Sender<ProviderEvent>, event: StreamEvent) -> bool {
     match event {
         StreamEvent::ContentDelta(text) => tx.send(ProviderEvent::TextDelta(text)).is_ok(),
@@ -146,14 +154,8 @@ impl LlmProvider for OpenRouterProvider {
                 .map_err(|e| format!("list_models error: {e}"))
         })?;
 
-        let mut result: Vec<ModelInfo> = models
-            .into_iter()
-            .map(|m| ModelInfo {
-                description: m.name.clone(),
-                id: m.id,
-                context_length: context_length_to_u32(m.context_length),
-            })
-            .collect();
+        let mut result: Vec<ModelInfo> =
+            models.into_iter().map(map_openrouter_model_info).collect();
         result.sort_by(|a, b| a.id.cmp(&b.id));
         Ok(result)
     }
@@ -294,10 +296,14 @@ fn build_or_messages(config: &OpenAiConfig, messages: &[ProviderMessage]) -> Vec
 
 #[cfg(test)]
 mod tests {
-    use super::{build_chat_request, build_or_messages, collect_tool_calls, handle_stream_event};
+    use super::{
+        build_chat_request, build_or_messages, collect_tool_calls, handle_stream_event,
+        map_openrouter_model_info,
+    };
     use crate::agent::tools::ToolSpec;
     use crate::provider::openai_compat::OpenAiConfig;
     use crate::provider::{ProviderEvent, ProviderMessage, ProviderUsage};
+    use openrouter_rs::api::models::{Architecture, Model, Pricing, TopProvider};
     use openrouter_rs::types::completion::ResponseUsage;
     use openrouter_rs::types::stream::StreamEvent;
     use serde_json::json;
@@ -440,6 +446,40 @@ mod tests {
             request.is_ok(),
             "request should build without tool metadata"
         );
+    }
+
+    #[test]
+    fn openrouter_model_mapping_carries_context_length() {
+        let info = map_openrouter_model_info(Model {
+            id: "openai/gpt-4o-mini".into(),
+            name: "GPT-4o mini".into(),
+            created: 0.0,
+            description: "test".into(),
+            context_length: 128000.0,
+            architecture: Architecture {
+                modality: "text+image->text".into(),
+                tokenizer: "cl100k_base".into(),
+                instruct_type: None,
+            },
+            top_provider: TopProvider {
+                context_length: Some(128000.0),
+                max_completion_tokens: None,
+                is_moderated: false,
+            },
+            pricing: Pricing {
+                prompt: "0".into(),
+                completion: "0".into(),
+                image: None,
+                request: None,
+                input_cache_read: None,
+                input_cache_write: None,
+                web_search: None,
+                internal_reasoning: None,
+            },
+            per_request_limits: None,
+        });
+
+        assert_eq!(info.context_length, Some(128000));
     }
 
     #[test]

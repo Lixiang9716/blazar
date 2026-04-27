@@ -68,6 +68,14 @@ fn is_deepseek_backend(config: &OpenAiConfig) -> bool {
         || config.base_url.contains("api.deepseek.com")
 }
 
+fn map_openai_model_info(model: async_openai::types::models::Model) -> super::ModelInfo {
+    super::ModelInfo {
+        description: model.id.clone(),
+        id: model.id,
+        context_length: None,
+    }
+}
+
 impl OpenAiConfig {
     /// Load from `config/provider.json` relative to `repo_root`.
     ///
@@ -511,15 +519,8 @@ impl LlmProvider for OpenAiProvider {
                 .await
                 .map_err(|e| format!("list_models error: {e}"))
         })?;
-        let mut models: Vec<super::ModelInfo> = resp
-            .data
-            .into_iter()
-            .map(|m| super::ModelInfo {
-                description: m.id.clone(),
-                id: m.id,
-                context_length: None,
-            })
-            .collect();
+        let mut models: Vec<super::ModelInfo> =
+            resp.data.into_iter().map(map_openai_model_info).collect();
         models.sort_by(|a, b| a.id.cmp(&b.id));
         Ok(models)
     }
