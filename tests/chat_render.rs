@@ -652,3 +652,32 @@ fn chat_view_does_not_render_turn_separator_lines() {
         "timeline should not insert horizontal separator rows between entries"
     );
 }
+
+#[test]
+fn expanded_details_render_markdown_and_diff_blocks() {
+    use blazar::agent::protocol::AgentEvent;
+    use blazar::agent::tools::ToolKind;
+    use blazar::chat::input::InputAction;
+
+    let mut app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
+    app.apply_agent_event_for_test(AgentEvent::ToolCallStarted {
+        call_id: "call-1".into(),
+        tool_name: "read_file".into(),
+        kind: ToolKind::Local,
+        arguments: "{\"path\":\"Cargo.toml\"}".into(),
+        batch_id: 0,
+        replay_index: 0,
+        normalized_claims: Vec::new(),
+    });
+    app.apply_agent_event_for_test(AgentEvent::ToolCallCompleted {
+        call_id: "call-1".into(),
+        output: "```diff\n- old\n+ new\n```".into(),
+        is_error: false,
+    });
+    app.handle_action(InputAction::ToggleDetails);
+    let lines = render_to_lines_for_test(&mut app, 100, 24);
+    let text = lines.join("\n");
+    assert!(text.contains("- old"));
+    assert!(text.contains("+ new"));
+    assert!(!text.contains("```diff"));
+}
