@@ -123,3 +123,16 @@ pub fn available_models(repo_root: &str) -> Vec<ModelInfo> {
     .join()
     .unwrap_or_default()
 }
+
+pub fn resolve_model_context_length(repo_root: &str, model_id: &str) -> Option<u32> {
+    available_models(repo_root)
+        .into_iter()
+        .find(|model| model.id == model_id)
+        .and_then(|model| model.context_length)
+}
+
+pub fn configured_max_tokens(repo_root: &str) -> Option<u32> {
+    openai_compat::OpenAiConfig::load(repo_root)
+        .ok()
+        .map(|cfg| cfg.max_tokens)
+}

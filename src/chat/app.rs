@@ -53,6 +53,8 @@ pub struct ChatApp {
     workspace_root: PathBuf,
     /// Display name of the active model (e.g. "Qwen/Qwen3-8B").
     model_name: String,
+    model_context_max_tokens: Option<u32>,
+    config_max_tokens: Option<u32>,
     user_mode: UserMode,
     users_status_mode: StatusMode,
     users_command_scroll_offset: usize,
@@ -123,6 +125,9 @@ impl ChatApp {
         )?;
 
         let (provider, model_name) = crate::provider::load_provider(repo_path);
+        let config_max_tokens = crate::provider::configured_max_tokens(repo_path);
+        let model_context_max_tokens =
+            crate::provider::resolve_model_context_length(repo_path, &model_name);
         let runtime = AgentRuntime::new(provider, workspace_root.clone(), model_name.clone())?;
 
         Ok(Self {
@@ -143,6 +148,8 @@ impl ChatApp {
             debug_recorder: DebugRecorder::new(&workspace_root),
             workspace_root,
             model_name,
+            model_context_max_tokens,
+            config_max_tokens,
             git_pr_label,
             user_mode: UserMode::Auto,
             // All remaining fields are zero/empty/false/None defaults.
@@ -403,6 +410,10 @@ impl ChatApp {
         match self.agent_runtime.set_model(model) {
             Ok(()) => {
                 self.model_name = model.to_owned();
+                self.model_context_max_tokens = crate::provider::resolve_model_context_length(
+                    &self.workspace_root.to_string_lossy(),
+                    model,
+                );
                 self.timeline.push(TimelineEntry::hint(format!(
                     "Model switched to **{model}**"
                 )));

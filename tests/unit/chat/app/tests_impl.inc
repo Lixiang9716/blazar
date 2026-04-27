@@ -297,6 +297,50 @@ fn agent_usage_updated_event_updates_users_context_snapshot() {
 }
 
 #[test]
+fn usage_update_prefers_model_context_length_over_config_max() {
+    let mut app = new_test_app();
+    app.model_context_max_tokens = Some(128000);
+    app.config_max_tokens = Some(8192);
+    app.apply_agent_event_for_test(AgentEvent::UsageUpdated(
+        crate::agent::protocol::AgentUsage {
+            prompt_tokens: 50,
+            completion_tokens: 10,
+            total_tokens: 60,
+        },
+    ));
+
+    assert_eq!(
+        app.users_status_snapshot()
+            .context_usage
+            .expect("usage snapshot should be present")
+            .max_tokens,
+        128000
+    );
+}
+
+#[test]
+fn usage_update_falls_back_to_config_max_when_context_unknown() {
+    let mut app = new_test_app();
+    app.model_context_max_tokens = None;
+    app.config_max_tokens = Some(8192);
+    app.apply_agent_event_for_test(AgentEvent::UsageUpdated(
+        crate::agent::protocol::AgentUsage {
+            prompt_tokens: 50,
+            completion_tokens: 10,
+            total_tokens: 60,
+        },
+    ));
+
+    assert_eq!(
+        app.users_status_snapshot()
+            .context_usage
+            .expect("usage snapshot should be present")
+            .max_tokens,
+        8192
+    );
+}
+
+#[test]
 fn tool_call_started_updates_referenced_files_from_normalized_claims() {
     let mut app = new_test_app();
     app.apply_agent_event_for_test(AgentEvent::ToolCallStarted {

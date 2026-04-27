@@ -97,12 +97,13 @@ impl ChatApp {
                 completion_tokens: _,
                 total_tokens,
             }) => {
+                let resolved_max = self
+                    .model_context_max_tokens
+                    .or(self.config_max_tokens)
+                    .unwrap_or(0);
                 self.context_usage = Some(ContextUsage {
                     used_tokens: total_tokens,
-                    max_tokens: self
-                        .context_usage
-                        .map(|usage| usage.max_tokens)
-                        .unwrap_or(0),
+                    max_tokens: resolved_max,
                 });
                 self.scroll_offset = u16::MAX;
             }
