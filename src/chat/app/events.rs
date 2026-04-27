@@ -22,6 +22,11 @@ impl ChatApp {
     }
 
     #[doc(hidden)]
+    pub fn set_model_context_max_tokens_for_test(&mut self, max_tokens: Option<u32>) {
+        self.model_context_max_tokens = max_tokens;
+    }
+
+    #[doc(hidden)]
     pub fn set_pr_label_for_test(&mut self, pr_label: Option<String>) {
         self.git_pr_label = pr_label;
     }

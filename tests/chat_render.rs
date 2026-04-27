@@ -1,3 +1,4 @@
+use blazar::agent::protocol::{AgentEvent, AgentUsage};
 use blazar::chat::app::ChatApp;
 use blazar::chat::users_state::UsersLayoutPolicy;
 use blazar::chat::view::render::contracts::{
@@ -226,16 +227,21 @@ fn chat_view_keeps_input_and_model_visible_in_tight_heights() {
 }
 
 #[test]
-fn mode_row_renders_context_ratio_when_available() {
+fn mode_row_renders_provider_usage_ratio() {
     let mut app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
-    app.set_context_usage_for_test(1200, 8000);
+    app.set_model_context_max_tokens_for_test(Some(8000));
+    app.apply_agent_event_for_test(AgentEvent::UsageUpdated(AgentUsage {
+        prompt_tokens: 900,
+        completion_tokens: 100,
+        total_tokens: 1000,
+    }));
 
     let lines = render_to_lines_for_test(&mut app, 120, 24);
     let users_rows = &lines[lines.len().saturating_sub(5)..];
 
     assert!(
-        users_rows[4].contains("1200/8000 (15%)"),
-        "mode row should render context ratio when available"
+        users_rows[4].contains("1000/8000 (12%)"),
+        "mode row should render provider usage ratio when available"
     );
 }
 

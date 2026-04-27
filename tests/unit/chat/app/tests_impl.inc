@@ -345,11 +345,11 @@ fn usage_update_prefers_model_context_length_over_config_max() {
     ));
 
     assert_eq!(
-        app.users_status_snapshot()
-            .context_usage
-            .expect("usage snapshot should be present")
-            .max_tokens,
-        128000
+        app.users_status_snapshot().context_usage,
+        Some(ContextUsage {
+            used_tokens: 60,
+            max_tokens: 128000,
+        })
     );
 }
 
@@ -367,11 +367,11 @@ fn usage_update_falls_back_to_config_max_when_context_unknown() {
     ));
 
     assert_eq!(
-        app.users_status_snapshot()
-            .context_usage
-            .expect("usage snapshot should be present")
-            .max_tokens,
-        8192
+        app.users_status_snapshot().context_usage,
+        Some(ContextUsage {
+            used_tokens: 60,
+            max_tokens: 8192,
+        })
     );
 }
 
