@@ -1,6 +1,5 @@
 ---
 source: tests/chat_render_snapshot.rs
-assertion_line: 11
 expression: "lines.join(\"\\n\")"
 ---
   ● Describe a task to get started.                         
@@ -18,8 +17,8 @@ expression: "lines.join(\"\\n\")"
                                                             
                                                             
                                                             
-                                                            
 ~/blazar · main                                             
+────────────────────────────────────────────────────────────
 > Describe a task or ask a question…                        
 ────────────────────────────────────────────────────────────
 AUTO                                          echo · ctx n/a

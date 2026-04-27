@@ -51,7 +51,7 @@ fn top_panel_renders_only_path_and_branch_in_normal_mode() {
         max_command_window_size: 6,
     };
     let lines = render_to_lines_for_test_with_users_policy(&mut app, 130, 24, policy);
-    let users_rows = &lines[lines.len().saturating_sub(5)..];
+    let users_rows = &lines[lines.len().saturating_sub(6)..];
 
     assert!(
         users_rows[0].contains("~/blazar") && users_rows[0].contains("main"),
@@ -73,7 +73,7 @@ fn users_area_renders_top_input_model_with_separator() {
         max_command_window_size: 6,
     };
     let lines = render_to_lines_for_test_with_users_policy(&mut app, 120, 24, policy);
-    let users_rows = &lines[lines.len().saturating_sub(6)..];
+    let users_rows = &lines[lines.len().saturating_sub(7)..];
 
     assert!(
         users_rows
@@ -82,11 +82,11 @@ fn users_area_renders_top_input_model_with_separator() {
         "top panel should show path + branch"
     );
     assert!(
-        users_rows[3].contains("─"),
-        "separator row should move according to policy-derived heights"
+        users_rows[2].contains("─") && users_rows[4].contains("─"),
+        "separator rows should bracket the input panel"
     );
     assert!(
-        users_rows[4].contains("AUTO") && users_rows[4].contains("echo"),
+        users_rows[5].contains("AUTO") && users_rows[5].contains("echo"),
         "model panel should land after policy-sized top/input/separator rows"
     );
 }
@@ -115,8 +115,12 @@ fn users_area_hides_separator_when_input_or_model_is_zero_height() {
     };
     let model_zero_lines = render_to_lines_for_test_with_users_policy(&mut app, 120, 8, model_zero);
     assert!(
-        model_zero_lines.iter().all(|line| !line.contains("─")),
-        "separator should stay hidden when model height is zero"
+        model_zero_lines
+            .iter()
+            .filter(|line| line.contains("─"))
+            .count()
+            == 1,
+        "top/input separator should still render when model height is zero"
     );
 }
 
@@ -142,10 +146,10 @@ fn mode_row_renders_context_ratio_when_available() {
     app.set_context_usage_for_test(1200, 8000);
 
     let lines = render_to_lines_for_test(&mut app, 120, 24);
-    let users_rows = &lines[lines.len().saturating_sub(4)..];
+    let users_rows = &lines[lines.len().saturating_sub(5)..];
 
     assert!(
-        users_rows[3].contains("1200/8000 (15%)"),
+        users_rows[4].contains("1200/8000 (15%)"),
         "mode row should render context ratio when available"
     );
 }
@@ -168,7 +172,7 @@ fn slash_command_window_scroll_changes_visible_items() {
         max_command_window_size: 3,
     };
     let initial = render_to_lines_for_test_with_users_policy(&mut app, 100, 18, policy);
-    let initial_rows = &initial[initial.len().saturating_sub(7)..];
+    let initial_rows = &initial[initial.len().saturating_sub(8)..];
     let initial_commands: Vec<&str> = initial_rows[1..4].iter().map(|line| line.trim()).collect();
 
     assert_eq!(initial_rows[0].trim(), "~/blazar · main");
@@ -178,7 +182,7 @@ fn slash_command_window_scroll_changes_visible_items() {
         app.handle_action(InputAction::ScrollDown);
     }
     let scrolled = render_to_lines_for_test_with_users_policy(&mut app, 100, 18, policy);
-    let scrolled_rows = &scrolled[scrolled.len().saturating_sub(7)..];
+    let scrolled_rows = &scrolled[scrolled.len().saturating_sub(8)..];
     let scrolled_commands: Vec<&str> = scrolled_rows[1..4].iter().map(|line| line.trim()).collect();
 
     assert!(
@@ -208,7 +212,7 @@ fn top_panel_caps_command_window_to_policy_max_items() {
         max_command_window_size: 3,
     };
     let lines = render_to_lines_for_test_with_users_policy(&mut app, 100, 18, policy);
-    let users_rows = &lines[lines.len().saturating_sub(7)..];
+    let users_rows = &lines[lines.len().saturating_sub(8)..];
 
     assert_eq!(users_rows[0].trim(), "~/blazar · main");
     assert!(users_rows[1].contains("/help"));
@@ -235,7 +239,7 @@ fn default_policy_caps_command_window_to_six_items() {
     )));
 
     let lines = render_to_lines_for_test(&mut app, 100, 18);
-    let users_rows = &lines[lines.len().saturating_sub(10)..];
+    let users_rows = &lines[lines.len().saturating_sub(11)..];
 
     assert!(users_rows[1].contains("/help"));
     assert!(users_rows[2].contains("/clear"));

@@ -1089,7 +1089,7 @@ fn slash_input_switches_to_inline_command_status_mode() {
         max_command_window_size: 3,
     };
     let lines = render_to_lines_for_test_with_users_policy(&mut app, 100, 18, policy);
-    let users_rows = &lines[lines.len().saturating_sub(7)..];
+    let users_rows = &lines[lines.len().saturating_sub(8)..];
 
     assert_eq!(users_rows[0].trim(), "~/blazar · main");
     assert_eq!(users_rows[1].trim(), "• /help");

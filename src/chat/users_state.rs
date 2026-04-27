@@ -55,7 +55,7 @@ impl UsersLayoutPolicy {
     }
 
     pub const fn total_height(self) -> u16 {
-        self.total_panel_height().saturating_add(1)
+        self.total_panel_height().saturating_add(2)
     }
 
     pub fn users_area_height(self, total_height: u16) -> u16 {
