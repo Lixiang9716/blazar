@@ -4,6 +4,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use log::warn;
 #[cfg(test)]
 use rusqlite::OpenFlags;
 use rusqlite::{Connection, Transaction, params};
@@ -71,6 +72,10 @@ impl PlanStore {
         Ok(self.plans_dir().join(format!("{plan_id}.json")))
     }
 
+    /// Persists plan session JSON as the source of truth.
+    ///
+    /// Index rows are derived cache data. Index sync failures are surfaced via
+    /// warning logs but do not fail the JSON write contract.
     pub(crate) fn save_session_json(&self, plan_id: &str, session: &PlanSession) -> io::Result<()> {
         let plans_dir = self.plans_dir();
         fs::create_dir_all(&plans_dir)?;
@@ -78,7 +83,9 @@ impl PlanStore {
             .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
         let plan_path = self.plan_json_path(plan_id)?;
         fs::write(plan_path, json)?;
-        self.sync_index_for_plan(plan_id)?;
+        if let Err(error) = self.sync_index_for_plan(plan_id) {
+            warn!("plan store: JSON saved for {plan_id}, index sync failed: {error}");
+        }
         Ok(())
     }
 
@@ -513,6 +520,53 @@ mod tests {
             ids,
             vec!["valid_plan"],
             "invalid stems should be ignored by list API"
+        );
+    }
+
+    #[test]
+    fn save_session_json_succeeds_when_index_sync_fails_and_rebuild_recovers() {
+        let workspace = TempWorkspace::new("plan-store-save-json-source-of-truth");
+        let store = PlanStore::for_workspace(workspace.path());
+        let plan_id = "recoverable-plan";
+        let session = store.create_session();
+
+        fs::create_dir_all(workspace.path().join(".blazar"))
+            .expect("blazar dir should be creatable");
+        fs::write(
+            workspace.path().join(".blazar/state"),
+            "block index dir creation",
+        )
+        .expect("state file should block index dir creation");
+
+        store
+            .save_session_json(plan_id, &session)
+            .expect("json save should succeed even if index sync fails");
+
+        let saved = store
+            .load_session_json(plan_id)
+            .expect("saved json should still load");
+        assert_eq!(saved, session, "json should remain source of truth");
+        assert_eq!(
+            store
+                .query_indexed_plans()
+                .expect("querying missing index should still succeed"),
+            Vec::<String>::new(),
+            "index should remain unsynced when state dir is blocked"
+        );
+
+        fs::remove_file(workspace.path().join(".blazar/state"))
+            .expect("blocking state file should be removable");
+        fs::create_dir_all(workspace.path().join(".blazar/state"))
+            .expect("state dir should be recreatable");
+
+        store
+            .rebuild_index_from_json()
+            .expect("rebuild should recover derived index from json");
+        assert_eq!(
+            store
+                .query_indexed_plans()
+                .expect("index should query after recovery"),
+            vec![plan_id.to_string()]
         );
     }
 
