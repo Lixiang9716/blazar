@@ -1963,7 +1963,7 @@ fn picker_submit_regular_command_and_navigation_actions_work() {
     assert!(
         app.timeline
             .iter()
-            .any(|entry| entry.actor == Actor::User && entry.body == "/help")
+            .any(|entry| entry.body.contains("Command reference"))
     );
 }
 

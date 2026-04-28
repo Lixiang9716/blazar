@@ -8,11 +8,11 @@ use crate::chat::commands::plugin::{
 };
 use crate::chat::commands::types::{CommandExecFuture, CommandResult, CommandSpec, PaletteCommand};
 
-struct HelpCommand {
+struct LogCommand {
     spec: CommandSpec,
 }
 
-impl PaletteCommand for HelpCommand {
+impl PaletteCommand for LogCommand {
     fn spec(&self) -> &CommandSpec {
         &self.spec
     }
@@ -24,9 +24,9 @@ impl PaletteCommand for HelpCommand {
     ) -> CommandExecFuture<'a> {
         Box::pin(async move {
             ctx.app
-                .push_system_hint("Command reference and keyboard shortcuts available");
+                .push_system_hint("Application logs viewer coming soon");
             Ok(CommandResult {
-                summary: "Help information displayed".to_owned(),
+                summary: "Log view displayed".to_owned(),
             })
         })
     }
@@ -34,13 +34,13 @@ impl PaletteCommand for HelpCommand {
 
 inventory::submit! {
     BuiltinCommandDescriptor {
-        name: "/help",
+        name: "/log",
         profiles: BuiltinCommandProfiles::Interactive,
         build: |_ctx: &CommandBuildContext| {
-            Arc::new(HelpCommand {
+            Arc::new(LogCommand {
                 spec: CommandSpec {
-                    name: "/help".to_owned(),
-                    description: "Show available commands and shortcuts".to_owned(),
+                    name: "/log".to_owned(),
+                    description: "Show application logs".to_owned(),
                     args_schema: json!({ "type": "object" }),
                 },
             })

@@ -8,11 +8,11 @@ use crate::chat::commands::plugin::{
 };
 use crate::chat::commands::types::{CommandExecFuture, CommandResult, CommandSpec, PaletteCommand};
 
-struct HelpCommand {
+struct AgentsCommand {
     spec: CommandSpec,
 }
 
-impl PaletteCommand for HelpCommand {
+impl PaletteCommand for AgentsCommand {
     fn spec(&self) -> &CommandSpec {
         &self.spec
     }
@@ -23,10 +23,9 @@ impl PaletteCommand for HelpCommand {
         _args: serde_json::Value,
     ) -> CommandExecFuture<'a> {
         Box::pin(async move {
-            ctx.app
-                .push_system_hint("Command reference and keyboard shortcuts available");
+            ctx.app.push_system_hint("Agent status display coming soon");
             Ok(CommandResult {
-                summary: "Help information displayed".to_owned(),
+                summary: "Agent information displayed".to_owned(),
             })
         })
     }
@@ -34,13 +33,13 @@ impl PaletteCommand for HelpCommand {
 
 inventory::submit! {
     BuiltinCommandDescriptor {
-        name: "/help",
+        name: "/agents",
         profiles: BuiltinCommandProfiles::Interactive,
         build: |_ctx: &CommandBuildContext| {
-            Arc::new(HelpCommand {
+            Arc::new(AgentsCommand {
                 spec: CommandSpec {
-                    name: "/help".to_owned(),
-                    description: "Show available commands and shortcuts".to_owned(),
+                    name: "/agents".to_owned(),
+                    description: "List running background agents".to_owned(),
                     args_schema: json!({ "type": "object" }),
                 },
             })
