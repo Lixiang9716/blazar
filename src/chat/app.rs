@@ -590,18 +590,56 @@ fn parse_plan_command_dispatch(trimmed: &str) -> Option<(String, serde_json::Val
     let first_token = request_tokens.next()?;
     if first_token == "--continue" {
         let continue_id = request_tokens.next().unwrap_or("").trim();
-        let goal = request_tokens
-            .collect::<Vec<_>>()
-            .join(" ")
-            .trim()
-            .to_owned();
+        let remaining_tokens = request_tokens.collect::<Vec<_>>();
         let mut args = serde_json::Map::new();
         args.insert(
             "continue_id".to_owned(),
             serde_json::Value::String(continue_id.to_owned()),
         );
-        if !goal.is_empty() {
-            args.insert("goal".to_owned(), serde_json::Value::String(goal));
+
+        if let Some(first_remaining) = remaining_tokens.first() {
+            if !first_remaining.starts_with("--") {
+                let goal = remaining_tokens.join(" ").trim().to_owned();
+                if !goal.is_empty() {
+                    args.insert("goal".to_owned(), serde_json::Value::String(goal));
+                }
+            } else {
+                let mut idx = 0;
+                while idx < remaining_tokens.len() {
+                    let flag = remaining_tokens[idx];
+                    idx += 1;
+                    match flag {
+                        "--goal" => {
+                            if idx >= remaining_tokens.len() {
+                                return None;
+                            }
+                            let start = idx;
+                            while idx < remaining_tokens.len()
+                                && !remaining_tokens[idx].starts_with("--")
+                            {
+                                idx += 1;
+                            }
+                            let goal = remaining_tokens[start..idx].join(" ").trim().to_owned();
+                            if goal.is_empty() {
+                                return None;
+                            }
+                            args.insert("goal".to_owned(), serde_json::Value::String(goal));
+                        }
+                        "--review" => {
+                            let decision = remaining_tokens.get(idx)?.trim();
+                            if decision.is_empty() {
+                                return None;
+                            }
+                            args.insert(
+                                "review".to_owned(),
+                                serde_json::Value::String(decision.to_owned()),
+                            );
+                            idx += 1;
+                        }
+                        _ => return None,
+                    }
+                }
+            }
         }
 
         return Some(("/plan".to_owned(), serde_json::Value::Object(args)));

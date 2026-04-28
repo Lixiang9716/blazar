@@ -2556,6 +2556,54 @@ fn build_pending_turn_parses_runtime_and_local_command_kinds() {
 }
 
 #[test]
+fn composer_plan_continue_with_review_flag_maps_to_command_args() {
+    let registry =
+        crate::chat::commands::CommandRegistry::with_builtins().expect("bootstrap built-ins");
+    let (name, args) =
+        parse_composer_command_dispatch("/plan --continue plan-123 --review revise", &registry)
+            .expect("composer parser should dispatch /plan continuation");
+
+    assert_eq!(name, "/plan");
+    assert_eq!(
+        args.get("continue_id").and_then(serde_json::Value::as_str),
+        Some("plan-123")
+    );
+    assert_eq!(
+        args.get("review").and_then(serde_json::Value::as_str),
+        Some("revise")
+    );
+    assert!(
+        args.get("goal").is_none(),
+        "review continuation should not fabricate a goal argument"
+    );
+}
+
+#[test]
+fn composer_plan_continue_with_goal_flag_maps_to_command_args() {
+    let registry =
+        crate::chat::commands::CommandRegistry::with_builtins().expect("bootstrap built-ins");
+    let (name, args) = parse_composer_command_dispatch(
+        "/plan --continue plan-456 --goal finish composer dispatch",
+        &registry,
+    )
+    .expect("composer parser should dispatch /plan continuation");
+
+    assert_eq!(name, "/plan");
+    assert_eq!(
+        args.get("continue_id").and_then(serde_json::Value::as_str),
+        Some("plan-456")
+    );
+    assert_eq!(
+        args.get("goal").and_then(serde_json::Value::as_str),
+        Some("finish composer dispatch")
+    );
+    assert!(
+        args.get("review").is_none(),
+        "goal continuation should not fabricate a review argument"
+    );
+}
+
+#[test]
 fn agent_runtime_implements_runtime_port_trait() {
     fn assert_impl<T: crate::chat::runtime_port::AgentRuntimePort>() {}
     // compile-time check that AgentRuntime implements the runtime port trait

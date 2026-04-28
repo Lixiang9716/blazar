@@ -278,6 +278,59 @@ async fn execute_plan_command_continue_id_handles_review_transitions() {
 }
 
 #[tokio::test]
+async fn execute_plan_command_does_not_replay_review_decision_recorded_outside_review_phase() {
+    let workspace = create_unique_test_workspace("plan_review_stale_replay");
+    let mut app = ChatApp::new_for_test(workspace.to_str().unwrap()).expect("app");
+
+    let continue_id = "plan-review-stale";
+    write_plan_json(
+        &workspace,
+        continue_id,
+        json!({
+            "id": continue_id,
+            "phase": "ExecuteStep",
+            "status": "executing",
+            "goal": "ship segmented workflow",
+            "current_step": 0,
+            "steps": [
+                {"title": "step-1", "status": "pending"},
+                {"title": "step-2", "status": "pending"}
+            ],
+            "events": []
+        }),
+    );
+
+    execute_command_for_test(
+        &mut app,
+        "/plan",
+        json!({"continue_id": continue_id, "review": "revise"}),
+    )
+    .await
+    .expect("execute step continuation should execute");
+    let after_execute_step = read_plan_json(&workspace, continue_id);
+    assert_eq!(
+        after_execute_step
+            .get("phase")
+            .and_then(serde_json::Value::as_str),
+        Some("Review")
+    );
+
+    execute_command_for_test(&mut app, "/plan", json!({"continue_id": continue_id}))
+        .await
+        .expect("review continuation should execute");
+    let after_review = read_plan_json(&workspace, continue_id);
+    assert_eq!(
+        after_review
+            .get("phase")
+            .and_then(serde_json::Value::as_str),
+        Some("ExecuteStep"),
+        "review decisions supplied outside the Review phase must not be replayed later"
+    );
+
+    let _ = std::fs::remove_dir_all(&workspace);
+}
+
+#[tokio::test]
 async fn execute_plan_command_rejects_invalid_args() {
     let mut app = ChatApp::new_for_test(REPO_ROOT).expect("app");
 

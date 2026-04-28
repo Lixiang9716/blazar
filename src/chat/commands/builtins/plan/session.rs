@@ -301,8 +301,7 @@ impl PlanSession {
         }
     }
 
-    #[cfg(test)]
-    fn phase(&self) -> PlanPhase {
+    pub(super) fn phase(&self) -> PlanPhase {
         self.phase
     }
 

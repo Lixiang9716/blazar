@@ -61,7 +61,9 @@ impl PaletteCommand for PlanCommand {
             if let Some(goal) = parsed.goal {
                 session.set_goal(goal);
             }
-            if let Some(review_decision) = parsed.review {
+            if let Some(review_decision) = parsed.review
+                && session.phase() == PlanPhase::Review
+            {
                 session.record_review_decision(review_decision);
             }
 
