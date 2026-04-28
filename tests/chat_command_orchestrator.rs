@@ -278,6 +278,76 @@ async fn execute_plan_command_continue_id_handles_review_transitions() {
             .and_then(serde_json::Value::as_str),
         Some("DraftStep")
     );
+    execute_command_for_test(&mut app, "/plan", json!({"continue_id": revise_id}))
+        .await
+        .expect("revise continuation should draft a replacement micro-step");
+    let drafted_revise = read_plan_json(&workspace, revise_id);
+    let drafted_steps = drafted_revise
+        .get("steps")
+        .and_then(serde_json::Value::as_array)
+        .expect("drafted revise plan should have steps");
+    assert_eq!(
+        drafted_revise
+            .get("phase")
+            .and_then(serde_json::Value::as_str),
+        Some("FinalizePlan")
+    );
+    assert_eq!(
+        drafted_steps.len(),
+        2,
+        "revise should prepare a newly drafted micro-step"
+    );
+    assert_eq!(
+        drafted_revise
+            .get("current_step")
+            .and_then(serde_json::Value::as_u64),
+        Some(1)
+    );
+    assert_eq!(
+        drafted_steps
+            .get(1)
+            .and_then(|step| step.get("status"))
+            .and_then(serde_json::Value::as_str),
+        Some("pending")
+    );
+
+    execute_command_for_test(&mut app, "/plan", json!({"continue_id": revise_id}))
+        .await
+        .expect("revise continuation should stage execution for replacement micro-step");
+    let execute_ready_revise = read_plan_json(&workspace, revise_id);
+    assert_eq!(
+        execute_ready_revise
+            .get("phase")
+            .and_then(serde_json::Value::as_str),
+        Some("ExecuteStep")
+    );
+    assert_eq!(
+        execute_ready_revise
+            .get("current_step")
+            .and_then(serde_json::Value::as_u64),
+        Some(1)
+    );
+
+    execute_command_for_test(&mut app, "/plan", json!({"continue_id": revise_id}))
+        .await
+        .expect("revise continuation should execute the newly drafted step");
+    let executed_revise = read_plan_json(&workspace, revise_id);
+    assert_eq!(
+        executed_revise
+            .get("phase")
+            .and_then(serde_json::Value::as_str),
+        Some("Review")
+    );
+    assert_eq!(
+        executed_revise
+            .get("steps")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|steps| steps.get(1))
+            .and_then(|step| step.get("status"))
+            .and_then(serde_json::Value::as_str),
+        Some("done"),
+        "newly drafted revise step should be executed"
+    );
 
     let cancel_id = "plan-review-cancel";
     write_plan_json(

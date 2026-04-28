@@ -879,6 +879,36 @@ fn send_message_queues_when_agent_busy_without_immediate_timeline_insert() {
 }
 
 #[test]
+fn send_message_queues_plan_continue_as_command_when_busy() {
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+    app.apply_agent_event_for_test(AgentEvent::TurnStarted {
+        turn_id: "busy-turn".into(),
+    });
+    assert!(app.agent_state.is_busy());
+
+    app.send_message("/plan --continue plan-123 --review revise");
+
+    assert_eq!(app.pending_messages.len(), 1);
+    let queued = &app.pending_messages[0];
+    assert_eq!(queued.user_text, "/plan --continue plan-123 --review revise");
+    match &queued.dispatch {
+        super::PendingDispatch::Command { name, args } => {
+            assert_eq!(name, "/plan");
+            assert_eq!(
+                args.get("continue_id").and_then(serde_json::Value::as_str),
+                Some("plan-123")
+            );
+            assert_eq!(
+                args.get("review").and_then(serde_json::Value::as_str),
+                Some("revise")
+            );
+        }
+        other => panic!("expected queued command dispatch, got {other:?}"),
+    }
+}
+
+#[test]
 fn queued_user_texts_for_render_reflects_pending_queue_fifo() {
     let repo_path = env!("CARGO_MANIFEST_DIR");
     let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");

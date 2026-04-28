@@ -368,6 +368,41 @@ fn chat_runtime_send_message_plan_continue_rebuilds_missing_index() {
 }
 
 #[test]
+fn chat_runtime_busy_queue_plan_continue_runs_command_after_turn_completes() {
+    let workspace = create_unique_test_workspace("send_message_busy_plan_continue");
+    let mut app = ChatApp::new_for_test(workspace.to_str().unwrap()).expect("test app");
+    app.send_message("/plan queue-safe continuation");
+    let plan_id = extract_continue_plan_id(&app.composer_text()).to_owned();
+
+    app.apply_agent_event_for_test(blazar::agent::protocol::AgentEvent::TurnStarted {
+        turn_id: "busy-turn".into(),
+    });
+    app.send_message(&format!("/plan --continue {plan_id}"));
+
+    let before = read_plan_json(&workspace, &plan_id);
+    assert_eq!(
+        before.get("phase").and_then(serde_json::Value::as_str),
+        Some("DraftStep")
+    );
+
+    app.apply_agent_event_for_test(blazar::agent::protocol::AgentEvent::TurnComplete);
+
+    let after = read_plan_json(&workspace, &plan_id);
+    assert_eq!(
+        after.get("phase").and_then(serde_json::Value::as_str),
+        Some("FinalizePlan"),
+        "queued /plan --continue should execute command path after busy turn drains"
+    );
+    assert!(
+        app.composer_text()
+            .starts_with(&format!("/plan --continue {plan_id}")),
+        "plan continuation command should prefill composer after queued command executes"
+    );
+
+    let _ = std::fs::remove_dir_all(&workspace);
+}
+
+#[test]
 fn chat_runtime_does_not_treat_planner_as_plan_command() {
     let mut app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
     assert_submits_as_plain_message(&mut app, "/planner");

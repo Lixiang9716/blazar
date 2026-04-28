@@ -30,16 +30,24 @@ impl ChatApp {
         }
 
         if allow_command_dispatch
-            && !self.agent_state.is_busy()
             && let Some((name, args)) =
                 parse_composer_command_dispatch(trimmed, &self.command_registry)
         {
-            if let Err(err) = self.execute_palette_command_sync(&name, args) {
-                self.timeline
-                    .push(TimelineEntry::warning(format!("Command failed: {err}")));
-                self.scroll_offset = u16::MAX;
+            if self.agent_state.is_busy() {
+                if name == "/plan" {
+                    self.has_user_sent = true;
+                    self.pending_messages
+                        .push_back(build_pending_command_turn(trimmed, &name, args));
+                    return;
+                }
+            } else {
+                if let Err(err) = self.execute_palette_command_sync(&name, args) {
+                    self.timeline
+                        .push(TimelineEntry::warning(format!("Command failed: {err}")));
+                    self.scroll_offset = u16::MAX;
+                }
+                return;
             }
-            return;
         }
 
         let turn = build_pending_turn_for_mode(trimmed, self.user_mode);
@@ -125,6 +133,14 @@ impl ChatApp {
                 true
             }
             PendingDispatch::DiscoverAgents => self.refresh_acp_agents(),
+            PendingDispatch::Command { name, args } => {
+                if let Err(err) = self.execute_palette_command_sync(&name, args) {
+                    self.timeline
+                        .push(TimelineEntry::warning(format!("Command failed: {err}")));
+                    self.scroll_offset = u16::MAX;
+                }
+                false
+            }
         };
 
         self.scroll_offset = u16::MAX;
@@ -191,6 +207,23 @@ pub(super) fn build_pending_turn_for_mode(input: &str, user_mode: UserMode) -> P
             kind: TurnKind::Chat,
         },
         timeline_inserted: false,
+    }
+}
+
+pub(super) fn build_pending_command_turn(
+    input: &str,
+    name: &str,
+    args: serde_json::Value,
+) -> PendingTurn {
+    PendingTurn {
+        user_text: input.trim().to_owned(),
+        dispatch: PendingDispatch::Command {
+            name: name.to_owned(),
+            args,
+        },
+        // Command dispatch should preserve command intent but avoid creating
+        // synthetic user timeline entries when finally drained.
+        timeline_inserted: true,
     }
 }
 

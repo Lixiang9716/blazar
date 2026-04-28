@@ -146,7 +146,22 @@ impl PlanSession {
                         });
                     }
                     if self.current_step.is_none() {
-                        self.current_step = Some(0);
+                        if self.steps.iter().all(|step| step.status == "done") {
+                            let goal = self.goal.as_deref().map(str::trim).unwrap_or("goal");
+                            self.steps.push(PlanStep {
+                                title: format!(
+                                    "Deliver: {goal} (revised {})",
+                                    self.steps.len() + 1
+                                ),
+                                status: "pending".to_owned(),
+                            });
+                            self.current_step = Some((self.steps.len() - 1) as u32);
+                        } else {
+                            self.current_step = self
+                                .next_pending_step_index()
+                                .map(|index| index as u32)
+                                .or(Some(0));
+                        }
                     }
                     self.phase = PlanPhase::FinalizePlan;
                     self.status = "executing".to_owned();
@@ -620,5 +635,48 @@ mod tests {
         assert_eq!(revise_decision.phase, PlanPhase::DraftStep);
         assert_eq!(cancel_decision.phase, PlanPhase::Done);
         assert_eq!(cancel.status, "cancelled");
+    }
+
+    #[test]
+    fn revise_path_drafts_new_step_and_executes_that_step() {
+        let mut session = PlanSession {
+            id: Some("plan-review-revise-progress".to_owned()),
+            phase: PlanPhase::Review,
+            status: "executing".to_owned(),
+            goal: Some("ship segmented plan".to_owned()),
+            current_step: Some(0),
+            steps: vec![super::PlanStep {
+                title: "execute first step".to_owned(),
+                status: "done".to_owned(),
+            }],
+            events: vec![super::PlanEvent {
+                kind: "review_decision".to_owned(),
+                summary: "revise".to_owned(),
+            }],
+        };
+
+        let revise = session.run_one_segment();
+        assert_eq!(revise.phase, PlanPhase::DraftStep);
+
+        let draft = session.run_one_segment();
+        assert_eq!(draft.phase, PlanPhase::FinalizePlan);
+        assert_eq!(
+            session.steps.len(),
+            2,
+            "revise should draft a new micro-step"
+        );
+        assert_eq!(session.current_step, Some(1));
+        assert_eq!(session.steps[1].status, "pending");
+
+        let finalize = session.run_one_segment();
+        assert_eq!(finalize.phase, PlanPhase::ExecuteStep);
+        assert_eq!(session.current_step, Some(1));
+
+        let execute = session.run_one_segment();
+        assert_eq!(execute.phase, PlanPhase::Review);
+        assert_eq!(
+            session.steps[1].status, "done",
+            "execution after revise should complete the drafted micro-step"
+        );
     }
 }

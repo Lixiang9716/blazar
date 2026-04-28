@@ -78,16 +78,20 @@ enum TurnKind {
     Compact,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 enum PendingDispatch {
     Runtime {
         runtime_prompt: String,
         kind: TurnKind,
     },
     DiscoverAgents,
+    Command {
+        name: String,
+        args: serde_json::Value,
+    },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 struct PendingTurn {
     user_text: String,
     dispatch: PendingDispatch,
