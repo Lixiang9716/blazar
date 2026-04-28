@@ -19,7 +19,9 @@ impl ChatApp {
     pub(crate) fn open_model_picker(&mut self) {
         let current = &self.model_name;
         let repo_str = self.workspace_root.to_string_lossy();
-        let model_items: Vec<PickerItem> = crate::provider::available_models(&repo_str)
+        let model_items: Vec<PickerItem> = self
+            .model_metadata
+            .fetch_available_models(&repo_str)
             .into_iter()
             .map(|m| {
                 let label = if m.id == *current {

@@ -5,10 +5,11 @@
 //! picker without blocking the event loop.
 
 use std::path::Path;
+use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::{Duration, Instant};
 
-use crate::provider::ModelInfo;
+use crate::provider::{ModelInfo, ProviderConfigPort};
 
 #[derive(Debug, Clone)]
 pub(super) struct ModelMetadataRefreshResult {
@@ -21,6 +22,7 @@ pub(crate) struct ModelMetadataState {
     pub(super) available_models: Vec<ModelInfo>,
     pub(super) model_context_max_tokens: Option<u32>,
     pub(super) config_max_tokens: Option<u32>,
+    provider_config: Arc<dyn ProviderConfigPort>,
     tx: Sender<ModelMetadataRefreshResult>,
     rx: Receiver<ModelMetadataRefreshResult>,
     handle: Option<std::thread::JoinHandle<()>>,
@@ -35,12 +37,16 @@ pub(crate) struct ModelMetadataState {
 }
 
 impl ModelMetadataState {
-    pub(super) fn new(config_max_tokens: Option<u32>) -> Self {
+    pub(super) fn new(
+        config_max_tokens: Option<u32>,
+        provider_config: Arc<dyn ProviderConfigPort>,
+    ) -> Self {
         let (tx, rx) = std::sync::mpsc::channel();
         Self {
             available_models: Vec::new(),
             model_context_max_tokens: None,
             config_max_tokens,
+            provider_config,
             tx,
             rx,
             handle: None,
@@ -59,11 +65,10 @@ impl ModelMetadataState {
     /// schedules a background fetch for fresh data.
     pub(super) fn on_model_changed(&mut self, workspace_root: &Path, model_name: &str) {
         let repo_root = workspace_root.to_string_lossy();
-        self.config_max_tokens = crate::provider::configured_max_tokens(&repo_root);
-        self.model_context_max_tokens = crate::provider::resolve_model_context_length_from_models(
-            &self.available_models,
-            model_name,
-        );
+        self.config_max_tokens = self.provider_config.configured_max_tokens(&repo_root);
+        self.model_context_max_tokens = self
+            .provider_config
+            .resolve_model_context_length(&self.available_models, model_name);
         self.schedule_refresh(workspace_root);
     }
 
@@ -80,6 +85,11 @@ impl ModelMetadataState {
     /// Resolved context-length limit: provider model limit or config override.
     pub(super) fn resolved_context_limit(&self) -> Option<u32> {
         self.model_context_max_tokens.or(self.config_max_tokens)
+    }
+
+    /// Live-fetch available models through the provider config port.
+    pub(super) fn fetch_available_models(&self, repo_root: &str) -> Vec<ModelInfo> {
+        self.provider_config.available_models(repo_root)
     }
 
     // ── private ─────────────────────────────────────────────────────
@@ -168,11 +178,9 @@ impl ModelMetadataState {
             }
             self.available_models = result.available_models;
             self.config_max_tokens = result.config_max_tokens;
-            self.model_context_max_tokens =
-                crate::provider::resolve_model_context_length_from_models(
-                    &self.available_models,
-                    model_name,
-                );
+            self.model_context_max_tokens = self
+                .provider_config
+                .resolve_model_context_length(&self.available_models, model_name);
             self.handle = None;
             self.in_flight = false;
             self.started_at = None;

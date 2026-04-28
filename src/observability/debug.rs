@@ -298,6 +298,43 @@ impl DebugRecorder {
     }
 }
 
+impl super::ObservabilityPort for DebugRecorder {
+    fn start_turn(&mut self, turn_id: &str, turn_kind: Option<&str>, queue_depth: usize) {
+        self.start_turn(turn_id, turn_kind, queue_depth);
+    }
+
+    fn record_event(
+        &mut self,
+        event_name: &str,
+        tool_name: Option<&str>,
+        call_id: Option<&str>,
+        error_kind: Option<&str>,
+        queue_depth: usize,
+        message: &str,
+    ) -> DebugEventSnapshot {
+        self.record_event(
+            event_name,
+            tool_name,
+            call_id,
+            error_kind,
+            queue_depth,
+            message,
+        )
+    }
+
+    fn finish_turn(&mut self, status: &str, error_kind: Option<&str>, error_message: Option<&str>) {
+        self.finish_turn(status, error_kind, error_message);
+    }
+
+    fn latest_turn_bundle(&self) -> Option<String> {
+        self.latest_turn_bundle()
+    }
+
+    fn status_summary(&self, pending_count: usize) -> String {
+        self.status_summary(pending_count)
+    }
+}
+
 fn timestamp_seconds() -> String {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)

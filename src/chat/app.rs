@@ -1,7 +1,7 @@
 use crate::agent::protocol::AgentEvent;
 use crate::agent::runtime::{AgentRuntime, AgentRuntimeError};
 use crate::agent::state::{ActiveToolStatus, AgentRuntimeState, TurnState};
-use crate::observability::debug::DebugRecorder;
+use crate::observability::ObservabilityPort;
 
 use crate::chat::input::InputAction;
 use crate::chat::model::{Actor, Author, ChatMessage, EntryKind, TimelineEntry, ToolCallStatus};
@@ -73,7 +73,7 @@ pub struct ChatApp {
     active_turn_title: Option<String>,
     thinking_action_name: Option<String>,
     current_turn_has_thinking_entry: bool,
-    debug_recorder: DebugRecorder,
+    debug_recorder: Box<dyn ObservabilityPort>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -127,7 +127,9 @@ impl ChatApp {
         )?;
 
         let (provider, model_name) = crate::provider::load_provider(repo_path);
-        let config_max_tokens = crate::provider::configured_max_tokens(repo_path);
+        let provider_config: std::sync::Arc<dyn crate::provider::ProviderConfigPort> =
+            std::sync::Arc::new(crate::provider::DefaultProviderConfig);
+        let config_max_tokens = provider_config.configured_max_tokens(repo_path);
         let runtime = AgentRuntime::new(provider, workspace_root.clone(), model_name.clone())?;
 
         Ok(Self {
@@ -142,10 +144,12 @@ impl ChatApp {
             theme_name: crate::chat::theme::DEFAULT_THEME.to_owned(),
             theme: crate::chat::theme::build_theme(),
             agent_runtime: Box::new(runtime),
-            debug_recorder: DebugRecorder::new(&workspace_root),
+            debug_recorder: Box::new(crate::observability::debug::DebugRecorder::new(
+                &workspace_root,
+            )),
             workspace_root,
             model_name,
-            model_metadata: ModelMetadataState::new(config_max_tokens),
+            model_metadata: ModelMetadataState::new(config_max_tokens, provider_config),
             git_pr_label,
             user_mode: UserMode::Auto,
             // All remaining fields are zero/empty/false/None defaults.

@@ -13,6 +13,37 @@ pub struct ModelInfo {
     pub context_length: Option<u32>,
 }
 
+/// Port abstraction for provider configuration queries.
+///
+/// Decouples model-metadata and UI layers from the concrete file-based
+/// provider config so that tests can supply canned data without
+/// thread-local hacks.
+pub trait ProviderConfigPort: Send + Sync {
+    /// Return models available from the configured provider.
+    fn available_models(&self, repo_root: &str) -> Vec<ModelInfo>;
+
+    /// Return the user-configured max_tokens from provider config.
+    fn configured_max_tokens(&self, repo_root: &str) -> Option<u32>;
+
+    /// Resolve context length for a specific model from a cached model list.
+    fn resolve_model_context_length(&self, models: &[ModelInfo], model_id: &str) -> Option<u32> {
+        resolve_model_context_length_from_models(models, model_id)
+    }
+}
+
+/// Default implementation that delegates to the module-level free functions.
+pub struct DefaultProviderConfig;
+
+impl ProviderConfigPort for DefaultProviderConfig {
+    fn available_models(&self, repo_root: &str) -> Vec<ModelInfo> {
+        available_models(repo_root)
+    }
+
+    fn configured_max_tokens(&self, repo_root: &str) -> Option<u32> {
+        configured_max_tokens(repo_root)
+    }
+}
+
 /// Conversation history replayed into a provider pass.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProviderMessage {
