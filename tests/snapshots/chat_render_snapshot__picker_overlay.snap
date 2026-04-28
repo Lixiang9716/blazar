@@ -2,21 +2,21 @@
 source: tests/chat_render_snapshot.rs
 expression: "lines.join(\"\\n\")"
 ---
-commands, Ctrl+O toggle details.             │              
   │       ███████████████████         Blazar uses AI. Check 
-for mistakes.                         │                     
+for mistakes.             │                                 
   │        ▀█▀▀▀▀▀▀▀▀▀▀▀▀▀█▀                                
-                                     │                      
+                         │                                  
   │          ▀▀▀▀▀▀▀▀▀▀▀▀▀                                  
-                                     │                      
+                         │                                  
   │                                                         
+                         │                                  
   ╭ Commands ──────────────────────────────────────╮        
   │› /agents  List running background agents       │        
   │  /clear  Clear the conversation history        │        
   │  /compact  Compact conversation context with lo│        
-  │  /config  Open configuration settings          │        
-  │  /context  Show current context window usage   │────────
-──│  /copy  Copy the last response to the clipboard│        
+  │  /config  Open configuration settings          │────────
+──│  /context  Show current context window usage   │        
+  │  /copy  Copy the last response to the clipboard│        
 ~/│  ▼ more                                        │        
 ──│↑↓ navigate · enter select · esc cancel  (1/24) │────────
 > ╰────────────────────────────────────────────────╯        
