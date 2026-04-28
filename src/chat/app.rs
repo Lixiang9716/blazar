@@ -443,9 +443,19 @@ impl ChatApp {
 
     pub fn submit_composer(&mut self) {
         let text = self.composer_text();
-        self.send_message(&text);
+        let trimmed = text.trim().to_owned();
         self.composer = new_composer();
         self.sync_users_status_from_composer();
+
+        if trimmed.is_empty() {
+            return;
+        }
+
+        if self.try_dispatch_composer_slash_command(&trimmed) {
+            return;
+        }
+
+        self.send_message(&trimmed);
     }
 
     pub(crate) fn sync_users_status_from_composer(&mut self) {
@@ -525,12 +535,80 @@ impl ChatApp {
     pub fn composer(&self) -> &TextArea<'static> {
         &self.composer
     }
+
+    fn try_dispatch_composer_slash_command(&mut self, trimmed: &str) -> bool {
+        if self.agent_state.is_busy() {
+            return false;
+        }
+
+        let Some((name, args)) = parse_composer_command_dispatch(trimmed, &self.command_registry)
+        else {
+            return false;
+        };
+
+        if let Err(err) = self.execute_palette_command_sync(&name, args) {
+            self.timeline
+                .push(TimelineEntry::warning(format!("Command failed: {err}")));
+            self.scroll_offset = u16::MAX;
+        }
+        true
+    }
 }
 
 fn new_composer() -> TextArea<'static> {
     let mut ta = TextArea::default();
     ta.set_cursor_line_style(ratatui_core::style::Style::default());
     ta
+}
+
+fn parse_composer_command_dispatch(
+    trimmed: &str,
+    registry: &crate::chat::commands::CommandRegistry,
+) -> Option<(String, serde_json::Value)> {
+    if trimmed == "/compact" || trimmed == "/plan" {
+        return None;
+    }
+
+    if registry.find(trimmed).is_some() {
+        return Some((trimmed.to_owned(), serde_json::json!({})));
+    }
+
+    parse_plan_command_dispatch(trimmed)
+}
+
+fn parse_plan_command_dispatch(trimmed: &str) -> Option<(String, serde_json::Value)> {
+    let request = trimmed.strip_prefix("/plan")?.trim();
+    if request.is_empty() {
+        return None;
+    }
+
+    if let Some(continue_tail) = request.strip_prefix("--continue") {
+        let continue_tail = continue_tail.trim();
+        let mut parts = continue_tail.splitn(2, char::is_whitespace);
+        let continue_id = parts.next().unwrap_or("").trim();
+        let goal = parts
+            .next()
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        let mut args = serde_json::Map::new();
+        args.insert(
+            "continue_id".to_owned(),
+            serde_json::Value::String(continue_id.to_owned()),
+        );
+        if let Some(goal) = goal {
+            args.insert(
+                "goal".to_owned(),
+                serde_json::Value::String(goal.to_owned()),
+            );
+        }
+
+        return Some(("/plan".to_owned(), serde_json::Value::Object(args)));
+    }
+
+    Some((
+        "/plan".to_owned(),
+        serde_json::json!({ "goal": request.to_owned() }),
+    ))
 }
 
 #[cfg(test)]
