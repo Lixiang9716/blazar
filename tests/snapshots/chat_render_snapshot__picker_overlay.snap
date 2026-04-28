@@ -11,12 +11,12 @@ for mistakes.                                         │
   │          ▀▀▀▀▀▀▀▀▀▀▀▀▀                                  
                                                      │      
   ╭ Commands ──────────────────────────────────────╮        
-  │› /help  Show available commands and shortcuts  │ │      
+  │› /agents  List running background agents       │ │      
   │  /clear  Clear the conversation history        │        
-  │  /copy  Copy the last response to the clipboard│ │      
-  │  /init  Generate a blazar-instructions.md file │        
-  │  /skills  List loaded skills and their status  │ │      
-  │  /model  Switch the active model               │────────
+  │  /compact  Compact conversation context        │ │      
+  │  /config  Open configuration settings          │        
+  │  /context  Show current context window usage   │ │      
+  │  /copy  Copy the last response to the clipboard│────────
 ~/│  ▼ more                                        │        
 ──│↑↓ navigate · enter select · esc cancel  (1/24) │────────
 > ╰────────────────────────────────────────────────╯        

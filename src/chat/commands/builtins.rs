@@ -3,8 +3,24 @@ use std::sync::Arc;
 use serde_json::json;
 
 use super::orchestrator::CommandContext;
+use super::plugin::{
+    BuiltinCommandDescriptor, BuiltinCommandProfiles, CommandBuildContext, CommandBuildProfile,
+    build_commands_from_descriptors, collect_builtin_descriptors,
+};
 use super::registry::CommandRegistry;
 use super::types::{CommandError, CommandExecFuture, CommandResult, CommandSpec, PaletteCommand};
+
+fn spec(name: &str, description: &str) -> CommandSpec {
+    CommandSpec {
+        name: name.to_owned(),
+        description: description.to_owned(),
+        args_schema: json!({ "type": "object" }),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Command implementations (single source of truth)
+// ---------------------------------------------------------------------------
 
 struct ForwardCommand {
     spec: CommandSpec,
@@ -122,65 +138,108 @@ impl PaletteCommand for ModelCommand {
     }
 }
 
-fn spec(name: &str, description: &str) -> CommandSpec {
-    CommandSpec {
-        name: name.to_owned(),
-        description: description.to_owned(),
-        args_schema: json!({ "type": "object" }),
+// ---------------------------------------------------------------------------
+// Inventory-backed built-in command registration (SINGLE SOURCE OF TRUTH)
+// ---------------------------------------------------------------------------
+
+macro_rules! register_forward_command {
+    ($name:literal, $description:literal) => {
+        inventory::submit! {
+            BuiltinCommandDescriptor {
+                name: $name,
+                profiles: BuiltinCommandProfiles::Interactive,
+                build: |_ctx: &CommandBuildContext| {
+                    Arc::new(ForwardCommand {
+                        spec: spec($name, $description),
+                    })
+                },
+            }
+        }
+    };
+}
+
+register_forward_command!("/help", "Show available commands and shortcuts");
+register_forward_command!("/clear", "Clear the conversation history");
+register_forward_command!("/copy", "Copy the last response to the clipboard");
+register_forward_command!("/init", "Generate a blazar-instructions.md file");
+register_forward_command!("/skills", "List loaded skills and their status");
+register_forward_command!("/mcp", "Manage MCP server configuration");
+register_forward_command!("/history", "Browse conversation history");
+register_forward_command!("/export", "Export conversation to file");
+register_forward_command!("/compact", "Compact conversation context");
+register_forward_command!("/config", "Open configuration settings");
+register_forward_command!("/tools", "List available tools");
+register_forward_command!("/agents", "List running background agents");
+register_forward_command!("/context", "Show current context window usage");
+register_forward_command!("/diff", "Show pending file changes");
+register_forward_command!("/git", "Show git repository status");
+register_forward_command!("/undo", "Undo last file change");
+register_forward_command!("/terminal", "Open a shell terminal");
+register_forward_command!("/debug", "Toggle debug overlay");
+register_forward_command!("/log", "Show application logs");
+register_forward_command!("/quit", "Exit Blazar");
+
+inventory::submit! {
+    BuiltinCommandDescriptor {
+        name: "/model",
+        profiles: BuiltinCommandProfiles::Interactive,
+        build: |_ctx: &CommandBuildContext| {
+            Arc::new(ModelCommand {
+                spec: spec("/model", "Switch the active model"),
+            })
+        },
     }
 }
 
-fn register_forward(
-    registry: &mut CommandRegistry,
-    name: &str,
-    description: &str,
-) -> Result<(), CommandError> {
-    registry.register(Arc::new(ForwardCommand {
-        spec: spec(name, description),
-    }))
+inventory::submit! {
+    BuiltinCommandDescriptor {
+        name: "/theme",
+        profiles: BuiltinCommandProfiles::Interactive,
+        build: |_ctx: &CommandBuildContext| {
+            Arc::new(ThemeCommand {
+                spec: spec("/theme", "Switch the color theme"),
+            })
+        },
+    }
 }
 
+inventory::submit! {
+    BuiltinCommandDescriptor {
+        name: "/plan",
+        profiles: BuiltinCommandProfiles::Interactive,
+        build: |_ctx: &CommandBuildContext| {
+            Arc::new(PlanCommand {
+                spec: spec("/plan", "Generate a plan with an auto-titled summary"),
+            })
+        },
+    }
+}
+
+inventory::submit! {
+    BuiltinCommandDescriptor {
+        name: "/discover-agents",
+        profiles: BuiltinCommandProfiles::Interactive,
+        build: |_ctx: &CommandBuildContext| {
+            Arc::new(DiscoverAgentsCommand {
+                spec: spec("/discover-agents", "Refresh discovered ACP agents"),
+            })
+        },
+    }
+}
+
+/// Compatibility shim for manual registration.
+///
+/// This function now consumes the same inventory-registered descriptors used by
+/// `CommandRegistry::with_builtins()`, ensuring a single source of truth.
 pub fn register_builtin_commands(registry: &mut CommandRegistry) -> Result<(), CommandError> {
-    register_forward(registry, "/help", "Show available commands and shortcuts")?;
-    register_forward(registry, "/clear", "Clear the conversation history")?;
-    register_forward(registry, "/copy", "Copy the last response to the clipboard")?;
-    register_forward(registry, "/init", "Generate a blazar-instructions.md file")?;
-    register_forward(registry, "/skills", "List loaded skills and their status")?;
+    let ctx = CommandBuildContext;
+    let descriptors = collect_builtin_descriptors(CommandBuildProfile::Interactive);
+    let commands = build_commands_from_descriptors(&descriptors, &ctx)
+        .map_err(CommandError::ExecutionFailed)?;
 
-    registry.register(Arc::new(ModelCommand {
-        spec: spec("/model", "Switch the active model"),
-    }))?;
-
-    register_forward(registry, "/mcp", "Manage MCP server configuration")?;
-
-    registry.register(Arc::new(ThemeCommand {
-        spec: spec("/theme", "Switch the color theme"),
-    }))?;
-
-    register_forward(registry, "/history", "Browse conversation history")?;
-
-    registry.register(Arc::new(PlanCommand {
-        spec: spec("/plan", "Generate a plan with an auto-titled summary"),
-    }))?;
-
-    register_forward(registry, "/export", "Export conversation to file")?;
-    register_forward(registry, "/compact", "Compact conversation context")?;
-    register_forward(registry, "/config", "Open configuration settings")?;
-    register_forward(registry, "/tools", "List available tools")?;
-    register_forward(registry, "/agents", "List running background agents")?;
-
-    registry.register(Arc::new(DiscoverAgentsCommand {
-        spec: spec("/discover-agents", "Refresh discovered ACP agents"),
-    }))?;
-
-    register_forward(registry, "/context", "Show current context window usage")?;
-    register_forward(registry, "/diff", "Show pending file changes")?;
-    register_forward(registry, "/git", "Show git repository status")?;
-    register_forward(registry, "/undo", "Undo last file change")?;
-    register_forward(registry, "/terminal", "Open a shell terminal")?;
-    register_forward(registry, "/debug", "Toggle debug overlay")?;
-    register_forward(registry, "/log", "Show application logs")?;
-    register_forward(registry, "/quit", "Exit Blazar")?;
+    for command in commands {
+        registry.register(command)?;
+    }
 
     Ok(())
 }

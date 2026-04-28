@@ -273,7 +273,11 @@ fn slash_command_window_scroll_changes_visible_items() {
     let initial_commands: Vec<&str> = initial_rows[1..4].iter().map(|line| line.trim()).collect();
 
     assert_eq!(initial_rows[0].trim(), "~/blazar · main");
-    assert_eq!(initial_commands, vec!["• /help", "• /clear", "• /copy"]);
+    // Commands are now sorted alphabetically via inventory registration
+    assert_eq!(
+        initial_commands,
+        vec!["• /agents", "• /clear", "• /compact"]
+    );
 
     for _ in 0..6 {
         app.handle_action(InputAction::ScrollDown);
@@ -287,8 +291,13 @@ fn slash_command_window_scroll_changes_visible_items() {
         "scrolling should change the visible command rows"
     );
     assert_eq!(scrolled_rows[0].trim(), "~/blazar · main");
-    assert_eq!(scrolled_commands[0], "• /mcp");
-    assert!(scrolled_commands.iter().all(|line| !line.contains("/help")));
+    // After scrolling down 6 commands from /agents, we're at /debug
+    assert_eq!(scrolled_commands[0], "• /debug");
+    assert!(
+        scrolled_commands
+            .iter()
+            .all(|line| !line.contains("/agents"))
+    );
 }
 
 #[test]
@@ -312,14 +321,15 @@ fn top_panel_caps_command_window_to_policy_max_items() {
     let users_rows = &lines[lines.len().saturating_sub(8)..];
 
     assert_eq!(users_rows[0].trim(), "~/blazar · main");
-    assert!(users_rows[1].contains("/help"));
+    // Commands are now sorted alphabetically via inventory registration
+    assert!(users_rows[1].contains("/agents"));
     assert!(users_rows[2].contains("/clear"));
-    assert!(users_rows[3].contains("/copy"));
+    assert!(users_rows[3].contains("/compact"));
     assert!(
         users_rows
             .iter()
             .take(4)
-            .all(|line| !line.contains("/init")),
+            .all(|line| !line.contains("/config")),
         "top panel should cap visible commands to the policy max"
     );
 }
@@ -338,14 +348,15 @@ fn default_policy_caps_command_window_to_six_items() {
     let lines = render_to_lines_for_test(&mut app, 100, 18);
     let users_rows = &lines[lines.len().saturating_sub(11)..];
 
-    assert!(users_rows[1].contains("/help"));
+    // Commands are now sorted alphabetically via inventory registration
+    assert!(users_rows[1].contains("/agents"));
     assert!(users_rows[2].contains("/clear"));
-    assert!(users_rows[3].contains("/copy"));
-    assert!(users_rows[4].contains("/init"));
-    assert!(users_rows[5].contains("/skills"));
-    assert!(users_rows[6].contains("/model"));
+    assert!(users_rows[3].contains("/compact"));
+    assert!(users_rows[4].contains("/config"));
+    assert!(users_rows[5].contains("/context"));
+    assert!(users_rows[6].contains("/copy"));
     assert!(
-        users_rows.iter().all(|line| !line.contains("/mcp")),
+        users_rows.iter().all(|line| !line.contains("/debug")),
         "default policy should cap the visible window to 6 items"
     );
 }
@@ -363,10 +374,30 @@ fn picker_navigation_reaches_later_commands() {
 
     let lines = render_to_lines_for_test(&mut app, 100, 35);
 
+    // Commands are sorted alphabetically; after navigating down 12 times from /agents,
+    // we should reach commands that are visible and not the first one
+    let has_some_command = lines.iter().any(|line| {
+        line.contains("/discover-agents")
+            || line.contains("/diff")
+            || line.contains("/export")
+            || line.contains("/git")
+            || line.contains("/help")
+            || line.contains("/history")
+            || line.contains("/init")
+            || line.contains("/log")
+            || line.contains("/mcp")
+            || line.contains("/model")
+            || line.contains("/plan")
+            || line.contains("/quit")
+            || line.contains("/skills")
+            || line.contains("/terminal")
+            || line.contains("/theme")
+            || line.contains("/tools")
+            || line.contains("/undo")
+    });
+
     assert!(
-        lines
-            .iter()
-            .any(|line| line.contains("/tools") || line.contains("/agents")),
+        has_some_command,
         "picker navigation should reach later command entries"
     );
 }

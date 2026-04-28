@@ -36,7 +36,7 @@ pub async fn execute_palette_command_for_test(
     name: &str,
     args: Value,
 ) -> Result<CommandResult, CommandError> {
-    let mut registry = CommandRegistry::new();
-    super::builtins::register_builtin_commands(&mut registry)?;
+    let registry = CommandRegistry::with_builtins()
+        .map_err(|e| CommandError::ExecutionFailed(format!("failed to bootstrap registry: {e}")))?;
     execute_palette_command(&registry, app, name, args).await
 }

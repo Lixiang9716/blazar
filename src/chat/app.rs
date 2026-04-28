@@ -117,14 +117,12 @@ impl ChatApp {
             }]
         };
 
-        let mut command_registry = crate::chat::commands::CommandRegistry::new();
-        crate::chat::commands::builtins::register_builtin_commands(&mut command_registry).map_err(
-            |error| {
+        let command_registry =
+            crate::chat::commands::CommandRegistry::with_builtins().map_err(|error| {
                 AgentRuntimeError::ToolInitialization(format!(
                     "failed to register built-in commands: {error}"
                 ))
-            },
-        )?;
+            })?;
 
         let (provider, model_name) = crate::provider::load_provider(repo_path);
         let provider_config: std::sync::Arc<dyn crate::provider::ProviderConfigPort> =

@@ -1516,9 +1516,10 @@ fn slash_input_switches_to_inline_command_status_mode() {
     let users_rows = &lines[lines.len().saturating_sub(8)..];
 
     assert_eq!(users_rows[0].trim(), "~/blazar · main");
-    assert_eq!(users_rows[1].trim(), "• /help");
+    // Commands are now sorted alphabetically via inventory registration
+    assert_eq!(users_rows[1].trim(), "• /agents");
     assert_eq!(users_rows[2].trim(), "• /clear");
-    assert_eq!(users_rows[3].trim(), "• /copy");
+    assert_eq!(users_rows[3].trim(), "• /compact");
 }
 
 #[test]

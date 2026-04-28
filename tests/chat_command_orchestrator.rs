@@ -1,16 +1,25 @@
 use blazar::chat::app::ChatApp;
-use blazar::chat::commands::CommandError;
-use blazar::chat::commands::orchestrator::execute_palette_command_for_test;
+use blazar::chat::commands::orchestrator::execute_palette_command;
+use blazar::chat::commands::{CommandError, CommandRegistry};
 use blazar::chat::model::Actor;
 use serde_json::json;
 
 const REPO_ROOT: &str = env!("CARGO_MANIFEST_DIR");
 
+async fn execute_command_for_test(
+    app: &mut ChatApp,
+    name: &str,
+    args: serde_json::Value,
+) -> Result<blazar::chat::commands::CommandResult, CommandError> {
+    let registry = CommandRegistry::with_builtins().expect("bootstrap built-ins");
+    execute_palette_command(&registry, app, name, args).await
+}
+
 #[tokio::test]
 async fn execute_plan_command_sets_composer_prefill() {
     let mut app = ChatApp::new_for_test(REPO_ROOT).expect("app");
 
-    execute_palette_command_for_test(&mut app, "/plan", json!({}))
+    execute_command_for_test(&mut app, "/plan", json!({}))
         .await
         .expect("plan command should execute");
 
@@ -23,7 +32,7 @@ async fn unknown_command_returns_unavailable_error() {
     let baseline_timeline_len = app.timeline().len();
     let baseline_composer = app.composer_text().to_string();
 
-    let err = execute_palette_command_for_test(&mut app, "/does-not-exist", json!({}))
+    let err = execute_command_for_test(&mut app, "/does-not-exist", json!({}))
         .await
         .expect_err("unknown command should fail");
 
@@ -39,7 +48,7 @@ async fn unknown_command_returns_unavailable_error() {
 async fn execute_discover_agents_command_adds_timeline_hint() {
     let mut app = ChatApp::new_for_test(REPO_ROOT).expect("app");
 
-    execute_palette_command_for_test(&mut app, "/discover-agents", json!({}))
+    execute_command_for_test(&mut app, "/discover-agents", json!({}))
         .await
         .expect("discover agents command should execute");
 
