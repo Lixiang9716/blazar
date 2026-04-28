@@ -13,12 +13,17 @@ use ratatui_textarea::TextArea;
 use std::cell::Cell;
 use std::collections::VecDeque;
 use std::path::PathBuf;
-use std::sync::mpsc::{Receiver, Sender};
 use std::time::Instant;
 
 mod actions;
 mod events;
+pub(super) mod helpers;
+mod model_metadata;
 pub(crate) mod turns;
+
+pub(crate) use helpers::normalize_slash_query;
+use helpers::*;
+use model_metadata::ModelMetadataState;
 
 #[cfg(test)]
 #[path = "../../tests/unit/chat/app/tests.rs"]
@@ -54,20 +59,7 @@ pub struct ChatApp {
     workspace_root: PathBuf,
     /// Display name of the active model (e.g. "Qwen/Qwen3-8B").
     model_name: String,
-    available_models: Vec<crate::provider::ModelInfo>,
-    model_context_max_tokens: Option<u32>,
-    config_max_tokens: Option<u32>,
-    model_metadata_refresh_tx: Sender<ModelMetadataRefreshResult>,
-    model_metadata_refresh_rx: Receiver<ModelMetadataRefreshResult>,
-    model_metadata_refresh_handle: Option<std::thread::JoinHandle<()>>,
-    stalled_model_metadata_refresh_handle: Option<std::thread::JoinHandle<()>>,
-    model_metadata_refresh_retry_exhausted: bool,
-    model_metadata_refresh_in_flight: bool,
-    model_metadata_refresh_interval: std::time::Duration,
-    model_metadata_refresh_timeout: std::time::Duration,
-    active_model_metadata_refresh_id: u64,
-    last_model_metadata_refresh_at: Instant,
-    model_metadata_refresh_started_at: Option<Instant>,
+    pub(super) model_metadata: ModelMetadataState,
     user_mode: UserMode,
     users_status_mode: StatusMode,
     users_command_scroll_offset: usize,
@@ -106,13 +98,6 @@ struct PendingTurn {
     timeline_inserted: bool,
 }
 
-#[derive(Debug, Clone)]
-struct ModelMetadataRefreshResult {
-    request_id: u64,
-    available_models: Vec<crate::provider::ModelInfo>,
-    config_max_tokens: Option<u32>,
-}
-
 impl ChatApp {
     pub fn new(repo_path: &str) -> Result<Self, AgentRuntimeError> {
         let display_path = shorten_home(repo_path);
@@ -143,7 +128,6 @@ impl ChatApp {
 
         let (provider, model_name) = crate::provider::load_provider(repo_path);
         let config_max_tokens = crate::provider::configured_max_tokens(repo_path);
-        let (model_metadata_refresh_tx, model_metadata_refresh_rx) = std::sync::mpsc::channel();
         let runtime = AgentRuntime::new(provider, workspace_root.clone(), model_name.clone())?;
 
         Ok(Self {
@@ -161,20 +145,7 @@ impl ChatApp {
             debug_recorder: DebugRecorder::new(&workspace_root),
             workspace_root,
             model_name,
-            available_models: Vec::new(),
-            model_context_max_tokens: None,
-            config_max_tokens,
-            model_metadata_refresh_tx,
-            model_metadata_refresh_rx,
-            model_metadata_refresh_handle: None,
-            stalled_model_metadata_refresh_handle: None,
-            model_metadata_refresh_retry_exhausted: false,
-            model_metadata_refresh_in_flight: false,
-            model_metadata_refresh_interval: std::time::Duration::from_secs(300),
-            model_metadata_refresh_timeout: std::time::Duration::from_secs(30),
-            active_model_metadata_refresh_id: 0,
-            last_model_metadata_refresh_at: Instant::now(),
-            model_metadata_refresh_started_at: None,
+            model_metadata: ModelMetadataState::new(config_max_tokens),
             git_pr_label,
             user_mode: UserMode::Auto,
             // All remaining fields are zero/empty/false/None defaults.
@@ -435,8 +406,8 @@ impl ChatApp {
         match self.agent_runtime.set_model(model) {
             Ok(()) => {
                 self.model_name = model.to_owned();
-                self.refresh_model_metadata_from_cache();
-                self.schedule_model_metadata_refresh();
+                self.model_metadata
+                    .on_model_changed(&self.workspace_root, model);
                 self.timeline.push(TimelineEntry::hint(format!(
                     "Model switched to **{model}**"
                 )));
@@ -451,133 +422,13 @@ impl ChatApp {
         }
     }
 
-    fn refresh_model_metadata_from_cache(&mut self) {
-        let repo_root = self.workspace_root.to_string_lossy();
-        self.config_max_tokens = crate::provider::configured_max_tokens(&repo_root);
-        self.model_context_max_tokens = crate::provider::resolve_model_context_length_from_models(
-            &self.available_models,
-            &self.model_name,
-        );
-    }
-
-    fn schedule_model_metadata_refresh(&mut self) {
-        if self.model_metadata_refresh_in_flight {
-            return;
-        }
-
-        if self
-            .stalled_model_metadata_refresh_handle
-            .as_ref()
-            .is_some_and(std::thread::JoinHandle::is_finished)
-        {
-            self.stalled_model_metadata_refresh_handle = None;
-            self.model_metadata_refresh_retry_exhausted = false;
-        }
-
-        if self.stalled_model_metadata_refresh_handle.is_some()
-            && self.model_metadata_refresh_retry_exhausted
-        {
-            return;
-        }
-
-        self.active_model_metadata_refresh_id =
-            self.active_model_metadata_refresh_id.wrapping_add(1);
-        self.model_metadata_refresh_in_flight = true;
-        self.model_metadata_refresh_started_at = Some(Instant::now());
-        let request_id = self.active_model_metadata_refresh_id;
-        let tx = self.model_metadata_refresh_tx.clone();
-        let repo_root = self.workspace_root.to_string_lossy().into_owned();
-        #[cfg(test)]
-        let available_models_behavior =
-            crate::provider::current_available_models_behavior_for_test();
-        self.model_metadata_refresh_handle = Some(std::thread::spawn(move || {
-            #[cfg(test)]
-            let _available_models_behavior =
-                crate::provider::set_available_models_behavior_for_current_thread_for_test(
-                    available_models_behavior,
-                );
-            let result = ModelMetadataRefreshResult {
-                request_id,
-                available_models: crate::provider::available_models(&repo_root),
-                config_max_tokens: crate::provider::configured_max_tokens(&repo_root),
-            };
-            let _ = tx.send(result);
-        }));
-    }
-
-    fn refresh_model_metadata_if_stale(&mut self) {
-        if self.model_metadata_refresh_in_flight
-            && self
-                .model_metadata_refresh_started_at
-                .is_some_and(|started_at| {
-                    started_at.elapsed() >= self.model_metadata_refresh_timeout
-                })
-        {
-            if self
-                .model_metadata_refresh_handle
-                .as_ref()
-                .is_some_and(std::thread::JoinHandle::is_finished)
-            {
-                self.model_metadata_refresh_handle = None;
-                self.model_metadata_refresh_in_flight = false;
-                self.model_metadata_refresh_started_at = None;
-            } else if self
-                .stalled_model_metadata_refresh_handle
-                .as_ref()
-                .is_some_and(|handle| !handle.is_finished())
-            {
-                self.model_metadata_refresh_handle = None;
-                self.model_metadata_refresh_in_flight = false;
-                self.model_metadata_refresh_started_at = None;
-                self.model_metadata_refresh_retry_exhausted = true;
-                self.active_model_metadata_refresh_id =
-                    self.active_model_metadata_refresh_id.wrapping_add(1);
-                self.last_model_metadata_refresh_at = Instant::now();
-                return;
-            } else {
-                self.stalled_model_metadata_refresh_handle =
-                    self.model_metadata_refresh_handle.take();
-                self.model_metadata_refresh_in_flight = false;
-                self.model_metadata_refresh_started_at = None;
-            }
-        }
-
-        if self.model_metadata_refresh_in_flight
-            || self.last_model_metadata_refresh_at.elapsed() < self.model_metadata_refresh_interval
-        {
-            return;
-        }
-
-        self.schedule_model_metadata_refresh();
-    }
-
-    fn apply_completed_model_metadata_refreshes(&mut self) {
-        while let Ok(result) = self.model_metadata_refresh_rx.try_recv() {
-            if result.request_id != self.active_model_metadata_refresh_id {
-                continue;
-            }
-            self.available_models = result.available_models;
-            self.config_max_tokens = result.config_max_tokens;
-            self.model_context_max_tokens =
-                crate::provider::resolve_model_context_length_from_models(
-                    &self.available_models,
-                    &self.model_name,
-                );
-            self.model_metadata_refresh_handle = None;
-            self.model_metadata_refresh_in_flight = false;
-            self.model_metadata_refresh_started_at = None;
-            self.model_metadata_refresh_retry_exhausted = false;
-            self.last_model_metadata_refresh_at = Instant::now();
-        }
-    }
-
     pub fn tick(&mut self) {
         self.tick_count = self.tick_count.wrapping_add(1);
         self.picker
             .overlay_state_mut()
             .tick(std::time::Duration::from_millis(100));
-        self.refresh_model_metadata_if_stale();
-        self.apply_completed_model_metadata_refreshes();
+        self.model_metadata
+            .tick(&self.workspace_root, &self.model_name);
 
         // Drain agent runtime events
         while let Some(event) = self.agent_runtime.try_recv() {
@@ -709,116 +560,10 @@ impl ChatApp {
     }
 }
 
-/// Shorten `/home/<user>/...` to `~/...` for display.
-fn shorten_home(path: &str) -> String {
-    if let Ok(home) = std::env::var("HOME")
-        && let Some(rest) = path.strip_prefix(&home)
-    {
-        return format!("~{rest}");
-    }
-    path.to_owned()
-}
-
 fn new_composer() -> TextArea<'static> {
     let mut ta = TextArea::default();
     ta.set_cursor_line_style(ratatui_core::style::Style::default());
     ta
-}
-
-pub(crate) fn normalize_slash_query(query: &str) -> String {
-    query
-        .replace(['\r', '\n'], " ")
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-fn infer_pr_label_from_branch(branch: &str) -> Option<String> {
-    let branch = branch.trim();
-    if branch.is_empty() {
-        return None;
-    }
-
-    let segments = branch
-        .split('/')
-        .filter(|segment| !segment.is_empty())
-        .collect::<Vec<_>>();
-
-    for (index, segment) in segments.iter().enumerate() {
-        if let Some(number) = segment.strip_prefix("pr-").and_then(leading_digits) {
-            return Some(format!("PR#{number}"));
-        }
-        if let Some(number) = segment.strip_prefix("pr_").and_then(leading_digits) {
-            return Some(format!("PR#{number}"));
-        }
-        if matches!(*segment, "pr" | "pull")
-            && let Some(number) = segments
-                .get(index + 1)
-                .and_then(|next| leading_digits(next))
-        {
-            return Some(format!("PR#{number}"));
-        }
-    }
-
-    let hash_suffix = branch.rsplit_once('#').map(|(_, suffix)| suffix)?;
-    let number = leading_digits(hash_suffix)?;
-    Some(format!("PR#{number}"))
-}
-
-fn leading_digits(value: &str) -> Option<&str> {
-    let end = value
-        .char_indices()
-        .find_map(|(index, ch)| (!ch.is_ascii_digit()).then_some(index))
-        .unwrap_or(value.len());
-    (end > 0).then_some(&value[..end])
-}
-
-fn parse_workspace_claim_path(claim: &str) -> Option<&str> {
-    let (resource, _) = claim.split_once('#')?;
-    let path = resource.strip_prefix("fs:")?;
-    (!path.is_empty()).then_some(path)
-}
-
-fn preview_text(text: &str, max_chars: usize) -> &str {
-    if text.chars().count() <= max_chars {
-        return text;
-    }
-
-    let end = text
-        .char_indices()
-        .nth(max_chars)
-        .map(|(index, _)| index)
-        .unwrap_or(text.len());
-
-    &text[..end]
-}
-
-fn summarize_tool_arguments(arguments: &str) -> String {
-    preview_text(arguments, 60).to_owned()
-}
-
-fn summarize_tool_output(output: &str) -> String {
-    let first_line = output.lines().next().unwrap_or("");
-    preview_text(first_line, 80).to_owned()
-}
-
-/// Detect the current git branch. Returns empty string if not in a git repo.
-fn detect_branch(repo_path: &str) -> String {
-    std::process::Command::new("git")
-        .args(["rev-parse", "--abbrev-ref", "HEAD"])
-        .current_dir(repo_path)
-        .output()
-        .ok()
-        .and_then(|o| {
-            if o.status.success() {
-                String::from_utf8(o.stdout)
-                    .ok()
-                    .map(|s| s.trim().to_owned())
-            } else {
-                None
-            }
-        })
-        .unwrap_or_default()
 }
 
 #[cfg(test)]

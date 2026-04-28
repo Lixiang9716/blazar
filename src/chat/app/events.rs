@@ -23,7 +23,7 @@ impl ChatApp {
 
     #[doc(hidden)]
     pub fn set_model_context_max_tokens_for_test(&mut self, max_tokens: Option<u32>) {
-        self.model_context_max_tokens = max_tokens;
+        self.model_metadata.model_context_max_tokens = max_tokens;
     }
 
     #[doc(hidden)]
@@ -102,10 +102,7 @@ impl ChatApp {
                 completion_tokens: _,
                 total_tokens,
             }) => {
-                let resolved_max = self
-                    .model_context_max_tokens
-                    .or(self.config_max_tokens)
-                    .unwrap_or(0);
+                let resolved_max = self.model_metadata.resolved_context_limit().unwrap_or(0);
                 self.context_usage = Some(ContextUsage {
                     used_tokens: total_tokens,
                     max_tokens: resolved_max,

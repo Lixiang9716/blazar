@@ -235,9 +235,9 @@ fn chat_app_init_uses_config_fallback_without_model_listing_cache() {
             let mut app = ChatApp::new_with_runtime_for_test(&repo_str, Box::new(fake), "echo")
                 .expect("init should succeed without model listing");
 
-            assert!(app.available_models.is_empty());
-            assert_eq!(app.config_max_tokens, Some(4096));
-            assert_eq!(app.model_context_max_tokens, None);
+            assert!(app.model_metadata.available_models.is_empty());
+            assert_eq!(app.model_metadata.config_max_tokens, Some(4096));
+            assert_eq!(app.model_metadata.model_context_max_tokens, None);
 
             app.apply_agent_event_for_test(AgentEvent::UsageUpdated(
                 crate::agent::protocol::AgentUsage {
@@ -293,9 +293,9 @@ fn set_model_does_not_block_on_async_metadata_refresh() {
                 app.set_model("switched-model");
                 result_tx
                     .send((
-                        app.available_models.is_empty(),
-                        app.model_context_max_tokens,
-                        app.config_max_tokens,
+                        app.model_metadata.available_models.is_empty(),
+                        app.model_metadata.model_context_max_tokens,
+                        app.model_metadata.config_max_tokens,
                     ))
                     .expect("send set_model result");
             });
@@ -329,12 +329,12 @@ fn async_metadata_refresh_result_is_applied_on_tick() {
     let repo_str = repo_path.to_string_lossy().to_string();
     let mut app = ChatApp::new_with_runtime_for_test(&repo_str, Box::new(fake), "echo")
         .expect("init");
-    app.available_models = vec![crate::provider::ModelInfo {
+    app.model_metadata.available_models = vec![crate::provider::ModelInfo {
         id: "switched-model".to_owned(),
         description: "stale entry".to_owned(),
         context_length: Some(1024),
     }];
-    app.model_context_max_tokens = Some(1024);
+    app.model_metadata.model_context_max_tokens = Some(1024);
 
     let refreshed = crate::provider::with_available_models_behavior_for_test(
         crate::provider::AvailableModelsTestBehavior::DelayedReturn {
@@ -347,23 +347,23 @@ fn async_metadata_refresh_result_is_applied_on_tick() {
         },
         || {
             app.set_model("switched-model");
-            assert_eq!(app.available_models[0].description, "stale entry");
-            assert_eq!(app.model_context_max_tokens, Some(1024));
+            assert_eq!(app.model_metadata.available_models[0].description, "stale entry");
+            assert_eq!(app.model_metadata.model_context_max_tokens, Some(1024));
             wait_until(TEST_WAIT_TIMEOUT, || {
                 app.tick();
-                app.available_models
+                app.model_metadata.available_models
                     .iter()
                     .any(|model| model.description == "fresh entry")
-                    && app.model_context_max_tokens == Some(65536)
+                    && app.model_metadata.model_context_max_tokens == Some(65536)
             })
         },
     );
 
     assert!(refreshed, "tick should apply async metadata refresh result");
-    assert_eq!(app.config_max_tokens, Some(4096));
-    assert_eq!(app.available_models.len(), 1);
-    assert_eq!(app.available_models[0].description, "fresh entry");
-    assert_eq!(app.model_context_max_tokens, Some(65536));
+    assert_eq!(app.model_metadata.config_max_tokens, Some(4096));
+    assert_eq!(app.model_metadata.available_models.len(), 1);
+    assert_eq!(app.model_metadata.available_models[0].description, "fresh entry");
+    assert_eq!(app.model_metadata.model_context_max_tokens, Some(65536));
 
     app.apply_agent_event_for_test(AgentEvent::UsageUpdated(
         crate::agent::protocol::AgentUsage {
@@ -400,7 +400,7 @@ fn tick_periodically_refreshes_model_metadata_for_long_lived_sessions() {
     let mut app = ChatApp::new_with_runtime_for_test(&repo_str, Box::new(fake), "echo")
         .expect("init");
     app.model_name = "periodic-model".to_owned();
-    app.model_metadata_refresh_interval = Duration::ZERO;
+    app.model_metadata.interval = Duration::ZERO;
 
     crate::provider::with_available_models_behavior_for_test(
         crate::provider::AvailableModelsTestBehavior::DelayedReturn {
@@ -413,15 +413,15 @@ fn tick_periodically_refreshes_model_metadata_for_long_lived_sessions() {
         },
         || {
             app.tick();
-            assert!(app.available_models.is_empty());
-            assert_eq!(app.model_context_max_tokens, None);
+            assert!(app.model_metadata.available_models.is_empty());
+            assert_eq!(app.model_metadata.model_context_max_tokens, None);
 
             let refreshed = wait_until(TEST_WAIT_TIMEOUT, || {
                 app.tick();
-                app.available_models
+                app.model_metadata.available_models
                     .iter()
                     .any(|model| model.description == "periodic entry")
-                    && app.model_context_max_tokens == Some(32768)
+                    && app.model_metadata.model_context_max_tokens == Some(32768)
             });
             assert!(
                 refreshed,
@@ -449,8 +449,8 @@ fn timed_out_metadata_refresh_allows_periodic_retry() {
     let mut app = ChatApp::new_with_runtime_for_test(&repo_str, Box::new(fake), "echo")
         .expect("init");
     app.model_name = "retry-model".to_owned();
-    app.model_metadata_refresh_interval = Duration::ZERO;
-    app.model_metadata_refresh_timeout = Duration::from_millis(10);
+    app.model_metadata.interval = Duration::ZERO;
+    app.model_metadata.timeout = Duration::from_millis(10);
 
     crate::provider::with_available_models_behavior_for_test(
         crate::provider::AvailableModelsTestBehavior::DelayedReturn {
@@ -480,10 +480,10 @@ fn timed_out_metadata_refresh_allows_periodic_retry() {
         || {
             wait_until(TEST_WAIT_TIMEOUT, || {
                 app.tick();
-                app.available_models
+                app.model_metadata.available_models
                     .iter()
                     .any(|model| model.description == "retry entry")
-                    && app.model_context_max_tokens == Some(24576)
+                    && app.model_metadata.model_context_max_tokens == Some(24576)
             })
         },
     );
@@ -516,8 +516,8 @@ fn failed_metadata_refresh_allows_periodic_retry() {
     let mut app = ChatApp::new_with_runtime_for_test(&repo_str, Box::new(fake), "echo")
         .expect("init");
     app.model_name = "failure-retry-model".to_owned();
-    app.model_metadata_refresh_interval = Duration::ZERO;
-    app.model_metadata_refresh_timeout = Duration::from_millis(10);
+    app.model_metadata.interval = Duration::ZERO;
+    app.model_metadata.timeout = Duration::from_millis(10);
 
     crate::provider::with_available_models_behavior_for_test(
         crate::provider::AvailableModelsTestBehavior::Panic("simulated async refresh failure"),
@@ -539,10 +539,10 @@ fn failed_metadata_refresh_allows_periodic_retry() {
         || {
             wait_until(TEST_WAIT_TIMEOUT, || {
                 app.tick();
-                app.available_models
+                app.model_metadata.available_models
                     .iter()
                     .any(|model| model.description == "failure retry entry")
-                    && app.model_context_max_tokens == Some(28672)
+                    && app.model_metadata.model_context_max_tokens == Some(28672)
             })
         },
     );
@@ -637,8 +637,8 @@ fn metadata_test_helpers_update_users_status_snapshot() {
 #[test]
 fn agent_usage_updated_event_updates_users_context_snapshot() {
     let mut app = new_test_app();
-    app.model_context_max_tokens = None;
-    app.config_max_tokens = None;
+    app.model_metadata.model_context_max_tokens = None;
+    app.model_metadata.config_max_tokens = None;
     app.apply_agent_event_for_test(AgentEvent::UsageUpdated(
         crate::agent::protocol::AgentUsage {
             prompt_tokens: 120,
@@ -660,8 +660,8 @@ fn agent_usage_updated_event_updates_users_context_snapshot() {
 #[test]
 fn usage_update_prefers_model_context_length_over_config_max() {
     let mut app = new_test_app();
-    app.model_context_max_tokens = Some(128000);
-    app.config_max_tokens = Some(8192);
+    app.model_metadata.model_context_max_tokens = Some(128000);
+    app.model_metadata.config_max_tokens = Some(8192);
     app.apply_agent_event_for_test(AgentEvent::UsageUpdated(
         crate::agent::protocol::AgentUsage {
             prompt_tokens: 50,
@@ -682,8 +682,8 @@ fn usage_update_prefers_model_context_length_over_config_max() {
 #[test]
 fn usage_update_falls_back_to_config_max_when_context_unknown() {
     let mut app = new_test_app();
-    app.model_context_max_tokens = None;
-    app.config_max_tokens = Some(8192);
+    app.model_metadata.model_context_max_tokens = None;
+    app.model_metadata.config_max_tokens = Some(8192);
     app.apply_agent_event_for_test(AgentEvent::UsageUpdated(
         crate::agent::protocol::AgentUsage {
             prompt_tokens: 50,
