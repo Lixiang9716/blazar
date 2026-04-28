@@ -23,6 +23,7 @@ impl ChatApp {
         if allow_command_dispatch
             && !self.agent_state.is_busy()
             && trimmed != "/plan"
+            && trimmed != "/compact"
             && self.command_registry.find(trimmed).is_some()
         {
             if let Err(err) = self.execute_palette_command_sync(trimmed, serde_json::json!({})) {
@@ -173,6 +174,17 @@ pub(super) fn build_pending_turn_for_mode(input: &str, user_mode: UserMode) -> P
         };
     }
 
+    if trimmed == "/compact" {
+        return PendingTurn {
+            user_text: trimmed.to_owned(),
+            dispatch: PendingDispatch::Runtime {
+                runtime_prompt: build_compact_prompt(),
+                kind: TurnKind::Compact,
+            },
+            timeline_inserted: false,
+        };
+    }
+
     if user_mode == UserMode::Plan {
         return PendingTurn {
             user_text: trimmed.to_owned(),
@@ -203,6 +215,16 @@ fn build_plan_prompt(request: &str) -> String {
          Keep the answer focused on planning.\n\n\
          User request:\n{request}"
     )
+}
+
+fn build_compact_prompt() -> String {
+    "You are in compaction mode.\n\
+     Your task is to create a concise summary of the conversation so far.\n\
+     First line must be a short plain-text title summarizing what has been accomplished.\n\
+     After a blank line, write a compact summary of key decisions, actions taken, and outcomes.\n\
+     Focus on information that would be valuable for continuing this conversation later.\n\
+     Keep the summary focused and under 200 words."
+        .to_owned()
 }
 
 pub(super) fn extract_plan_title_and_body(text: &str) -> Option<(String, String)> {

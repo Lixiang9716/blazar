@@ -99,6 +99,23 @@ async fn execute_help_command_adds_timeline_hint() {
 }
 
 #[tokio::test]
+async fn execute_compact_command_starts_compaction_flow() {
+    let mut app = ChatApp::new_for_test(REPO_ROOT).expect("app");
+
+    let result = execute_command_for_test(&mut app, "/compact", json!({}))
+        .await
+        .expect("compact command should execute");
+
+    assert_eq!(result.summary, "Compaction started");
+    assert!(
+        app.timeline()
+            .iter()
+            .any(|entry| entry.actor == Actor::User && entry.body == "/compact"),
+        "should queue /compact message"
+    );
+}
+
+#[tokio::test]
 async fn execute_context_command_adds_timeline_hint() {
     let mut app = ChatApp::new_for_test(REPO_ROOT).expect("app");
     let baseline_len = app.timeline().len();

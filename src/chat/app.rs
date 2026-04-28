@@ -80,6 +80,7 @@ pub struct ChatApp {
 enum TurnKind {
     Chat,
     Plan,
+    Compact,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -264,6 +265,7 @@ impl ChatApp {
 
         match self.active_turn_kind {
             Some(TurnKind::Plan) => "planning".to_owned(),
+            Some(TurnKind::Compact) => "compacting".to_owned(),
             _ => self
                 .thinking_action_name
                 .clone()
@@ -519,6 +521,7 @@ impl ChatApp {
         match self.active_turn_kind {
             Some(TurnKind::Chat) => Some("chat"),
             Some(TurnKind::Plan) => Some("plan"),
+            Some(TurnKind::Compact) => Some("compact"),
             None => None,
         }
     }

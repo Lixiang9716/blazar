@@ -1,17 +1,13 @@
-use std::sync::Arc;
-
-use serde_json::json;
-
-use super::orchestrator::CommandContext;
 use super::plugin::{
-    BuiltinCommandDescriptor, BuiltinCommandProfiles, CommandBuildContext, CommandBuildProfile,
-    build_commands_from_descriptors, collect_builtin_descriptors,
+    CommandBuildContext, CommandBuildProfile, build_commands_from_descriptors,
+    collect_builtin_descriptors,
 };
 use super::registry::CommandRegistry;
-use super::types::{CommandError, CommandExecFuture, CommandResult, CommandSpec, PaletteCommand};
+use super::types::CommandError;
 
 pub mod agents;
 pub mod clear;
+pub mod compact;
 pub mod config;
 pub mod context;
 pub mod copy;
@@ -33,65 +29,6 @@ pub mod terminal;
 pub mod theme;
 pub mod tools;
 pub mod undo;
-
-fn spec(name: &str, description: &str) -> CommandSpec {
-    CommandSpec {
-        name: name.to_owned(),
-        description: description.to_owned(),
-        args_schema: json!({ "type": "object" }),
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Command implementations (commands not yet split into modules)
-// ---------------------------------------------------------------------------
-
-struct ForwardCommand {
-    spec: CommandSpec,
-}
-
-impl PaletteCommand for ForwardCommand {
-    fn spec(&self) -> &CommandSpec {
-        &self.spec
-    }
-
-    fn execute<'a>(
-        &'a self,
-        ctx: &'a mut CommandContext<'a>,
-        _args: serde_json::Value,
-    ) -> CommandExecFuture<'a> {
-        let command = self.spec.name.clone();
-        Box::pin(async move {
-            ctx.app.send_message_without_command_dispatch(&command);
-            Ok(CommandResult {
-                summary: format!("Queued {command}"),
-            })
-        })
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Inventory-backed built-in command registration (commands not yet split)
-// ---------------------------------------------------------------------------
-
-macro_rules! register_forward_command {
-    ($name:literal, $description:literal) => {
-        inventory::submit! {
-            BuiltinCommandDescriptor {
-                name: $name,
-                profiles: BuiltinCommandProfiles::Interactive,
-                build: |_ctx: &CommandBuildContext| {
-                    Arc::new(ForwardCommand {
-                        spec: spec($name, $description),
-                    })
-                },
-            }
-        }
-    };
-}
-
-// Task 6 command (workspace side effect - to be implemented)
-register_forward_command!("/compact", "Compact conversation context");
 
 /// Compatibility shim for manual registration.
 ///

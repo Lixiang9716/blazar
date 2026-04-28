@@ -2827,3 +2827,80 @@ fn export_conversation_json_includes_key_fields() {
     assert_eq!(messages[1]["body"], "test assistant message");
 }
 
+#[test]
+fn compact_turn_finalizes_with_title_prefix() {
+    use crate::agent::protocol::AgentEvent;
+
+    let fake = FakeRuntime::with_events(vec![
+        AgentEvent::TurnStarted {
+            turn_id: "turn-1".into(),
+        },
+        AgentEvent::TextDelta {
+            text: "Conversation Summary\n\nSummarized 5 messages covering workspace setup and initial configuration."
+                .into(),
+        },
+        AgentEvent::TurnComplete,
+    ]);
+
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let mut app = ChatApp::new_with_runtime_for_test(repo_path, Box::new(fake), "echo")
+        .expect("test app should initialize");
+
+    app.send_message("/compact");
+    app.tick();
+    app.tick();
+    app.tick();
+
+    let last_response = app
+        .timeline()
+        .iter()
+        .rev()
+        .find(|entry| entry.actor == Actor::Assistant && entry.kind == EntryKind::Message);
+
+    assert!(last_response.is_some(), "should have assistant response");
+    let response = last_response.unwrap();
+
+    assert!(response.title.is_some(), "compact should extract title");
+    let title = response.title.as_ref().unwrap();
+    assert!(
+        title.starts_with("📦"),
+        "compact title should have box emoji prefix, got: {title}"
+    );
+    assert!(
+        title.contains("Conversation Summary"),
+        "should contain extracted title, got: {title}"
+    );
+
+    assert!(
+        response.body.contains("Summarized 5 messages"),
+        "body should contain summary text"
+    );
+}
+
+#[test]
+fn compact_streaming_shows_compacting_status() {
+    use crate::agent::protocol::AgentEvent;
+
+    let fake = FakeRuntime::with_events(vec![
+        AgentEvent::TurnStarted {
+            turn_id: "turn-1".into(),
+        },
+        AgentEvent::TextDelta {
+            text: "Building summary...".into(),
+        },
+    ]);
+
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let mut app = ChatApp::new_with_runtime_for_test(repo_path, Box::new(fake), "echo")
+        .expect("test app should initialize");
+
+    app.send_message("/compact");
+    app.tick();
+    app.tick();
+
+    let status = app.derive_active_turn_status_label();
+    assert!(
+        status.contains("compacting"),
+        "status should show 'compacting' while streaming, got: {status}"
+    );
+}

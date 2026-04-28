@@ -253,6 +253,8 @@ impl ChatApp {
                 self.debug_recorder.finish_turn("completed", None, None);
                 if self.active_turn_kind == Some(TurnKind::Plan) {
                     self.finalize_plan_response();
+                } else if self.active_turn_kind == Some(TurnKind::Compact) {
+                    self.finalize_compact_response();
                 }
                 self.thinking_action_name = None;
                 self.current_turn_has_thinking_entry = false;
@@ -323,10 +325,29 @@ impl ChatApp {
         entry.body = body;
     }
 
+    fn finalize_compact_response(&mut self) {
+        let Some(entry) = self
+            .timeline
+            .iter_mut()
+            .rev()
+            .find(|entry| entry.actor == Actor::Assistant && entry.kind == EntryKind::Message)
+        else {
+            return;
+        };
+
+        let Some((title, body)) = extract_plan_title_and_body(&entry.body) else {
+            return;
+        };
+
+        entry.title = Some(format!("📦 {}", title));
+        entry.body = body;
+    }
+
     pub(super) fn streaming_title_for_turn(&self, kind: TurnKind) -> Option<String> {
         match kind {
             TurnKind::Plan => None,
             TurnKind::Chat => self.latest_plan_title(),
+            TurnKind::Compact => Some("Compacting...".to_owned()),
         }
     }
 
