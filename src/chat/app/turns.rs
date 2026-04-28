@@ -51,15 +51,6 @@ impl ChatApp {
             trimmed
         );
 
-        // Trigger demo playback when user types "1"
-        if trimmed == "1" {
-            self.timeline.clear();
-            self.demo_queue = crate::chat::demo::demo_playback_script();
-            self.demo_last_add = None;
-            self.scroll_offset = u16::MAX;
-            return;
-        }
-
         self.has_user_sent = true;
 
         // Admission control: queue if agent is busy instead of dropping

@@ -1257,17 +1257,17 @@ fn picker_theme_selection_opens_subpicker_and_applies_theme() {
 }
 
 #[test]
-fn demo_trigger_message_resets_timeline_and_starts_playback_queue() {
+fn numeric_message_no_longer_triggers_demo_reset() {
     let repo_path = env!("CARGO_MANIFEST_DIR");
     let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+    let initial_len = app.timeline.len();
 
     app.send_message("1");
-    assert!(app.timeline.is_empty());
-    assert!(app.demo_active());
-
-    app.tick();
-    assert_eq!(app.timeline.len(), 1);
-    assert!(!app.timeline[0].body.is_empty());
+    assert_eq!(app.timeline.len(), initial_len + 1);
+    assert_eq!(
+        app.timeline.last().expect("timeline should contain user message").body,
+        "1"
+    );
 }
 
 #[test]

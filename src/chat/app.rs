@@ -13,7 +13,6 @@ use ratatui_textarea::TextArea;
 use std::cell::Cell;
 use std::collections::VecDeque;
 use std::path::PathBuf;
-use std::time::Instant;
 
 mod actions;
 mod events;
@@ -41,10 +40,6 @@ pub struct ChatApp {
     pub picker: ModalPicker,
     command_registry: crate::chat::commands::CommandRegistry,
     tick_count: u64,
-    /// Remaining demo entries to play back.
-    demo_queue: Vec<TimelineEntry>,
-    /// When the last demo entry was added (for 1-second pacing).
-    demo_last_add: Option<Instant>,
     /// Last known content height of the timeline (set by renderer).
     pub timeline_content_height: Cell<u16>,
     /// Last known visible height of the timeline area (set by renderer).
@@ -106,17 +101,13 @@ impl ChatApp {
         let git_pr_label = infer_pr_label_from_branch(&branch);
         let workspace_root = PathBuf::from(repo_path);
 
-        let timeline = if std::env::var("BLAZAR_DEMO").is_ok() {
-            crate::chat::demo::demo_timeline()
-        } else {
-            vec![TimelineEntry {
-                actor: Actor::System,
-                kind: EntryKind::Banner,
-                title: Some("Welcome".to_owned()),
-                body: display_path.clone(),
-                details: branch.clone(),
-            }]
-        };
+        let timeline = vec![TimelineEntry {
+            actor: Actor::System,
+            kind: EntryKind::Banner,
+            title: Some("Welcome".to_owned()),
+            body: display_path.clone(),
+            details: branch.clone(),
+        }];
 
         let command_registry =
             crate::chat::commands::CommandRegistry::with_builtins().map_err(|error| {
@@ -155,8 +146,6 @@ impl ChatApp {
             should_quit: false,
             show_details: false,
             tick_count: 0,
-            demo_queue: Vec::new(),
-            demo_last_add: None,
             timeline_content_height: Cell::new(0),
             timeline_visible_height: Cell::new(0),
             agent_state: AgentRuntimeState::default(),
@@ -208,14 +197,6 @@ impl ChatApp {
         // Stable model name for tests.
         app.model_name = model_name.to_owned();
         app.agent_runtime = runtime;
-        Ok(app)
-    }
-
-    /// Creates a ChatApp pre-loaded with demo timeline entries for visual testing.
-    #[cfg(test)]
-    pub fn new_with_demo_timeline(repo_path: &str) -> Result<Self, AgentRuntimeError> {
-        let mut app = Self::new(repo_path)?;
-        app.timeline = crate::chat::demo::demo_timeline();
         Ok(app)
     }
 
@@ -438,25 +419,6 @@ impl ChatApp {
         while let Some(event) = self.agent_runtime.try_recv() {
             self.apply_agent_event(event);
         }
-
-        // Demo playback: add one entry per second
-        if !self.demo_queue.is_empty() {
-            let should_add = match self.demo_last_add {
-                Some(last) => last.elapsed().as_secs() >= 1,
-                None => true,
-            };
-            if should_add {
-                let entry = self.demo_queue.remove(0);
-                self.timeline.push(entry);
-                self.scroll_offset = u16::MAX; // auto-scroll
-                self.demo_last_add = Some(Instant::now());
-            }
-        }
-    }
-
-    /// Whether demo playback is currently running.
-    pub fn demo_active(&self) -> bool {
-        !self.demo_queue.is_empty()
     }
 
     /// Convert the u16::MAX auto-scroll sentinel into a real offset

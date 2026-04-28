@@ -44,12 +44,7 @@ pub fn run_terminal_chat(schema: Value) -> Result<(), Box<dyn std::error::Error>
 
         terminal.draw(|frame| render_frame(frame, &mut app, tick_ms))?;
 
-        // Use faster polling during animations for smooth ~30 FPS.
-        let poll_timeout = if app.demo_active() {
-            Duration::from_millis(33)
-        } else {
-            Duration::from_millis(100)
-        };
+        let poll_timeout = Duration::from_millis(100);
 
         if event::poll(poll_timeout)? {
             match event::read()? {
