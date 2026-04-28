@@ -1,17 +1,30 @@
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
+use serde::Deserialize;
 use serde_json::json;
 
 use crate::chat::commands::orchestrator::CommandContext;
 use crate::chat::commands::plugin::{
     BuiltinCommandDescriptor, BuiltinCommandProfiles, CommandBuildContext,
 };
-use crate::chat::commands::types::{CommandExecFuture, CommandResult, CommandSpec, PaletteCommand};
+use crate::chat::commands::types::{
+    CommandError, CommandExecFuture, CommandResult, CommandSpec, PaletteCommand,
+};
 
 use super::store::PlanStore;
 
 struct PlanCommand {
     spec: CommandSpec,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PlanArgs {
+    #[serde(default)]
+    goal: Option<String>,
+    #[serde(default)]
+    continue_id: Option<String>,
 }
 
 impl PaletteCommand for PlanCommand {
@@ -22,16 +35,135 @@ impl PaletteCommand for PlanCommand {
     fn execute<'a>(
         &'a self,
         ctx: &'a mut CommandContext<'a>,
-        _args: serde_json::Value,
+        args: serde_json::Value,
     ) -> CommandExecFuture<'a> {
         Box::pin(async move {
-            let session = PlanStore::new().create_session();
-            ctx.app.set_composer_text(session.prefill_text());
+            let parsed = parse_plan_args(args)?;
+            let store = PlanStore::for_workspace(ctx.app.workspace_root());
+            let resumed = parsed.continue_id.is_some();
+
+            let mut session = if let Some(continue_id) = parsed.continue_id.as_deref() {
+                let mut session = load_continued_session(&store, continue_id)?;
+                if session.plan_id().is_none() {
+                    session.set_plan_id(continue_id.to_owned());
+                }
+                session
+            } else {
+                let mut session = store.create_session();
+                let plan_id = generate_plan_id(&store)?;
+                session.set_plan_id(plan_id);
+                session
+            };
+
+            if let Some(goal) = parsed.goal {
+                session.set_goal(goal);
+            }
+
+            let decision = session.run_one_segment();
+            let plan_id = session
+                .plan_id()
+                .ok_or_else(|| CommandError::ExecutionFailed("plan id missing".to_owned()))?
+                .to_owned();
+
+            store
+                .save_session_json(&plan_id, &session)
+                .map_err(map_store_save_error)?;
+
+            let continue_command = format!("/plan --continue {plan_id}");
+            ctx.app.push_system_hint(format!(
+                "Plan {plan_id}: {} (phase: {}).",
+                decision.summary,
+                decision.phase.as_str()
+            ));
+            ctx.app
+                .push_system_hint(format!("Continue this plan with `{continue_command}`."));
+            ctx.app.set_composer_text(&continue_command);
+
+            let lifecycle = if resumed { "continued" } else { "started" };
             Ok(CommandResult {
-                summary: "Prepared /plan composer prompt".to_string(),
+                summary: format!(
+                    "Plan {plan_id} {lifecycle}: {} (phase: {})",
+                    decision.summary,
+                    decision.phase.as_str()
+                ),
             })
         })
     }
+}
+
+fn parse_plan_args(args: serde_json::Value) -> Result<PlanArgs, CommandError> {
+    let parsed: PlanArgs = serde_json::from_value(args)
+        .map_err(|err| CommandError::InvalidArgs(format!("failed to parse /plan args: {err}")))?;
+
+    if let Some(goal) = parsed.goal.as_deref()
+        && goal.trim().is_empty()
+    {
+        return Err(CommandError::InvalidArgs(
+            "goal must not be blank when provided".to_owned(),
+        ));
+    }
+
+    if let Some(continue_id) = parsed.continue_id.as_deref()
+        && continue_id.trim().is_empty()
+    {
+        return Err(CommandError::InvalidArgs(
+            "continue_id must not be blank when provided".to_owned(),
+        ));
+    }
+
+    Ok(PlanArgs {
+        goal: parsed.goal.map(|value| value.trim().to_owned()),
+        continue_id: parsed.continue_id.map(|value| value.trim().to_owned()),
+    })
+}
+
+fn load_continued_session(
+    store: &PlanStore,
+    continue_id: &str,
+) -> Result<super::session::PlanSession, CommandError> {
+    store
+        .load_session_json(continue_id)
+        .map_err(|error| match error.kind() {
+            std::io::ErrorKind::NotFound => {
+                CommandError::Unavailable(format!("plan session not found: {continue_id}"))
+            }
+            std::io::ErrorKind::InvalidInput | std::io::ErrorKind::InvalidData => {
+                CommandError::InvalidArgs(format!("invalid continue_id {continue_id:?}: {error}"))
+            }
+            _ => CommandError::ExecutionFailed(format!(
+                "failed to load plan session {continue_id}: {error}"
+            )),
+        })
+}
+
+fn map_store_save_error(error: std::io::Error) -> CommandError {
+    match error.kind() {
+        std::io::ErrorKind::InvalidInput | std::io::ErrorKind::InvalidData => {
+            CommandError::InvalidArgs(format!("failed to persist plan session: {error}"))
+        }
+        _ => CommandError::ExecutionFailed(format!("failed to persist plan session: {error}")),
+    }
+}
+
+fn generate_plan_id(store: &PlanStore) -> Result<String, CommandError> {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+
+    for suffix in 0..1000_u16 {
+        let candidate = format!("plan-{now}-{suffix}");
+        let path = store.plan_json_path(&candidate).map_err(|error| {
+            CommandError::ExecutionFailed(format!("failed to create plan id: {error}"))
+        })?;
+        if !path.exists() {
+            return Ok(candidate);
+        }
+    }
+
+    Err(CommandError::ExecutionFailed(
+        "failed to allocate unique plan id".to_owned(),
+    ))
 }
 
 inventory::submit! {
@@ -43,7 +175,14 @@ inventory::submit! {
                 spec: CommandSpec {
                     name: "/plan".to_owned(),
                     description: "Generate a plan with an auto-titled summary".to_owned(),
-                    args_schema: json!({ "type": "object" }),
+                    args_schema: json!({
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                            "goal": { "type": "string" },
+                            "continue_id": { "type": "string" }
+                        }
+                    }),
                 },
             })
         },

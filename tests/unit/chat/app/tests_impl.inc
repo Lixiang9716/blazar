@@ -1475,8 +1475,33 @@ fn set_model_sends_command_and_updates_timeline() {
 fn picker_plan_command_prefills_composer_shortcut() {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-    let repo_path = env!("CARGO_MANIFEST_DIR");
-    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+    let workspace = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/test-workspaces");
+    std::fs::create_dir_all(&workspace).expect("test-workspaces dir should exist");
+    let unique_workspace = workspace.join(format!(
+        "picker-plan-prefill-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock should be monotonic")
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&unique_workspace).expect("unique workspace should exist");
+
+    let _ = std::process::Command::new("git")
+        .args(["init"])
+        .current_dir(&unique_workspace)
+        .output();
+    let _ = std::process::Command::new("git")
+        .args(["config", "user.email", "test@example.com"])
+        .current_dir(&unique_workspace)
+        .output();
+    let _ = std::process::Command::new("git")
+        .args(["config", "user.name", "Test User"])
+        .current_dir(&unique_workspace)
+        .output();
+
+    let mut app =
+        ChatApp::new_for_test(unique_workspace.to_str().expect("workspace path should be utf-8"))
+            .expect("test app should initialize");
     app.picker.open();
     for ch in "plan".chars() {
         app.handle_action(InputAction::Key(KeyEvent::new(
@@ -1486,7 +1511,13 @@ fn picker_plan_command_prefills_composer_shortcut() {
     }
 
     app.handle_action(InputAction::Submit);
-    assert_eq!(app.composer_text(), "/plan ");
+    let composer = app.composer_text();
+    assert!(
+        composer.starts_with("/plan --continue plan-"),
+        "expected continue shortcut, got {composer:?}"
+    );
+
+    let _ = std::fs::remove_dir_all(unique_workspace);
 }
 
 #[test]

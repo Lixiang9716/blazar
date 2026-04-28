@@ -3,7 +3,7 @@ use blazar::chat::commands::orchestrator::execute_palette_command;
 use blazar::chat::commands::{CommandError, CommandRegistry};
 use blazar::chat::model::Actor;
 use serde_json::json;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 const REPO_ROOT: &str = env!("CARGO_MANIFEST_DIR");
 
@@ -51,15 +51,101 @@ fn create_unique_test_workspace(test_name: &str) -> PathBuf {
     workspace
 }
 
-#[tokio::test]
-async fn execute_plan_command_sets_composer_prefill() {
-    let mut app = ChatApp::new_for_test(REPO_ROOT).expect("app");
+fn extract_continue_plan_id(composer_text: &str) -> &str {
+    composer_text
+        .strip_prefix("/plan --continue ")
+        .expect("composer should contain continue command")
+}
 
-    execute_command_for_test(&mut app, "/plan", json!({}))
+fn read_plan_json(workspace: &Path, plan_id: &str) -> serde_json::Value {
+    let plan_path = workspace
+        .join(".blazar")
+        .join("plans")
+        .join(format!("{plan_id}.json"));
+    let raw = std::fs::read_to_string(plan_path).expect("plan session json should exist");
+    serde_json::from_str(&raw).expect("plan json should parse")
+}
+
+#[tokio::test]
+async fn execute_plan_command_bootstraps_session_and_sets_continue_guidance() {
+    let workspace = create_unique_test_workspace("plan_bootstrap");
+    let mut app = ChatApp::new_for_test(workspace.to_str().unwrap()).expect("app");
+
+    let result = execute_command_for_test(&mut app, "/plan", json!({"goal": "wire orchestration"}))
         .await
         .expect("plan command should execute");
 
-    assert_eq!(app.composer_text(), "/plan ");
+    let composer = app.composer_text();
+    let plan_id = extract_continue_plan_id(&composer);
+    assert!(!plan_id.is_empty(), "continue id should be present");
+    assert!(
+        result.summary.contains(plan_id),
+        "summary should mention plan id"
+    );
+
+    let saved = read_plan_json(&workspace, plan_id);
+    assert_eq!(
+        saved.get("goal").and_then(serde_json::Value::as_str),
+        Some("wire orchestration")
+    );
+    assert_eq!(
+        saved.get("phase").and_then(serde_json::Value::as_str),
+        Some("DraftStep")
+    );
+    assert!(
+        app.timeline()
+            .iter()
+            .any(|entry| entry.body.contains("/plan --continue") && entry.body.contains(plan_id)),
+        "timeline should include continue hint"
+    );
+
+    let _ = std::fs::remove_dir_all(&workspace);
+}
+
+#[tokio::test]
+async fn execute_plan_command_continue_id_loads_and_advances_existing_session() {
+    let workspace = create_unique_test_workspace("plan_continue");
+    let mut app = ChatApp::new_for_test(workspace.to_str().unwrap()).expect("app");
+
+    execute_command_for_test(&mut app, "/plan", json!({}))
+        .await
+        .expect("initial bootstrap should succeed");
+    let plan_id = extract_continue_plan_id(&app.composer_text()).to_owned();
+
+    let result = execute_command_for_test(
+        &mut app,
+        "/plan",
+        json!({"continue_id": plan_id, "goal": "finish command orchestration"}),
+    )
+    .await
+    .expect("continue command should execute");
+
+    assert!(
+        result.summary.contains("continued"),
+        "continue summary should communicate resumed execution"
+    );
+    let saved = read_plan_json(&workspace, extract_continue_plan_id(&app.composer_text()));
+    assert_eq!(
+        saved.get("goal").and_then(serde_json::Value::as_str),
+        Some("finish command orchestration")
+    );
+    assert_eq!(
+        saved.get("phase").and_then(serde_json::Value::as_str),
+        Some("DraftStep")
+    );
+
+    let _ = std::fs::remove_dir_all(&workspace);
+}
+
+#[tokio::test]
+async fn execute_plan_command_rejects_invalid_args() {
+    let mut app = ChatApp::new_for_test(REPO_ROOT).expect("app");
+
+    let err = execute_command_for_test(&mut app, "/plan", json!({"goal": 123}))
+        .await
+        .expect_err("non-string goal should fail");
+
+    assert!(matches!(err, CommandError::InvalidArgs(_)));
 }
 
 #[tokio::test]
