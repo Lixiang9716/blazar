@@ -63,3 +63,19 @@ async fn execute_discover_agents_command_adds_timeline_hint() {
             .any(|entry| entry.body.contains("Discovering ACP agents"))
     );
 }
+
+#[tokio::test]
+async fn execute_quit_command_forwards_to_app() {
+    let mut app = ChatApp::new_for_test(REPO_ROOT).expect("app");
+
+    let result = execute_command_for_test(&mut app, "/quit", json!({}))
+        .await
+        .expect("quit command should execute");
+
+    assert_eq!(result.summary, "Queued /quit");
+    assert!(
+        app.timeline()
+            .iter()
+            .any(|entry| entry.actor == Actor::User && entry.body == "/quit")
+    );
+}
