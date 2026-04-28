@@ -3,6 +3,7 @@ use blazar::chat::commands::orchestrator::execute_palette_command;
 use blazar::chat::commands::{CommandError, CommandRegistry};
 use blazar::chat::model::Actor;
 use serde_json::json;
+use std::path::PathBuf;
 
 const REPO_ROOT: &str = env!("CARGO_MANIFEST_DIR");
 
@@ -13,6 +14,41 @@ async fn execute_command_for_test(
 ) -> Result<blazar::chat::commands::CommandResult, CommandError> {
     let registry = CommandRegistry::with_builtins().expect("bootstrap built-ins");
     execute_palette_command(&registry, app, name, args).await
+}
+
+/// Creates a unique temporary test workspace directory.
+/// Returns a PathBuf that will be automatically cleaned up when dropped.
+fn create_unique_test_workspace(test_name: &str) -> PathBuf {
+    let base = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/test-workspaces");
+    std::fs::create_dir_all(&base).expect("create test-workspaces dir");
+
+    let unique = format!(
+        "{}-{}",
+        test_name,
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock should be monotonic")
+            .as_nanos()
+    );
+
+    let workspace = base.join(unique);
+    std::fs::create_dir_all(&workspace).expect("create unique workspace");
+
+    // Initialize as a git repo to satisfy ChatApp requirements
+    let _ = std::process::Command::new("git")
+        .args(["init"])
+        .current_dir(&workspace)
+        .output();
+    let _ = std::process::Command::new("git")
+        .args(["config", "user.email", "test@example.com"])
+        .current_dir(&workspace)
+        .output();
+    let _ = std::process::Command::new("git")
+        .args(["config", "user.name", "Test User"])
+        .current_dir(&workspace)
+        .output();
+
+    workspace
 }
 
 #[tokio::test]
@@ -295,11 +331,9 @@ async fn execute_copy_command_without_messages_returns_unavailable() {
 
 #[tokio::test]
 async fn execute_init_command_creates_instructions_file() {
-    let mut app = ChatApp::new_for_test(REPO_ROOT).expect("app");
+    let workspace = create_unique_test_workspace("init_creates");
+    let mut app = ChatApp::new_for_test(workspace.to_str().unwrap()).expect("app");
     let instructions_path = app.workspace_root().join("blazar-instructions.md");
-
-    // Clean up any existing file
-    let _ = std::fs::remove_file(&instructions_path);
 
     let result = execute_command_for_test(&mut app, "/init", json!({}))
         .await
@@ -314,12 +348,13 @@ async fn execute_init_command_creates_instructions_file() {
     );
 
     // Clean up
-    let _ = std::fs::remove_file(&instructions_path);
+    let _ = std::fs::remove_dir_all(&workspace);
 }
 
 #[tokio::test]
 async fn execute_init_command_when_file_exists() {
-    let mut app = ChatApp::new_for_test(REPO_ROOT).expect("app");
+    let workspace = create_unique_test_workspace("init_exists");
+    let mut app = ChatApp::new_for_test(workspace.to_str().unwrap()).expect("app");
     let instructions_path = app.workspace_root().join("blazar-instructions.md");
 
     // Create the file first
@@ -337,7 +372,7 @@ async fn execute_init_command_when_file_exists() {
     );
 
     // Clean up
-    let _ = std::fs::remove_file(&instructions_path);
+    let _ = std::fs::remove_dir_all(&workspace);
 }
 
 #[tokio::test]
@@ -389,7 +424,8 @@ async fn execute_undo_command_shows_hint() {
 
 #[tokio::test]
 async fn execute_export_command_creates_json_file() {
-    let mut app = ChatApp::new_for_test(REPO_ROOT).expect("app");
+    let workspace = create_unique_test_workspace("export");
+    let mut app = ChatApp::new_for_test(workspace.to_str().unwrap()).expect("app");
 
     let result = execute_command_for_test(&mut app, "/export", json!({}))
         .await
@@ -402,18 +438,20 @@ async fn execute_export_command_creates_json_file() {
             .any(|entry| entry.body.contains("Exported conversation"))
     );
 
-    // Clean up exported files
-    let workspace = app.workspace_root();
-    for entry in std::fs::read_dir(workspace).expect("read workspace") {
-        let entry = entry.expect("dir entry");
-        let path = entry.path();
-        if path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .map(|n| n.starts_with("blazar-export-") && n.ends_with(".json"))
-            .unwrap_or(false)
-        {
-            let _ = std::fs::remove_file(&path);
-        }
-    }
+    // Verify the file was created
+    let exported_files: Vec<_> = std::fs::read_dir(&workspace)
+        .expect("read workspace")
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_str()
+                .map(|n| n.starts_with("blazar-export-") && n.ends_with(".json"))
+                .unwrap_or(false)
+        })
+        .collect();
+    assert!(!exported_files.is_empty(), "export should create a file");
+
+    // Clean up
+    let _ = std::fs::remove_dir_all(&workspace);
 }
