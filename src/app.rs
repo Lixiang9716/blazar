@@ -345,12 +345,21 @@ pub fn run() -> AppResult<()> {
 fn init_logger() {
     use flexi_logger::{Cleanup, Criterion, FileSpec, Logger, Naming, WriteMode};
 
-    let log_dir = std::env::current_dir().unwrap_or_default().join("logs");
+    let log_dir = if cfg!(test) {
+        std::env::current_dir()
+            .unwrap_or_default()
+            .join("target")
+            .join("test-logs")
+    } else {
+        std::env::current_dir().unwrap_or_default().join("logs")
+    };
     let _ = std::fs::create_dir_all(&log_dir);
 
-    // Default: blazar=debug, third-party libs=warn to suppress TLS/HTTP noise.
+    // Default: blazar=debug, suppress noisy third-party crates.
     // Override with BLAZAR_LOG env var (e.g. "trace" or "blazar=trace,ureq=debug").
-    let level = std::env::var("BLAZAR_LOG").unwrap_or_else(|_| "warn, blazar=debug".to_owned());
+    let level = std::env::var("BLAZAR_LOG").unwrap_or_else(|_| {
+        "warn, blazar=debug, ureq=warn, rustls=warn, hyper=warn, h2=warn".to_owned()
+    });
 
     if let Err(e) = Logger::try_with_str(&level).and_then(|logger| {
         logger

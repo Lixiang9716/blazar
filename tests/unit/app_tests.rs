@@ -276,7 +276,10 @@ fn init_logger_writes_json_lines() {
     log::info!("logger_json_probe");
     log::logger().flush();
 
-    let log_dir = std::env::current_dir().expect("cwd").join("logs");
+    let log_dir = std::env::current_dir()
+        .expect("cwd")
+        .join("target")
+        .join("test-logs");
     let log_path = if log_dir.join("blazar_rCURRENT.log").exists() {
         log_dir.join("blazar_rCURRENT.log")
     } else {

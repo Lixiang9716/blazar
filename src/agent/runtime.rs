@@ -61,7 +61,7 @@ pub struct AgentRuntime {
 
 /// Maximum number of transient-error retries per turn.
 const MAX_TRANSIENT_RETRIES: u32 = 1;
-const MAX_TOOL_ITERATIONS: usize = 10;
+const MAX_TOOL_ITERATIONS: usize = 50;
 const REPEATED_SUCCESS_GUIDANCE: &str = "REPEATED SUCCESS: identical tool call already succeeded in this turn. \
      Stop repeating it and continue with the next step or final answer.";
 const JSON_REPAIR_NOTE: &str = "[NOTE] Tool arguments had malformed JSON and were auto-repaired. \

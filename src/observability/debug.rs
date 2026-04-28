@@ -58,6 +58,12 @@ impl DebugRecorder {
             tokio_console_enabled,
         };
         recorder.init_schema();
+        // Propagate session context to the global logger so even plain log!()
+        // calls include session_id and workspace_path.
+        crate::observability::logging::set_global_log_context(
+            &recorder.session_id,
+            &recorder.workspace_path,
+        );
         recorder
     }
 

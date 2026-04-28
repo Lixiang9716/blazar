@@ -7,3 +7,6 @@ src/graphify-out/
 config/provider.json
 logs/
 __pycache__/
+student-management/
+.wt-review-*
+.vscode/

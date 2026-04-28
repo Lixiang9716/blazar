@@ -18,25 +18,19 @@ fn structured_log_contains_required_stable_keys() {
     );
     let value: Value = serde_json::from_str(&raw).expect("valid json");
 
-    for key in [
-        "ts",
-        "level",
-        "target",
-        "event",
-        "message",
-        "trace_id",
-        "turn_id",
-        "tool_name",
-        "agent_id",
-        "error_kind",
-        "call_id",
-        "session_id",
-        "workspace_path",
-        "queue_depth",
-        "event_seq",
-        "turn_kind",
-    ] {
-        assert!(value.get(key).is_some(), "missing key: {key}");
+    // Always-present keys (set by every call)
+    for key in ["ts", "level", "target", "event", "message"] {
+        assert!(value.get(key).is_some(), "missing required key: {key}");
+    }
+
+    // Keys that should be present because they were explicitly provided
+    for key in ["trace_id", "turn_id", "tool_name", "agent_id", "error_kind"] {
+        assert!(value.get(key).is_some(), "missing provided key: {key}");
+    }
+
+    // No field should ever be JSON null — we skip rather than emit null
+    for (key, val) in value.as_object().unwrap() {
+        assert!(!val.is_null(), "key {key} should never be null");
     }
 }
 

@@ -1,11 +1,33 @@
 use flexi_logger::DeferredNow;
 use log::Level;
 use log::Record;
-use serde_json::json;
+use serde_json::Value;
+use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{fmt::Display, io::Write};
 
 const STRUCTURED_EVENT_PREFIX: &str = "__blazar_structured_event__:";
+
+// ── Global session context for plain log!() calls ──────────────────────
+// Set once during ChatApp::new(); read by flexi_structured_format so that
+// even early/plain log lines carry session_id and workspace_path.
+
+struct GlobalLogContext {
+    session_id: String,
+    workspace_path: String,
+}
+
+static GLOBAL_LOG_CONTEXT: OnceLock<GlobalLogContext> = OnceLock::new();
+
+/// Register session-level context so that all subsequent log lines (including
+/// plain `log::info!()` calls) include `session_id` and `workspace_path`.
+/// Safe to call multiple times — only the first call takes effect.
+pub fn set_global_log_context(session_id: &str, workspace_path: &str) {
+    let _ = GLOBAL_LOG_CONTEXT.set(GlobalLogContext {
+        session_id: session_id.to_owned(),
+        workspace_path: workspace_path.to_owned(),
+    });
+}
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct StructuredEventContext<'a> {
@@ -57,25 +79,61 @@ pub fn format_event_json_with_context(
     message: &str,
     context: StructuredEventContext<'_>,
 ) -> String {
-    json!({
-        "ts": timestamp_seconds(),
-        "level": level,
-        "target": target,
-        "event": event,
-        "message": message,
-        "trace_id": context.trace_id,
-        "turn_id": context.turn_id,
-        "tool_name": context.tool_name,
-        "agent_id": context.agent_id,
-        "error_kind": context.error_kind,
-        "call_id": context.call_id,
-        "session_id": context.session_id,
-        "workspace_path": context.workspace_path,
-        "queue_depth": context.queue_depth,
-        "event_seq": context.event_seq,
-        "turn_kind": context.turn_kind,
-    })
-    .to_string()
+    use serde_json::Map;
+
+    let global = GLOBAL_LOG_CONTEXT.get();
+
+    let mut map = Map::new();
+    map.insert("ts".into(), Value::String(timestamp_seconds()));
+    map.insert("level".into(), Value::String(level.to_owned()));
+    map.insert("target".into(), Value::String(target.to_owned()));
+    map.insert("event".into(), Value::String(event.to_owned()));
+    map.insert("message".into(), Value::String(message.to_owned()));
+
+    if let Some(v) = context.trace_id {
+        map.insert("trace_id".into(), Value::String(v.to_owned()));
+    }
+    if let Some(v) = context.turn_id {
+        map.insert("turn_id".into(), Value::String(v.to_owned()));
+    }
+    if let Some(v) = context.tool_name {
+        map.insert("tool_name".into(), Value::String(v.to_owned()));
+    }
+    if let Some(v) = context.agent_id {
+        map.insert("agent_id".into(), Value::String(v.to_owned()));
+    }
+    if let Some(v) = context.error_kind {
+        map.insert("error_kind".into(), Value::String(v.to_owned()));
+    }
+    if let Some(v) = context.call_id {
+        map.insert("call_id".into(), Value::String(v.to_owned()));
+    }
+
+    // session_id: prefer explicit context, fall back to global
+    let session_id = context.session_id.or(global.map(|g| g.session_id.as_str()));
+    if let Some(v) = session_id {
+        map.insert("session_id".into(), Value::String(v.to_owned()));
+    }
+
+    // workspace_path: prefer explicit context, fall back to global
+    let workspace_path = context
+        .workspace_path
+        .or(global.map(|g| g.workspace_path.as_str()));
+    if let Some(v) = workspace_path {
+        map.insert("workspace_path".into(), Value::String(v.to_owned()));
+    }
+
+    if let Some(v) = context.queue_depth {
+        map.insert("queue_depth".into(), Value::Number(v.into()));
+    }
+    if let Some(v) = context.event_seq {
+        map.insert("event_seq".into(), Value::Number(v.into()));
+    }
+    if let Some(v) = context.turn_kind {
+        map.insert("turn_kind".into(), Value::String(v.to_owned()));
+    }
+
+    Value::Object(map).to_string()
 }
 
 #[allow(clippy::too_many_arguments)]
