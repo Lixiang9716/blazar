@@ -51,6 +51,14 @@ Rules:
 
 ## Plugin Folder Structure
 
+Current implementation path (verified in repository):
+
+1. `src/chat/commands/builtins/plan.rs`
+   - `/plan` plugin command definition and execution
+   - currently prepares composer text (`/plan `)
+
+Planned refactor target (not yet landed):
+
 `src/chat/commands/builtins/plan/`
 
 1. `command.rs`
@@ -64,11 +72,14 @@ Rules:
    - JSON read/write
    - SQLite index sync/rebuild
 
-`src/chat/commands/builtins/plan.rs` acts as module entry and re-exports.
+When split structure lands, `src/chat/commands/builtins/plan.rs` should act as module entry and re-exports.
 
 ## Persistence Model (Hybrid)
 
 ### Git Source of Truth
+
+Current implementation does not yet persist plans to disk.
+Target storage path for this design:
 
 `.blazar/plans/<plan_id>.json`
 
@@ -85,6 +96,9 @@ Recommended fields:
 - `events` (decision/status summary only)
 
 ### Local Query Index (Not in Git)
+
+Current implementation does not yet build this local index.
+Target index path for this design:
 
 `.blazar/state/plan_index.db`
 
