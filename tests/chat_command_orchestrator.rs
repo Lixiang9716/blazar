@@ -98,6 +98,12 @@ async fn execute_plan_command_bootstraps_session_and_sets_continue_guidance() {
             .any(|entry| entry.body.contains("/plan --continue") && entry.body.contains(plan_id)),
         "timeline should include continue hint"
     );
+    assert!(
+        app.timeline()
+            .iter()
+            .any(|entry| entry.body.to_ascii_lowercase().contains("deferred")),
+        "timeline guidance should explicitly call out deferred continuation semantics"
+    );
 
     let _ = std::fs::remove_dir_all(&workspace);
 }

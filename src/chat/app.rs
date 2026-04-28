@@ -577,32 +577,38 @@ fn parse_composer_command_dispatch(
 }
 
 fn parse_plan_command_dispatch(trimmed: &str) -> Option<(String, serde_json::Value)> {
-    let request = trimmed.strip_prefix("/plan")?.trim();
+    let mut command_and_tail = trimmed.splitn(2, char::is_whitespace);
+    if command_and_tail.next()? != "/plan" {
+        return None;
+    }
+    let request = command_and_tail.next().map(str::trim).unwrap_or_default();
     if request.is_empty() {
         return None;
     }
 
-    if let Some(continue_tail) = request.strip_prefix("--continue") {
-        let continue_tail = continue_tail.trim();
-        let mut parts = continue_tail.splitn(2, char::is_whitespace);
-        let continue_id = parts.next().unwrap_or("").trim();
-        let goal = parts
-            .next()
-            .map(str::trim)
-            .filter(|value| !value.is_empty());
+    let mut request_tokens = request.split_whitespace();
+    let first_token = request_tokens.next()?;
+    if first_token == "--continue" {
+        let continue_id = request_tokens.next().unwrap_or("").trim();
+        let goal = request_tokens
+            .collect::<Vec<_>>()
+            .join(" ")
+            .trim()
+            .to_owned();
         let mut args = serde_json::Map::new();
         args.insert(
             "continue_id".to_owned(),
             serde_json::Value::String(continue_id.to_owned()),
         );
-        if let Some(goal) = goal {
-            args.insert(
-                "goal".to_owned(),
-                serde_json::Value::String(goal.to_owned()),
-            );
+        if !goal.is_empty() {
+            args.insert("goal".to_owned(), serde_json::Value::String(goal));
         }
 
         return Some(("/plan".to_owned(), serde_json::Value::Object(args)));
+    }
+
+    if first_token.starts_with("--") {
+        return None;
     }
 
     Some((

@@ -75,14 +75,15 @@ impl PaletteCommand for PlanCommand {
                 decision.summary,
                 decision.phase.as_str()
             ));
-            ctx.app
-                .push_system_hint(format!("Continue this plan with `{continue_command}`."));
+            ctx.app.push_system_hint(format!(
+                "Continue this plan with `{continue_command}`. This workflow is intentionally staged; deeper steps are deferred until you run the continue command."
+            ));
             ctx.app.set_composer_text(&continue_command);
 
             let lifecycle = if resumed { "continued" } else { "started" };
             Ok(CommandResult {
                 summary: format!(
-                    "Plan {plan_id} {lifecycle}: {} (phase: {})",
+                    "Plan {plan_id} {lifecycle}: {} (phase: {}). Continuation is intentionally staged; deeper steps remain deferred until `/plan --continue`.",
                     decision.summary,
                     decision.phase.as_str()
                 ),

@@ -55,6 +55,17 @@ fn read_plan_json(workspace: &Path, plan_id: &str) -> serde_json::Value {
     serde_json::from_str(&raw).expect("plan json should parse")
 }
 
+fn assert_submits_as_plain_message(app: &mut ChatApp, text: &str) {
+    app.set_composer_text(text);
+    app.handle_action(InputAction::Submit);
+    assert!(
+        app.timeline()
+            .iter()
+            .any(|entry| entry.actor == Actor::User && entry.body == text),
+        "expected malformed form {text:?} to be submitted as a regular message"
+    );
+}
+
 #[test]
 fn enter_key_submits_composer_content_and_clears() {
     let mut app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
@@ -285,4 +296,22 @@ fn chat_runtime_submit_plan_continue_from_composer_dispatches_plan_command() {
     );
 
     let _ = std::fs::remove_dir_all(&workspace);
+}
+
+#[test]
+fn chat_runtime_does_not_treat_planner_as_plan_command() {
+    let mut app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
+    assert_submits_as_plain_message(&mut app, "/planner");
+}
+
+#[test]
+fn chat_runtime_does_not_treat_planx_as_plan_command() {
+    let mut app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
+    assert_submits_as_plain_message(&mut app, "/planx");
+}
+
+#[test]
+fn chat_runtime_rejects_malformed_plan_continue_flag_form() {
+    let mut app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
+    assert_submits_as_plain_message(&mut app, "/plan --continue123 bad");
 }
