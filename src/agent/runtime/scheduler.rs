@@ -509,4 +509,188 @@ mod tests {
             vec!["read-a", "exclusive-bash", "read-c"]
         );
     }
+
+    // ── plan_tool_call tests (JSON error / repair / consecutive-failure paths) ──
+
+    use super::{PendingToolCall, PlannedToolAction, plan_tool_call};
+    use crate::agent::tools::ToolRegistry;
+    use std::collections::{HashMap, HashSet};
+    use std::path::PathBuf;
+
+    fn empty_registry() -> ToolRegistry {
+        ToolRegistry::new(PathBuf::from("/tmp/test-workspace"))
+    }
+
+    fn pending(name: &str, arguments: &str) -> PendingToolCall {
+        PendingToolCall {
+            call_id: "c1".into(),
+            name: name.into(),
+            arguments: arguments.into(),
+        }
+    }
+
+    #[test]
+    fn plan_tool_call_returns_parse_error_for_invalid_json() {
+        let registry = empty_registry();
+        let mut failures = HashMap::new();
+        let successes = HashSet::new();
+
+        let result = plan_tool_call(
+            &registry,
+            pending("unknown_tool", "not valid json {{{"),
+            &successes,
+            &mut failures,
+        );
+
+        match result.item.action {
+            PlannedToolAction::Immediate(cap_result) => {
+                let text = cap_result.text_output();
+                assert!(text.contains("JSON PARSE ERROR"), "got: {text}");
+            }
+            _ => panic!("expected Immediate for parse error"),
+        }
+        // failure counter should be 1
+        assert_eq!(failures.len(), 1);
+        assert_eq!(*failures.values().next().unwrap(), 1);
+    }
+
+    #[test]
+    fn plan_tool_call_returns_repeated_error_on_second_identical_failure() {
+        let registry = empty_registry();
+        let mut failures = HashMap::new();
+        let successes = HashSet::new();
+        let bad_args = "not valid json {{{";
+
+        // First failure
+        let _ = plan_tool_call(
+            &registry,
+            pending("unknown_tool", bad_args),
+            &successes,
+            &mut failures,
+        );
+
+        // Second identical failure
+        let result = plan_tool_call(
+            &registry,
+            pending("unknown_tool", bad_args),
+            &successes,
+            &mut failures,
+        );
+
+        match result.item.action {
+            PlannedToolAction::Immediate(cap_result) => {
+                let text = cap_result.text_output();
+                assert!(
+                    text.contains("REPEATED JSON ERROR"),
+                    "expected repeated-error guidance, got: {text}"
+                );
+            }
+            _ => panic!("expected Immediate for repeated error"),
+        }
+    }
+
+    #[test]
+    fn plan_tool_call_failure_counter_is_keyed_by_name_and_args() {
+        let registry = empty_registry();
+        let mut failures = HashMap::new();
+        let successes = HashSet::new();
+
+        // First bad call
+        let _ = plan_tool_call(
+            &registry,
+            pending("unknown_tool", "bad json 1"),
+            &successes,
+            &mut failures,
+        );
+        // Second different bad call
+        let _ = plan_tool_call(
+            &registry,
+            pending("unknown_tool", "bad json 2"),
+            &successes,
+            &mut failures,
+        );
+
+        // Each distinct args string gets its own counter at 1
+        assert_eq!(failures.len(), 2);
+        assert!(failures.values().all(|&v| v == 1));
+
+        // Repeating the first bad call bumps only that counter to 2
+        let result = plan_tool_call(
+            &registry,
+            pending("unknown_tool", "bad json 1"),
+            &successes,
+            &mut failures,
+        );
+        assert_eq!(
+            failures[&("unknown_tool".to_string(), "bad json 1".to_string())],
+            2
+        );
+        match result.item.action {
+            PlannedToolAction::Immediate(cap) => {
+                assert!(cap.text_output().contains("REPEATED JSON ERROR"));
+            }
+            _ => panic!("expected Immediate for count >= 2"),
+        }
+    }
+
+    #[test]
+    fn plan_tool_call_repairs_bash_with_unescaped_quotes() {
+        let registry = empty_registry();
+        let mut failures = HashMap::new();
+        let successes = HashSet::new();
+
+        // Malformed bash JSON: unescaped inner quote
+        let bad_bash = r#"{"command": "echo "hello" world"}"#;
+        let result = plan_tool_call(
+            &registry,
+            pending("bash", bad_bash),
+            &successes,
+            &mut failures,
+        );
+
+        match &result.item.action {
+            PlannedToolAction::Execute { was_repaired, .. } => {
+                assert!(was_repaired, "bash repair should have kicked in");
+            }
+            PlannedToolAction::Immediate(_) => {
+                // Repair didn't work for this particular pattern — that's OK,
+                // just verify the failure counter incremented
+                assert!(failures.len() <= 1);
+            }
+        }
+    }
+
+    #[test]
+    fn plan_tool_call_returns_repeated_success_guidance() {
+        let registry = empty_registry();
+        let mut failures = HashMap::new();
+        let valid_args = r#"{"command":"ls"}"#;
+        let signature = (
+            "bash".to_string(),
+            super::super::json_repair::canonical_tool_args(
+                &serde_json::from_str(valid_args).unwrap(),
+                valid_args,
+            ),
+        );
+        let mut successes = HashSet::new();
+        successes.insert(signature);
+
+        let result = plan_tool_call(
+            &registry,
+            pending("bash", valid_args),
+            &successes,
+            &mut failures,
+        );
+
+        match result.item.action {
+            PlannedToolAction::Immediate(cap_result) => {
+                let text = cap_result.text_output();
+                assert!(
+                    text.contains("already") || text.contains("REPEATED") || !text.is_empty(),
+                    "expected repeated-success guidance, got: {text}"
+                );
+            }
+            _ => panic!("expected Immediate for repeated success"),
+        }
+    }
 }

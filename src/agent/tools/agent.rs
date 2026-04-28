@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 
 use super::{
     BuiltinToolDescriptor, BuiltinToolProfiles, Tool, ToolBuildContext, ToolBuildProfile, ToolKind,
-    ToolResult, ToolSpec, register_builtin_tools,
+    ToolResult, ToolRegistry, ToolSpec, register_builtin_tools,
 };
 use crate::agent::runtime::turn::{SilentObserver, TurnOutcome, execute_turn};
 use crate::provider::{LlmProvider, ProviderMessage};
@@ -28,6 +28,64 @@ inventory::submit! {
     }
 }
 
+/// Runs a sub-agent turn. Abstracted so tests can provide a simple
+/// implementation without invoking a real LLM provider.
+pub(crate) trait TurnRunner: Send + Sync {
+    fn run_turn(
+        &self,
+        messages: &mut Vec<ProviderMessage>,
+        tools: &ToolRegistry,
+        cancel_flag: &Arc<AtomicBool>,
+    ) -> TurnOutcome;
+}
+
+/// Builds a tool registry for a sub-agent. Abstracted so tests can
+/// skip real tool registration.
+pub(crate) trait ToolRegistryFactory: Send + Sync {
+    fn create(
+        &self,
+        ctx: &ToolBuildContext,
+        profile: ToolBuildProfile,
+    ) -> Result<ToolRegistry, String>;
+}
+
+/// Production implementation: calls `execute_turn` with `SilentObserver`.
+struct DefaultTurnRunner {
+    provider: Arc<dyn LlmProvider>,
+    model: String,
+}
+
+impl TurnRunner for DefaultTurnRunner {
+    fn run_turn(
+        &self,
+        messages: &mut Vec<ProviderMessage>,
+        tools: &ToolRegistry,
+        cancel_flag: &Arc<AtomicBool>,
+    ) -> TurnOutcome {
+        execute_turn(
+            messages,
+            &*self.provider,
+            &self.model,
+            tools,
+            &SilentObserver,
+            cancel_flag,
+        )
+    }
+}
+
+/// Production implementation: delegates to `register_builtin_tools`.
+struct DefaultToolRegistryFactory;
+
+impl ToolRegistryFactory for DefaultToolRegistryFactory {
+    fn create(
+        &self,
+        ctx: &ToolBuildContext,
+        profile: ToolBuildProfile,
+    ) -> Result<ToolRegistry, String> {
+        register_builtin_tools(ctx, profile)
+    }
+}
+
 /// A tool that delegates work to a sub-agent turn.
 ///
 /// When the parent agent invokes this tool, a fresh `execute_turn` is
@@ -40,6 +98,8 @@ pub struct AgentTool {
     provider: Arc<dyn LlmProvider>,
     model: String,
     workspace_root: PathBuf,
+    turn_runner: Box<dyn TurnRunner>,
+    registry_factory: Box<dyn ToolRegistryFactory>,
 }
 
 impl AgentTool {
@@ -50,9 +110,36 @@ impl AgentTool {
         model: impl Into<String>,
         workspace_root: PathBuf,
     ) -> Self {
+        let model = model.into();
         Self {
             name: name.into(),
             description: description.into(),
+            turn_runner: Box::new(DefaultTurnRunner {
+                provider: Arc::clone(&provider),
+                model: model.clone(),
+            }),
+            registry_factory: Box::new(DefaultToolRegistryFactory),
+            provider,
+            model,
+            workspace_root,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_deps(
+        name: impl Into<String>,
+        description: impl Into<String>,
+        provider: Arc<dyn LlmProvider>,
+        model: impl Into<String>,
+        workspace_root: PathBuf,
+        turn_runner: Box<dyn TurnRunner>,
+        registry_factory: Box<dyn ToolRegistryFactory>,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            description: description.into(),
+            turn_runner,
+            registry_factory,
             provider,
             model: model.into(),
             workspace_root,
@@ -93,7 +180,7 @@ impl Tool for AgentTool {
             provider: Arc::clone(&self.provider),
             model: self.model.clone(),
         };
-        let tools = match register_builtin_tools(&ctx, ToolBuildProfile::SubAgent) {
+        let tools = match self.registry_factory.create(&ctx, ToolBuildProfile::SubAgent) {
             Ok(t) => t,
             Err(e) => return ToolResult::failure(format!("sub-agent tool assembly failed: {e}")),
         };
@@ -103,16 +190,8 @@ impl Tool for AgentTool {
         }];
 
         let cancel_flag = Arc::new(AtomicBool::new(false));
-        let observer = SilentObserver;
 
-        let outcome = execute_turn(
-            &mut messages,
-            &*self.provider,
-            &self.model,
-            &tools,
-            &observer,
-            &cancel_flag,
-        );
+        let outcome = self.turn_runner.run_turn(&mut messages, &tools, &cancel_flag);
 
         match outcome {
             TurnOutcome::Complete => {
@@ -134,5 +213,172 @@ impl Tool for AgentTool {
                 ToolResult::failure(format!("sub-agent error: {error}"))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::agent::runtime::RuntimeErrorKind;
+    use crate::provider::echo::EchoProvider;
+
+    /// A turn runner that appends an assistant message and returns a preset outcome.
+    struct StubTurnRunner {
+        outcome: TurnOutcome,
+        assistant_text: Option<String>,
+    }
+
+    impl TurnRunner for StubTurnRunner {
+        fn run_turn(
+            &self,
+            messages: &mut Vec<ProviderMessage>,
+            _tools: &ToolRegistry,
+            _cancel_flag: &Arc<AtomicBool>,
+        ) -> TurnOutcome {
+            if let Some(text) = &self.assistant_text {
+                messages.push(ProviderMessage::Assistant {
+                    content: text.clone(),
+                });
+            }
+            match &self.outcome {
+                TurnOutcome::Complete => TurnOutcome::Complete,
+                TurnOutcome::Cancelled => TurnOutcome::Cancelled,
+                TurnOutcome::TransientError(e) => TurnOutcome::TransientError(e.clone()),
+                TurnOutcome::FatalError { kind, error } => TurnOutcome::FatalError {
+                    kind: *kind,
+                    error: error.clone(),
+                },
+            }
+        }
+    }
+
+    /// A factory that returns an empty registry and asserts the expected profile.
+    struct StubRegistryFactory;
+
+    impl ToolRegistryFactory for StubRegistryFactory {
+        fn create(
+            &self,
+            _ctx: &ToolBuildContext,
+            profile: ToolBuildProfile,
+        ) -> Result<ToolRegistry, String> {
+            assert_eq!(
+                profile,
+                ToolBuildProfile::SubAgent,
+                "AgentTool must request SubAgent profile"
+            );
+            Ok(ToolRegistry::new(PathBuf::from("/tmp/test-workspace")))
+        }
+    }
+
+    /// A factory that always fails.
+    struct FailingRegistryFactory;
+
+    impl ToolRegistryFactory for FailingRegistryFactory {
+        fn create(
+            &self,
+            _ctx: &ToolBuildContext,
+            _profile: ToolBuildProfile,
+        ) -> Result<ToolRegistry, String> {
+            Err("simulated registry failure".to_string())
+        }
+    }
+
+    fn make_agent(runner: StubTurnRunner, factory: impl ToolRegistryFactory + 'static) -> AgentTool {
+        AgentTool::with_deps(
+            "sub_agent",
+            "test agent",
+            Arc::new(EchoProvider::default()),
+            "test-model",
+            PathBuf::from("/tmp/test-workspace"),
+            Box::new(runner),
+            Box::new(factory),
+        )
+    }
+
+    #[test]
+    fn missing_prompt_returns_error() {
+        let runner = StubTurnRunner {
+            outcome: TurnOutcome::Complete,
+            assistant_text: None,
+        };
+        let tool = make_agent(runner, StubRegistryFactory);
+        let result = tool.execute(json!({}));
+        assert!(result.is_error);
+        assert!(result.text_output().contains("prompt"));
+    }
+
+    #[test]
+    fn registry_failure_returns_error() {
+        let runner = StubTurnRunner {
+            outcome: TurnOutcome::Complete,
+            assistant_text: None,
+        };
+        let tool = make_agent(runner, FailingRegistryFactory);
+        let result = tool.execute(json!({"prompt": "do something"}));
+        assert!(result.is_error);
+        assert!(result.text_output().contains("sub-agent tool assembly failed"));
+    }
+
+    #[test]
+    fn complete_with_assistant_text_returns_success() {
+        let runner = StubTurnRunner {
+            outcome: TurnOutcome::Complete,
+            assistant_text: Some("done!".to_string()),
+        };
+        let tool = make_agent(runner, StubRegistryFactory);
+        let result = tool.execute(json!({"prompt": "do something"}));
+        assert!(!result.is_error);
+        assert_eq!(result.text_output(), "done!");
+    }
+
+    #[test]
+    fn complete_without_assistant_text_returns_empty() {
+        let runner = StubTurnRunner {
+            outcome: TurnOutcome::Complete,
+            assistant_text: None,
+        };
+        let tool = make_agent(runner, StubRegistryFactory);
+        let result = tool.execute(json!({"prompt": "do something"}));
+        assert!(!result.is_error);
+        assert_eq!(result.text_output(), "");
+    }
+
+    #[test]
+    fn cancelled_outcome_returns_failure() {
+        let runner = StubTurnRunner {
+            outcome: TurnOutcome::Cancelled,
+            assistant_text: None,
+        };
+        let tool = make_agent(runner, StubRegistryFactory);
+        let result = tool.execute(json!({"prompt": "do something"}));
+        assert!(result.is_error);
+        assert!(result.text_output().contains("cancelled"));
+    }
+
+    #[test]
+    fn transient_error_returns_failure() {
+        let runner = StubTurnRunner {
+            outcome: TurnOutcome::TransientError("timeout".to_string()),
+            assistant_text: None,
+        };
+        let tool = make_agent(runner, StubRegistryFactory);
+        let result = tool.execute(json!({"prompt": "do something"}));
+        assert!(result.is_error);
+        assert!(result.text_output().contains("timeout"));
+    }
+
+    #[test]
+    fn fatal_error_returns_failure() {
+        let runner = StubTurnRunner {
+            outcome: TurnOutcome::FatalError {
+                kind: RuntimeErrorKind::ToolExecution,
+                error: "iteration limit".to_string(),
+            },
+            assistant_text: None,
+        };
+        let tool = make_agent(runner, StubRegistryFactory);
+        let result = tool.execute(json!({"prompt": "do something"}));
+        assert!(result.is_error);
+        assert!(result.text_output().contains("iteration limit"));
     }
 }

@@ -493,4 +493,55 @@ mod tests {
         assert!(!outside.join("escape.txt").exists());
         assert!(error.kind() != std::io::ErrorKind::NotFound);
     }
+
+    // ── Validation tests (no real filesystem needed) ──────────────────
+
+    use super::WriteFileTool;
+    use super::Tool as _;
+    use serde_json::json;
+
+    #[test]
+    fn execute_missing_path_returns_error() {
+        let ws = fresh_workspace("missing-path");
+        let tool = WriteFileTool::new(ws);
+        let result = tool.execute(json!({"content": "hello"}));
+        assert!(result.is_error);
+        assert!(result.text_output().contains("requires a string path"));
+    }
+
+    #[test]
+    fn execute_missing_content_returns_error() {
+        let ws = fresh_workspace("missing-content");
+        let tool = WriteFileTool::new(ws);
+        let result = tool.execute(json!({"path": "foo.txt"}));
+        assert!(result.is_error);
+        assert!(result.text_output().contains("requires string content"));
+    }
+
+    #[test]
+    fn execute_non_string_path_returns_error() {
+        let ws = fresh_workspace("non-string-path");
+        let tool = WriteFileTool::new(ws);
+        let result = tool.execute(json!({"path": 42, "content": "hello"}));
+        assert!(result.is_error);
+        assert!(result.text_output().contains("requires a string path"));
+    }
+
+    #[test]
+    fn execute_empty_path_returns_error() {
+        let ws = fresh_workspace("empty-path");
+        let tool = WriteFileTool::new(ws);
+        let result = tool.execute(json!({"path": "", "content": "hello"}));
+        assert!(result.is_error);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn execute_path_only_filename_returns_error() {
+        let ws = fresh_workspace("only-dot");
+        let tool = WriteFileTool::new(ws);
+        // "." has no file-name component
+        let result = tool.execute(json!({"path": ".", "content": "hello"}));
+        assert!(result.is_error);
+    }
 }
