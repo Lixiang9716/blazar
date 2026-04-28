@@ -8,6 +8,6 @@ impl PlanStore {
     }
 
     pub(crate) fn create_session(self) -> PlanSession {
-        PlanSession
+        PlanSession::new()
     }
 }
