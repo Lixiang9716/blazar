@@ -12,7 +12,7 @@ static BANNER_EPOCH: OnceLock<Instant> = OnceLock::new();
 /// Layout: colored solid border wrapping [mascot | text] side-by-side.
 pub(super) fn render_banner_entry<'a>(
     theme: &ChatTheme,
-    width: u16,
+    _width: u16,
     workspace: &str,
     branch: &str,
 ) -> Vec<Line<'a>> {

@@ -192,7 +192,9 @@ fn users_area_hides_separator_when_input_or_model_is_zero_height() {
     // timeline may contain border characters.
     let users_rows = input_zero_lines.len().saturating_sub(3);
     assert!(
-        input_zero_lines[users_rows..].iter().all(|line| !line.contains("─")),
+        input_zero_lines[users_rows..]
+            .iter()
+            .all(|line| !line.contains("─")),
         "separator should stay hidden when input height is zero"
     );
 
