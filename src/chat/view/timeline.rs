@@ -55,47 +55,11 @@ fn render_timeline_with_renderer(
 
     let content_width = area.width;
 
-    // Track logical turns for turn headers
-    let mut last_actor: Option<Actor> = None;
-    let mut user_turn = 0u16;
-    let mut assistant_turn = 0u16;
-
     for entry in app.timeline() {
         let hide_empty_thinking = entry.kind == EntryKind::Thinking && entry.body.trim().is_empty();
         if hide_empty_thinking {
             continue;
         }
-
-        // Insert turn header when actor changes between User and Assistant
-        let is_user = entry.actor == Actor::User && entry.kind == EntryKind::Message;
-        let is_assistant = entry.actor == Actor::Assistant && entry.kind == EntryKind::Message;
-
-        if is_user {
-            if last_actor != Some(Actor::User) {
-                user_turn += 1;
-                lines.push(Line::from(vec![
-                    Span::raw(MARGIN),
-                    Span::styled(format!("You #{user_turn}"), theme.bold_text),
-                ]));
-            }
-            last_actor = Some(Actor::User);
-        } else if is_assistant {
-            if last_actor != Some(Actor::Assistant) {
-                assistant_turn += 1;
-                lines.push(Line::from(vec![
-                    Span::raw(MARGIN),
-                    Span::styled(
-                        entry
-                            .title
-                            .clone()
-                            .unwrap_or_else(|| format!("Blazar #{assistant_turn}")),
-                        theme.marker_response,
-                    ),
-                ]));
-            }
-            last_actor = Some(Actor::Assistant);
-        }
-        // Tool/thinking/etc entries stay within the current assistant turn
 
         let entry_lines = renderer.render(entry, theme, content_width);
         lines.extend(entry_lines);

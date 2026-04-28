@@ -3,11 +3,10 @@ use blazar::chat::app::ChatApp;
 const REPO_ROOT: &str = env!("CARGO_MANIFEST_DIR");
 
 #[test]
-fn chat_app_starts_with_a_spirit_greeting_message() {
+fn chat_app_starts_with_no_messages() {
     let app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
 
-    assert_eq!(app.messages().len(), 1);
-    assert!(app.messages()[0].body.contains("Spirit"));
+    assert!(app.messages().is_empty());
 }
 
 #[test]
@@ -17,8 +16,8 @@ fn sending_a_user_message_appends_user_and_spirit_messages() {
     app.send_message("Help me design a Spirit chat UI");
 
     // User message is added synchronously.
-    assert_eq!(app.messages().len(), 2);
-    assert!(app.messages()[1].body.contains("Help me design"));
+    assert_eq!(app.messages().len(), 1);
+    assert!(app.messages()[0].body.contains("Help me design"));
 
     // Agent response arrives asynchronously via tick().
     // Give the background thread time to process, then drain events.

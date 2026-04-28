@@ -17,7 +17,7 @@ fn timeline_initial_render_includes_banner_entry() {
     let lines = crate::chat::view::render_to_lines_for_test(&mut app, 100, 28);
     let text = lines.join("\n");
     assert!(
-        text.contains("● Describe a task to get started."),
+        text.contains("Describe a task to get started."),
         "initial timeline should include the banner entry"
     );
 }
@@ -34,7 +34,7 @@ fn timeline_keeps_banner_after_first_user_message_and_renders_thinking() {
     let lines = crate::chat::view::render_to_lines_for_test(&mut app, 100, 28);
     let text = lines.join("\n");
     assert!(
-        text.contains("● Describe a task to get started."),
+        text.contains("Describe a task to get started."),
         "banner entry should remain visible after the first user message"
     );
     assert!(

@@ -2,20 +2,20 @@
 source: tests/chat_render_snapshot.rs
 expression: "lines.join(\"\\n\")"
 ---
-  ● Describe a task to get started.                         
-                                                            
-  Blazar #1                                                 
-  ● Tell me what you'd like to explore.                     
-                                                            
-                                                            
-                                                            
-                                                            
-                                                            
-                                                            
-                                                            
-                                                            
-                                                            
-                                                            
+  │       ███████████████████         Blazar uses AI. Check 
+for mistakes.             │                                 
+  │        ▀█▀▀▀▀▀▀▀▀▀▀▀▀▀█▀                                
+                         │                                  
+  │          ▀▀▀▀▀▀▀▀▀▀▀▀▀                                  
+                         │                                  
+  │                                                         
+                         │                                  
+  │                                                         
+                         │                                  
+  │                                                         
+                         │                                  
+  ╰─────────────────────────────────────────────────────────
+──────────────────────────╯                                 
                                                             
 ~/blazar · main                                             
 ────────────────────────────────────────────────────────────

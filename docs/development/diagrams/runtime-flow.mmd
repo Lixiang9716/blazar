@@ -1,0 +1,24 @@
+flowchart TD
+    A["run_terminal_chat()"] --> B["Init ChatApp + Terminal"]
+    B --> C{"Main loop"}
+    C --> D["app.tick()"]
+    D --> E["drain agent_runtime.try_recv() -> apply_agent_event()"]
+    E --> F["render_frame()"]
+    F --> G{"event::poll/read"}
+    G -->|key/mouse/paste| H["handle_action(InputAction)"]
+    H --> C
+
+    H -->|Submit| I["submit_composer()"]
+    I --> J["send_message()"]
+    J --> K{"agent_state.is_busy()"}
+    K -->|yes| L["enqueue pending_messages"]
+    K -->|no| M["dispatch_turn()"]
+    M --> N["agent_runtime.submit_turn()"]
+
+    N --> O["runtime_loop thread"]
+    O --> P["run_turn_with_retry()"]
+    P --> Q["execute_turn()"]
+    Q --> R["stream_provider_pass()"]
+    R --> S["ProviderEvent stream"]
+    S --> T["ChannelObserver -> AgentEvent"]
+    T --> D

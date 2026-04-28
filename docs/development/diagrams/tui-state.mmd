@@ -1,0 +1,17 @@
+stateDiagram-v2
+    [*] --> PickerClosed
+
+    PickerClosed --> PickerOpen: open command/theme/model picker
+    PickerOpen --> PickerClosed: Esc / close / select submit
+
+    state "Users Status Mode" as USM {
+        [*] --> Normal
+        Normal --> CommandList: composer starts with "/"
+        CommandList --> Normal: composer no longer starts with "/"
+    }
+
+    state "Streaming Indicator" as SI {
+        [*] --> Off
+        Off --> On: app.is_streaming() == true
+        On --> Off: TurnComplete / TurnFailed
+    }

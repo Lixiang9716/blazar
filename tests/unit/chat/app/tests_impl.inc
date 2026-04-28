@@ -867,10 +867,8 @@ fn send_message_queues_when_agent_busy_without_immediate_timeline_insert() {
     assert_eq!(app.pending_messages.len(), 2);
     assert_eq!(app.pending_messages[0].user_text, "second message");
     assert_eq!(app.pending_messages[1].user_text, "third message");
-    assert_eq!(app.messages().len(), 2);
-    assert_eq!(app.messages()[1].body, "first message");
-
-    // Queued turns should not mutate the visible timeline until dispatch.
+    assert_eq!(app.messages().len(), 1);
+    assert_eq!(app.messages()[0].body, "first message");
     let user_messages: Vec<&str> = app
         .timeline
         .iter()
@@ -914,8 +912,8 @@ fn dispatch_next_queued_drains_fifo_on_turn_complete() {
     app.apply_agent_event_for_test(AgentEvent::TurnComplete);
     assert_eq!(app.pending_messages.len(), 1);
     assert_eq!(app.pending_messages[0].user_text, "queued-b");
-    assert_eq!(app.messages().len(), 2);
-    assert_eq!(app.messages()[1].body, "queued-a");
+    assert_eq!(app.messages().len(), 1);
+    assert_eq!(app.messages()[0].body, "queued-a");
     assert!(
         app.timeline
             .iter()
@@ -937,8 +935,8 @@ fn discover_agents_queued_while_busy_and_runs_after_turn() {
     app.send_message("/discover-agents");
     app.send_message("after");
     assert_eq!(app.pending_messages.len(), 2);
-    assert_eq!(app.messages().len(), 2);
-    assert_eq!(app.messages()[1].body, "first message");
+    assert_eq!(app.messages().len(), 1);
+    assert_eq!(app.messages()[0].body, "first message");
 
     app.apply_agent_event_for_test(AgentEvent::TurnComplete);
     assert_eq!(app.pending_messages.len(), 1);
@@ -970,8 +968,8 @@ fn discover_agents_refresh_failure_continues_queue() {
     app.send_message("/discover-agents");
     app.send_message("after");
     assert_eq!(app.pending_messages.len(), 2);
-    assert_eq!(app.messages().len(), 2);
-    assert_eq!(app.messages()[1].body, "first message");
+    assert_eq!(app.messages().len(), 1);
+    assert_eq!(app.messages()[0].body, "first message");
 
     app.apply_agent_event_for_test(AgentEvent::TurnComplete);
     assert_eq!(app.pending_messages.len(), 1);
@@ -1179,7 +1177,7 @@ fn planning_turn_uses_planning_while_streaming_then_sets_title() {
 
     let completed_lines = render_to_lines_for_test(&mut app, 90, 24);
     let completed_text = completed_lines.join("\n");
-    assert!(completed_text.contains("MiniMax Provider Integration"));
+    assert!(completed_text.contains("Review current provider abstraction"));
     assert!(!completed_text.contains("Blazar #2"));
 }
 

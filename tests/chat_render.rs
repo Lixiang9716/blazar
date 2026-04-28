@@ -33,7 +33,7 @@ fn chat_view_renders_title_bar_and_timeline() {
     assert!(
         lines
             .iter()
-            .any(|line| line.contains("Tell me what you'd like to explore")),
+            .any(|line| line.contains("Describe a task to get started.")),
         "timeline should show initial greeting"
     );
 }
@@ -188,8 +188,11 @@ fn users_area_hides_separator_when_input_or_model_is_zero_height() {
         max_command_window_size: 6,
     };
     let input_zero_lines = render_to_lines_for_test_with_users_policy(&mut app, 120, 8, input_zero);
+    // Only check the users area (bottom rows) for separator — the banner in the
+    // timeline may contain border characters.
+    let users_rows = input_zero_lines.len().saturating_sub(3);
     assert!(
-        input_zero_lines.iter().all(|line| !line.contains("─")),
+        input_zero_lines[users_rows..].iter().all(|line| !line.contains("─")),
         "separator should stay hidden when input height is zero"
     );
 
@@ -200,8 +203,9 @@ fn users_area_hides_separator_when_input_or_model_is_zero_height() {
         max_command_window_size: 6,
     };
     let model_zero_lines = render_to_lines_for_test_with_users_policy(&mut app, 120, 8, model_zero);
+    let users_rows_m = model_zero_lines.len().saturating_sub(3);
     assert!(
-        model_zero_lines
+        model_zero_lines[users_rows_m..]
             .iter()
             .filter(|line| line.contains("─"))
             .count()
@@ -424,11 +428,14 @@ fn timeline_does_not_emit_raw_ansi_escape_sequences() {
 #[test]
 fn timeline_entries_have_identity_markers() {
     let mut app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
+    app.send_message("hi");
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    app.tick();
     let lines = render_to_lines_for_test(&mut app, 100, 35);
 
     assert!(
-        lines.iter().any(|line| line.contains('●')),
-        "timeline entries should have ● identity markers"
+        lines.iter().any(|line| line.contains('›')),
+        "user entries should have › identity markers"
     );
 }
 
@@ -481,7 +488,7 @@ fn interactive_send_message_shows_echo_response() {
     assert!(
         lines_before
             .iter()
-            .any(|l| l.contains("Tell me what you'd like to explore")),
+            .any(|l| l.contains("Describe a task to get started.")),
         "initial state should show greeting"
     );
     assert!(

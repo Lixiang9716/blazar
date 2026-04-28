@@ -1,5 +1,6 @@
 use super::*;
 
+mod banner;
 mod common;
 mod fenced_code;
 mod markdown_body;
@@ -45,6 +46,7 @@ impl Default for EntryRenderRegistry {
                 Box::new(HintRenderer),
                 Box::new(ThinkingRenderer),
                 Box::new(CodeBlockRenderer),
+                Box::new(BannerRenderer),
             ],
         }
     }
@@ -69,10 +71,11 @@ struct WarningRenderer;
 struct HintRenderer;
 struct ThinkingRenderer;
 struct CodeBlockRenderer;
+struct BannerRenderer;
 
 impl EntryKindRenderer for MessageRenderer {
     fn supports(&self, kind: &EntryKind) -> bool {
-        matches!(kind, EntryKind::Message | EntryKind::Banner)
+        matches!(kind, EntryKind::Message)
     }
 
     fn render(
@@ -195,6 +198,24 @@ impl EntryKindRenderer for CodeBlockRenderer {
         _marker_style: Style,
     ) -> Vec<Line<'static>> {
         status::render_code_block_entry(entry, theme, width)
+    }
+}
+
+impl EntryKindRenderer for BannerRenderer {
+    fn supports(&self, kind: &EntryKind) -> bool {
+        matches!(kind, EntryKind::Banner)
+    }
+
+    fn render(
+        &self,
+        entry: &TimelineEntry,
+        theme: &ChatTheme,
+        width: u16,
+        _marker_style: Style,
+    ) -> Vec<Line<'static>> {
+        let workspace = &entry.body;
+        let branch = &entry.details;
+        banner::render_banner_entry(theme, width, workspace, branch)
     }
 }
 

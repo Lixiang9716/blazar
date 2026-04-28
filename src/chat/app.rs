@@ -123,16 +123,13 @@ impl ChatApp {
         let timeline = if std::env::var("BLAZAR_DEMO").is_ok() {
             crate::chat::demo::demo_timeline()
         } else {
-            vec![
-                TimelineEntry {
-                    actor: Actor::System,
-                    kind: EntryKind::Banner,
-                    title: Some("Welcome".to_owned()),
-                    body: "Describe a task to get started.".to_owned(),
-                    details: String::new(),
-                },
-                TimelineEntry::response("Tell me what you'd like to explore."),
-            ]
+            vec![TimelineEntry {
+                actor: Actor::System,
+                kind: EntryKind::Banner,
+                title: Some("Welcome".to_owned()),
+                body: display_path.clone(),
+                details: branch.clone(),
+            }]
         };
 
         let mut command_registry = crate::chat::commands::CommandRegistry::new();
@@ -150,10 +147,7 @@ impl ChatApp {
         let runtime = AgentRuntime::new(provider, workspace_root.clone(), model_name.clone())?;
 
         Ok(Self {
-            messages: vec![ChatMessage {
-                author: Author::Spirit,
-                body: "Spirit: Tell me what you'd like to explore.".to_owned(),
-            }],
+            messages: Vec::new(),
             timeline,
             composer: new_composer(),
             display_path,

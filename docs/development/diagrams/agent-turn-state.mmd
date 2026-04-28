@@ -1,0 +1,13 @@
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Streaming: AgentEvent.TurnStarted
+    Streaming --> Done: AgentEvent.TurnComplete
+    Streaming --> Failed: AgentEvent.TurnFailed
+    Done --> Streaming: next TurnStarted
+    Failed --> Streaming: next TurnStarted
+
+    state Streaming {
+        [*] --> Thinking
+        Thinking --> Executing: ToolCallStarted
+        Executing --> Thinking: ToolCallCompleted
+    }
