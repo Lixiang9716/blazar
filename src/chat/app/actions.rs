@@ -163,6 +163,11 @@ impl ChatApp {
         self.should_quit = true;
     }
 
+    /// Toggle debug overlay (show_details flag).
+    pub fn toggle_debug_overlay(&mut self) {
+        self.show_details = !self.show_details;
+    }
+
     /// Clear all conversation messages and timeline entries, preserving only the welcome banner.
     pub fn clear_conversation(&mut self) {
         self.messages.clear();

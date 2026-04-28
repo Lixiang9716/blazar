@@ -14,6 +14,15 @@ impl ChatApp {
         self.refresh_acp_agents();
     }
 
+    pub(crate) fn execute_compact_command(&mut self) {
+        self.send_message_internal("/compact", false);
+    }
+
+    pub(crate) fn push_quit_command(&mut self) {
+        self.push_user_message("/quit");
+        self.should_quit = true;
+    }
+
     fn send_message_internal(&mut self, input: &str, allow_command_dispatch: bool) {
         let trimmed = input.trim();
         if trimmed.is_empty() {

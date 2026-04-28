@@ -23,7 +23,7 @@ impl PaletteCommand for CompactCommand {
         _args: serde_json::Value,
     ) -> CommandExecFuture<'a> {
         Box::pin(async move {
-            ctx.app.send_message_without_command_dispatch("/compact");
+            ctx.app.execute_compact_command();
             Ok(CommandResult {
                 summary: "Compaction started".to_string(),
             })

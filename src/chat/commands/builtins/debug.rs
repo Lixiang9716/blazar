@@ -22,11 +22,16 @@ impl PaletteCommand for DebugCommand {
         ctx: &'a mut CommandContext<'a>,
         _args: serde_json::Value,
     ) -> CommandExecFuture<'a> {
-        let command = self.spec.name.clone();
         Box::pin(async move {
-            ctx.app.send_message_without_command_dispatch(&command);
+            ctx.app.toggle_debug_overlay();
+            let state = if ctx.app.show_details() {
+                "enabled"
+            } else {
+                "disabled"
+            };
+            ctx.app.push_system_hint(format!("Debug overlay {state}"));
             Ok(CommandResult {
-                summary: format!("Queued {command}"),
+                summary: format!("Debug overlay {state}"),
             })
         })
     }

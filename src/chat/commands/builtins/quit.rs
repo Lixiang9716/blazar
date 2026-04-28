@@ -22,11 +22,10 @@ impl PaletteCommand for QuitCommand {
         ctx: &'a mut CommandContext<'a>,
         _args: serde_json::Value,
     ) -> CommandExecFuture<'a> {
-        let command = self.spec.name.clone();
         Box::pin(async move {
-            ctx.app.send_message_without_command_dispatch(&command);
+            ctx.app.push_quit_command();
             Ok(CommandResult {
-                summary: format!("Queued {command}"),
+                summary: "Queued /quit".to_string(),
             })
         })
     }

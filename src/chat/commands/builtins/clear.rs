@@ -22,11 +22,10 @@ impl PaletteCommand for ClearCommand {
         ctx: &'a mut CommandContext<'a>,
         _args: serde_json::Value,
     ) -> CommandExecFuture<'a> {
-        let command = self.spec.name.clone();
         Box::pin(async move {
-            ctx.app.send_message_without_command_dispatch(&command);
+            ctx.app.clear_conversation();
             Ok(CommandResult {
-                summary: format!("Queued {command}"),
+                summary: "Conversation cleared".to_string(),
             })
         })
     }
