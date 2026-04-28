@@ -61,9 +61,8 @@ fn render_timeline_with_renderer(
     let mut assistant_turn = 0u16;
 
     for entry in app.timeline() {
-        let hide_banner = entry.kind == EntryKind::Banner && app.has_user_sent();
         let hide_empty_thinking = entry.kind == EntryKind::Thinking && entry.body.trim().is_empty();
-        if hide_banner || hide_empty_thinking {
+        if hide_empty_thinking {
             continue;
         }
 

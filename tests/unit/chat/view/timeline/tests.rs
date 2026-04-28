@@ -6,7 +6,7 @@ use ratatui_core::{backend::TestBackend, terminal::Terminal};
 #[test]
 fn timeline_renders_banner_and_thinking_entries() {
     timeline_initial_render_includes_banner_entry();
-    timeline_hides_banner_after_first_user_message_and_renders_thinking();
+    timeline_keeps_banner_after_first_user_message_and_renders_thinking();
 }
 
 #[test]
@@ -23,7 +23,7 @@ fn timeline_initial_render_includes_banner_entry() {
 }
 
 #[test]
-fn timeline_hides_banner_after_first_user_message_and_renders_thinking() {
+fn timeline_keeps_banner_after_first_user_message_and_renders_thinking() {
     let mut app = crate::chat::app::ChatApp::new_for_test(env!("CARGO_MANIFEST_DIR"))
         .expect("app should initialize");
     app.send_message("hello");
@@ -34,8 +34,8 @@ fn timeline_hides_banner_after_first_user_message_and_renders_thinking() {
     let lines = crate::chat::view::render_to_lines_for_test(&mut app, 100, 28);
     let text = lines.join("\n");
     assert!(
-        !text.contains("Describe a task to get started."),
-        "banner entry should collapse after the first user message"
+        text.contains("● Describe a task to get started."),
+        "banner entry should remain visible after the first user message"
     );
     assert!(
         text.contains("reasoning"),
