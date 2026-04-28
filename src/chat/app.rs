@@ -565,94 +565,20 @@ fn parse_composer_command_dispatch(
     trimmed: &str,
     registry: &crate::chat::commands::CommandRegistry,
 ) -> Option<(String, serde_json::Value)> {
-    if trimmed == "/compact" || trimmed == "/plan" {
+    if trimmed == "/compact" {
         return None;
+    }
+
+    if let Some(args) =
+        crate::chat::commands::builtins::plan::parse_plan_command_dispatch_args(trimmed)
+    {
+        return Some(("/plan".to_owned(), args));
     }
 
     if registry.find(trimmed).is_some() {
         return Some((trimmed.to_owned(), serde_json::json!({})));
     }
-
-    parse_plan_command_dispatch(trimmed)
-}
-
-fn parse_plan_command_dispatch(trimmed: &str) -> Option<(String, serde_json::Value)> {
-    let mut command_and_tail = trimmed.splitn(2, char::is_whitespace);
-    if command_and_tail.next()? != "/plan" {
-        return None;
-    }
-    let request = command_and_tail.next().map(str::trim).unwrap_or_default();
-    if request.is_empty() {
-        return None;
-    }
-
-    let mut request_tokens = request.split_whitespace();
-    let first_token = request_tokens.next()?;
-    if first_token == "--continue" {
-        let continue_id = request_tokens.next().unwrap_or("").trim();
-        let remaining_tokens = request_tokens.collect::<Vec<_>>();
-        let mut args = serde_json::Map::new();
-        args.insert(
-            "continue_id".to_owned(),
-            serde_json::Value::String(continue_id.to_owned()),
-        );
-
-        if let Some(first_remaining) = remaining_tokens.first() {
-            if !first_remaining.starts_with("--") {
-                let goal = remaining_tokens.join(" ").trim().to_owned();
-                if !goal.is_empty() {
-                    args.insert("goal".to_owned(), serde_json::Value::String(goal));
-                }
-            } else {
-                let mut idx = 0;
-                while idx < remaining_tokens.len() {
-                    let flag = remaining_tokens[idx];
-                    idx += 1;
-                    match flag {
-                        "--goal" => {
-                            if idx >= remaining_tokens.len() {
-                                return None;
-                            }
-                            let start = idx;
-                            while idx < remaining_tokens.len()
-                                && !remaining_tokens[idx].starts_with("--")
-                            {
-                                idx += 1;
-                            }
-                            let goal = remaining_tokens[start..idx].join(" ").trim().to_owned();
-                            if goal.is_empty() {
-                                return None;
-                            }
-                            args.insert("goal".to_owned(), serde_json::Value::String(goal));
-                        }
-                        "--review" => {
-                            let decision = remaining_tokens.get(idx)?.trim();
-                            if decision.is_empty() {
-                                return None;
-                            }
-                            args.insert(
-                                "review".to_owned(),
-                                serde_json::Value::String(decision.to_owned()),
-                            );
-                            idx += 1;
-                        }
-                        _ => return None,
-                    }
-                }
-            }
-        }
-
-        return Some(("/plan".to_owned(), serde_json::Value::Object(args)));
-    }
-
-    if first_token.starts_with("--") {
-        return None;
-    }
-
-    Some((
-        "/plan".to_owned(),
-        serde_json::json!({ "goal": request.to_owned() }),
-    ))
+    None
 }
 
 #[cfg(test)]

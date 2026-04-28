@@ -1103,46 +1103,59 @@ fn paste_action_inserts_into_composer_without_submitting() {
 }
 
 #[test]
-fn plan_command_rewrites_prompt_for_planning_mode() {
-    let mut app = new_test_app();
-    let captured_prompt = Arc::new(Mutex::new(None));
-    let repo_path = env!("CARGO_MANIFEST_DIR");
-    app.agent_runtime = Box::new(AgentRuntime::new(
-        Box::new(CapturePromptProvider {
-            prompt: captured_prompt.clone(),
-        }),
-        PathBuf::from(repo_path),
-        "echo".to_owned(),
-    ).expect("runtime should initialize"));
+fn plan_command_send_message_dispatches_to_plugin_command_path() {
+    let workspace = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target/test-workspaces")
+        .join(format!(
+            "send-message-plan-dispatch-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock should be monotonic")
+                .as_nanos()
+        ));
+    std::fs::create_dir_all(&workspace).expect("workspace should exist");
+    let _ = std::process::Command::new("git")
+        .args(["init"])
+        .current_dir(&workspace)
+        .output();
+    let _ = std::process::Command::new("git")
+        .args(["config", "user.email", "test@example.com"])
+        .current_dir(&workspace)
+        .output();
+    let _ = std::process::Command::new("git")
+        .args(["config", "user.name", "Test User"])
+        .current_dir(&workspace)
+        .output();
 
+    let mut app = ChatApp::new_for_test(workspace.to_str().expect("utf8 workspace")).expect("app");
     app.send_message("/plan add minimax provider");
-    let captured = wait_until(TEST_WAIT_TIMEOUT, || {
-        app.tick();
-        captured_prompt
-            .lock()
-            .expect("prompt mutex poisoned")
-            .is_some()
-    });
-    assert!(captured, "planning prompt was not captured within timeout");
 
-    let prompt = captured_prompt
-        .lock()
-        .expect("prompt mutex poisoned")
-        .clone()
-        .expect("provider should capture a prompt");
+    let composer = app.composer_text();
+    let plan_id = composer
+        .strip_prefix("/plan --continue ")
+        .expect("plan command should prefill continuation")
+        .to_owned();
+    let plan_path = workspace
+        .join(".blazar")
+        .join("plans")
+        .join(format!("{plan_id}.json"));
+    let raw = std::fs::read_to_string(plan_path).expect("plan session json should exist");
+    let saved: serde_json::Value = serde_json::from_str(&raw).expect("plan json should parse");
+    assert_eq!(
+        saved.get("goal").and_then(serde_json::Value::as_str),
+        Some("add minimax provider")
+    );
 
-    assert!(prompt.contains("planning mode"));
-    assert!(prompt.contains("short plain-text title"));
-    assert!(prompt.contains("User request:"));
-    assert!(prompt.contains("add minimax provider"));
+    let _ = std::fs::remove_dir_all(&workspace);
 }
 
 #[test]
 fn planning_turn_uses_planning_while_streaming_then_sets_title() {
     let repo_path = env!("CARGO_MANIFEST_DIR");
     let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+    app.handle_action(InputAction::ToggleMode);
 
-    app.send_message("/plan add minimax provider");
+    app.send_message("add minimax provider");
     app.apply_agent_event_for_test(AgentEvent::TurnStarted {
         turn_id: "plan-1".into(),
     });
@@ -2535,19 +2548,18 @@ fn build_pending_turn_parses_runtime_and_local_command_kinds() {
     );
     assert!(!chat.timeline_inserted);
 
-    let plan = super::turns::build_pending_turn("/plan   improve tests");
-    match &plan.dispatch {
+    let plan_command_text = super::turns::build_pending_turn("/plan   improve tests");
+    match &plan_command_text.dispatch {
         super::PendingDispatch::Runtime {
             runtime_prompt,
             kind,
         } => {
-            assert_eq!(*kind, TurnKind::Plan);
-            assert!(runtime_prompt.contains("planning mode"));
-            assert!(runtime_prompt.contains("User request:\nimprove tests"));
+            assert_eq!(*kind, TurnKind::Chat);
+            assert_eq!(runtime_prompt, "/plan   improve tests");
         }
         other => panic!("expected runtime dispatch, got {other:?}"),
     }
-    assert!(!plan.timeline_inserted);
+    assert!(!plan_command_text.timeline_inserted);
 
     let discover = super::turns::build_pending_turn("/discover-agents");
     assert_eq!(discover.user_text, "/discover-agents");
@@ -2576,6 +2588,17 @@ fn composer_plan_continue_with_review_flag_maps_to_command_args() {
         args.get("goal").is_none(),
         "review continuation should not fabricate a goal argument"
     );
+}
+
+#[test]
+fn composer_exact_plan_maps_to_empty_command_args() {
+    let registry =
+        crate::chat::commands::CommandRegistry::with_builtins().expect("bootstrap built-ins");
+    let (name, args) = parse_composer_command_dispatch("/plan", &registry)
+        .expect("exact /plan should dispatch command path");
+
+    assert_eq!(name, "/plan");
+    assert_eq!(args, serde_json::json!({}));
 }
 
 #[test]

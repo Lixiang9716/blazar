@@ -31,11 +31,10 @@ impl ChatApp {
 
         if allow_command_dispatch
             && !self.agent_state.is_busy()
-            && trimmed != "/plan"
-            && trimmed != "/compact"
-            && self.command_registry.find(trimmed).is_some()
+            && let Some((name, args)) =
+                parse_composer_command_dispatch(trimmed, &self.command_registry)
         {
-            if let Err(err) = self.execute_palette_command_sync(trimmed, serde_json::json!({})) {
+            if let Err(err) = self.execute_palette_command_sync(&name, args) {
                 self.timeline
                     .push(TimelineEntry::warning(format!("Command failed: {err}")));
                 self.scroll_offset = u16::MAX;
@@ -159,17 +158,6 @@ pub(super) fn build_pending_turn_for_mode(input: &str, user_mode: UserMode) -> P
         return PendingTurn {
             user_text: trimmed.to_owned(),
             dispatch: PendingDispatch::DiscoverAgents,
-            timeline_inserted: false,
-        };
-    }
-
-    if let Some(request) = trimmed.strip_prefix("/plan") {
-        return PendingTurn {
-            user_text: trimmed.to_owned(),
-            dispatch: PendingDispatch::Runtime {
-                runtime_prompt: build_plan_prompt(request.trim()),
-                kind: TurnKind::Plan,
-            },
             timeline_inserted: false,
         };
     }

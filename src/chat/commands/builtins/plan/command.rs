@@ -19,6 +19,88 @@ struct PlanCommand {
     spec: CommandSpec,
 }
 
+pub(crate) fn parse_plan_command_dispatch_args(trimmed: &str) -> Option<serde_json::Value> {
+    let mut command_and_tail = trimmed.splitn(2, char::is_whitespace);
+    if command_and_tail.next()? != "/plan" {
+        return None;
+    }
+
+    let request = command_and_tail.next().map(str::trim).unwrap_or_default();
+    if request.is_empty() {
+        return Some(json!({}));
+    }
+
+    let mut request_tokens = request.split_whitespace();
+    let first_token = request_tokens.next()?;
+    if first_token == "--continue" {
+        let continue_id = request_tokens.next()?.trim();
+        if continue_id.is_empty() {
+            return None;
+        }
+
+        let remaining_tokens = request_tokens.collect::<Vec<_>>();
+        let mut args = serde_json::Map::new();
+        args.insert(
+            "continue_id".to_owned(),
+            serde_json::Value::String(continue_id.to_owned()),
+        );
+
+        if let Some(first_remaining) = remaining_tokens.first() {
+            if !first_remaining.starts_with("--") {
+                let goal = remaining_tokens.join(" ").trim().to_owned();
+                if goal.is_empty() {
+                    return None;
+                }
+                args.insert("goal".to_owned(), serde_json::Value::String(goal));
+            } else {
+                let mut idx = 0;
+                while idx < remaining_tokens.len() {
+                    let flag = remaining_tokens[idx];
+                    idx += 1;
+                    match flag {
+                        "--goal" => {
+                            if idx >= remaining_tokens.len() {
+                                return None;
+                            }
+                            let start = idx;
+                            while idx < remaining_tokens.len()
+                                && !remaining_tokens[idx].starts_with("--")
+                            {
+                                idx += 1;
+                            }
+                            let goal = remaining_tokens[start..idx].join(" ").trim().to_owned();
+                            if goal.is_empty() {
+                                return None;
+                            }
+                            args.insert("goal".to_owned(), serde_json::Value::String(goal));
+                        }
+                        "--review" => {
+                            let decision = remaining_tokens.get(idx)?.trim();
+                            if decision.is_empty() || decision.starts_with("--") {
+                                return None;
+                            }
+                            args.insert(
+                                "review".to_owned(),
+                                serde_json::Value::String(decision.to_owned()),
+                            );
+                            idx += 1;
+                        }
+                        _ => return None,
+                    }
+                }
+            }
+        }
+
+        return Some(serde_json::Value::Object(args));
+    }
+
+    if first_token.starts_with("--") {
+        return None;
+    }
+
+    Some(json!({ "goal": request.to_owned() }))
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PlanArgs {
@@ -91,7 +173,7 @@ impl PaletteCommand for PlanCommand {
             }
             if decision.phase == PlanPhase::Review {
                 ctx.app.push_system_hint(
-                    "Review required. Re-run with `/plan --continue <plan-id> --review continue|revise|fail`."
+                    "Review required. Re-run with `/plan --continue <plan-id> --review continue|retry|revise|cancel`."
                         .to_owned(),
                 );
             }
@@ -139,9 +221,9 @@ fn parse_plan_args(args: serde_json::Value) -> Result<PlanArgs, CommandError> {
                 "review must not be blank when provided".to_owned(),
             ));
         }
-        if !matches!(review, "continue" | "revise" | "fail") {
+        if !matches!(review, "continue" | "retry" | "revise" | "cancel" | "fail") {
             return Err(CommandError::InvalidArgs(
-                "review must be one of: continue, revise, fail".to_owned(),
+                "review must be one of: continue, retry, revise, cancel".to_owned(),
             ));
         }
     }
@@ -217,7 +299,7 @@ inventory::submit! {
                         "properties": {
                             "goal": { "type": "string" },
                             "continue_id": { "type": "string" },
-                            "review": { "type": "string", "enum": ["continue", "revise", "fail"] }
+                            "review": { "type": "string", "enum": ["continue", "retry", "revise", "cancel", "fail"] }
                         }
                     }),
                 },

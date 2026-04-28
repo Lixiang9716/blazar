@@ -71,8 +71,9 @@ pub(super) struct SegmentDecision {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ReviewDecision {
     Continue,
+    Retry,
     Revise,
-    Fail,
+    Cancel,
 }
 
 impl PlanSession {
@@ -192,7 +193,7 @@ impl PlanSession {
                     self.current_step = Some(step_index as u32);
                     self.phase = PlanPhase::Review;
                     self.status = "executing".to_owned();
-                    "Execution micro-step completed. Review decision required: continue, revise, or fail."
+                    "Execution micro-step completed. Review decision required: continue, retry, revise, or cancel."
                         .to_owned()
                 }
             }
@@ -218,6 +219,29 @@ impl PlanSession {
                                 "Review confirmed completion. Plan is done.".to_owned()
                             }
                         }
+                        ReviewDecision::Retry => {
+                            let retry_step = self
+                                .current_step
+                                .map(|step| step as usize)
+                                .or_else(|| self.next_pending_step_index())
+                                .unwrap_or(0);
+                            if retry_step >= self.steps.len() {
+                                self.steps.push(PlanStep {
+                                    title: format!("Execution step {}", retry_step + 1),
+                                    status: "pending".to_owned(),
+                                });
+                            }
+                            if let Some(step) = self.steps.get_mut(retry_step) {
+                                step.status = "pending".to_owned();
+                            }
+                            self.current_step = Some(retry_step as u32);
+                            self.phase = PlanPhase::ExecuteStep;
+                            self.status = "executing".to_owned();
+                            format!(
+                                "Review selected retry. Re-running execution micro-step: {}.",
+                                retry_step + 1
+                            )
+                        }
                         ReviewDecision::Revise => {
                             self.phase = PlanPhase::DraftStep;
                             self.current_step = None;
@@ -225,10 +249,10 @@ impl PlanSession {
                             "Review selected revise. Returning to draft a new micro-step."
                                 .to_owned()
                         }
-                        ReviewDecision::Fail => {
+                        ReviewDecision::Cancel => {
                             self.phase = PlanPhase::Done;
-                            self.status = "failed".to_owned();
-                            "Review selected fail. Plan marked as failed.".to_owned()
+                            self.status = "cancelled".to_owned();
+                            "Review selected cancel. Plan marked as cancelled.".to_owned()
                         }
                     }
                 }
@@ -279,11 +303,14 @@ impl PlanSession {
                     return None;
                 }
                 let decision = event.summary.trim().to_ascii_lowercase();
-                if decision.contains("fail") {
-                    return Some(ReviewDecision::Fail);
+                if decision.contains("cancel") || decision.contains("fail") {
+                    return Some(ReviewDecision::Cancel);
                 }
                 if decision.contains("revise") {
                     return Some(ReviewDecision::Revise);
+                }
+                if decision.contains("retry") {
+                    return Some(ReviewDecision::Retry);
                 }
                 if decision.contains("continue") {
                     return Some(ReviewDecision::Continue);
@@ -537,7 +564,22 @@ mod tests {
     }
 
     #[test]
-    fn run_one_segment_review_can_revise_or_fail() {
+    fn run_one_segment_review_supports_retry_revise_and_cancel() {
+        let mut retry = PlanSession {
+            id: Some("plan-review-retry".to_owned()),
+            phase: PlanPhase::Review,
+            status: "executing".to_owned(),
+            goal: Some("ship segmented plan".to_owned()),
+            current_step: Some(0),
+            steps: vec![super::PlanStep {
+                title: "execute first step".to_owned(),
+                status: "done".to_owned(),
+            }],
+            events: vec![super::PlanEvent {
+                kind: "review_decision".to_owned(),
+                summary: "retry".to_owned(),
+            }],
+        };
         let mut revise = PlanSession {
             id: Some("plan-review-revise".to_owned()),
             phase: PlanPhase::Review,
@@ -553,8 +595,8 @@ mod tests {
                 summary: "revise".to_owned(),
             }],
         };
-        let mut fail = PlanSession {
-            id: Some("plan-review-fail".to_owned()),
+        let mut cancel = PlanSession {
+            id: Some("plan-review-cancel".to_owned()),
             phase: PlanPhase::Review,
             status: "executing".to_owned(),
             goal: Some("ship segmented plan".to_owned()),
@@ -565,14 +607,18 @@ mod tests {
             }],
             events: vec![super::PlanEvent {
                 kind: "review_decision".to_owned(),
-                summary: "fail".to_owned(),
+                summary: "cancel".to_owned(),
             }],
         };
 
+        let retry_decision = retry.run_one_segment();
         let revise_decision = revise.run_one_segment();
-        let fail_decision = fail.run_one_segment();
+        let cancel_decision = cancel.run_one_segment();
 
+        assert_eq!(retry_decision.phase, PlanPhase::ExecuteStep);
+        assert_eq!(retry.steps[0].status, "pending");
         assert_eq!(revise_decision.phase, PlanPhase::DraftStep);
-        assert_eq!(fail_decision.phase, PlanPhase::Done);
+        assert_eq!(cancel_decision.phase, PlanPhase::Done);
+        assert_eq!(cancel.status, "cancelled");
     }
 }

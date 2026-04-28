@@ -212,6 +212,43 @@ async fn execute_plan_command_continue_id_handles_review_transitions() {
         Some("ExecuteStep")
     );
 
+    let retry_id = "plan-review-retry";
+    write_plan_json(
+        &workspace,
+        retry_id,
+        json!({
+            "id": retry_id,
+            "phase": "Review",
+            "status": "executing",
+            "goal": "ship segmented workflow",
+            "current_step": 0,
+            "steps": [{"title": "step-1", "status": "done"}],
+            "events": []
+        }),
+    );
+
+    execute_command_for_test(
+        &mut app,
+        "/plan",
+        json!({"continue_id": retry_id, "review": "retry"}),
+    )
+    .await
+    .expect("continue command should execute for review retry");
+    let saved_retry = read_plan_json(&workspace, retry_id);
+    assert_eq!(
+        saved_retry.get("phase").and_then(serde_json::Value::as_str),
+        Some("ExecuteStep")
+    );
+    assert_eq!(
+        saved_retry
+            .get("steps")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|steps| steps.first())
+            .and_then(|step| step.get("status"))
+            .and_then(serde_json::Value::as_str),
+        Some("pending")
+    );
+
     let revise_id = "plan-review-revise";
     write_plan_json(
         &workspace,
@@ -242,12 +279,12 @@ async fn execute_plan_command_continue_id_handles_review_transitions() {
         Some("DraftStep")
     );
 
-    let fail_id = "plan-review-fail";
+    let cancel_id = "plan-review-cancel";
     write_plan_json(
         &workspace,
-        fail_id,
+        cancel_id,
         json!({
-            "id": fail_id,
+            "id": cancel_id,
             "phase": "Review",
             "status": "executing",
             "goal": "ship segmented workflow",
@@ -260,18 +297,22 @@ async fn execute_plan_command_continue_id_handles_review_transitions() {
     execute_command_for_test(
         &mut app,
         "/plan",
-        json!({"continue_id": fail_id, "review": "fail"}),
+        json!({"continue_id": cancel_id, "review": "cancel"}),
     )
     .await
-    .expect("continue command should execute for review fail");
-    let saved_fail = read_plan_json(&workspace, fail_id);
+    .expect("continue command should execute for review cancel");
+    let saved_cancel = read_plan_json(&workspace, cancel_id);
     assert_eq!(
-        saved_fail.get("phase").and_then(serde_json::Value::as_str),
+        saved_cancel
+            .get("phase")
+            .and_then(serde_json::Value::as_str),
         Some("Done")
     );
     assert_eq!(
-        saved_fail.get("status").and_then(serde_json::Value::as_str),
-        Some("failed")
+        saved_cancel
+            .get("status")
+            .and_then(serde_json::Value::as_str),
+        Some("cancelled")
     );
 
     let _ = std::fs::remove_dir_all(&workspace);

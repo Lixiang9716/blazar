@@ -4,8 +4,8 @@ use blazar::chat::input::InputAction;
 use blazar::chat::model::Actor;
 use blazar::chat::picker::PickerContext;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use rusqlite::{Connection, OptionalExtension, params};
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
 
 const REPO_ROOT: &str = env!("CARGO_MANIFEST_DIR");
 
@@ -53,6 +53,28 @@ fn read_plan_json(workspace: &Path, plan_id: &str) -> serde_json::Value {
         .join(format!("{plan_id}.json"));
     let raw = std::fs::read_to_string(plan_path).expect("plan session json should exist");
     serde_json::from_str(&raw).expect("plan json should parse")
+}
+
+fn plan_index_path(workspace: &Path) -> PathBuf {
+    workspace
+        .join(".blazar")
+        .join("state")
+        .join("plan_index.db")
+}
+
+fn read_index_phase_and_status(index_path: &Path, plan_id: &str) -> Option<(String, String)> {
+    if !index_path.exists() {
+        return None;
+    }
+
+    let conn = Connection::open(index_path).expect("index db should open");
+    conn.query_row(
+        "SELECT phase, status FROM plans WHERE plan_id = ?1",
+        params![plan_id],
+        |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+    )
+    .optional()
+    .expect("index query should succeed")
 }
 
 fn assert_submits_as_plain_message(app: &mut ChatApp, text: &str) {
@@ -218,33 +240,25 @@ fn chat_runtime_discover_agents_stays_local_without_streaming() {
 }
 
 #[test]
-fn chat_runtime_submit_exact_plan_from_composer_uses_planning_turn() {
-    let mut app = ChatApp::new_for_test(REPO_ROOT).expect("test app should initialize");
+fn chat_runtime_submit_exact_plan_from_composer_dispatches_plan_command() {
+    let workspace = create_unique_test_workspace("composer_plan_dispatch_exact");
+    let mut app = ChatApp::new_for_test(workspace.to_str().unwrap()).expect("test app");
     app.set_composer_text("/plan");
 
     app.handle_action(InputAction::Submit);
 
+    let composer = app.composer_text();
+    let plan_id = extract_continue_plan_id(&composer);
     assert!(
-        app.timeline()
-            .iter()
-            .any(|entry| entry.actor == Actor::User && entry.body == "/plan"),
-        "submitting /plan should create a user turn entry"
+        !plan_id.is_empty(),
+        "exact /plan submit should route through command path and prefill continue command"
     );
-
-    let deadline = Instant::now() + Duration::from_secs(2);
-    while Instant::now() < deadline {
-        app.tick();
-        if app.timeline().iter().any(|entry| {
-            entry.actor == Actor::Assistant
-                && entry.title.is_some()
-                && !entry.body.trim().is_empty()
-        }) {
-            return;
-        }
-        std::thread::sleep(Duration::from_millis(10));
-    }
-
-    panic!("expected /plan submit to run planning prompt flow");
+    let saved = read_plan_json(&workspace, plan_id);
+    assert_eq!(
+        saved.get("phase").and_then(serde_json::Value::as_str),
+        Some("Clarify")
+    );
+    let _ = std::fs::remove_dir_all(&workspace);
 }
 
 #[test]
@@ -293,6 +307,61 @@ fn chat_runtime_submit_plan_continue_from_composer_dispatches_plan_command() {
     assert_eq!(
         saved.get("goal").and_then(serde_json::Value::as_str),
         Some("finish composer dispatch")
+    );
+
+    let _ = std::fs::remove_dir_all(&workspace);
+}
+
+#[test]
+fn chat_runtime_send_message_plan_goal_dispatches_plan_command() {
+    let workspace = create_unique_test_workspace("send_message_plan_goal");
+    let mut app = ChatApp::new_for_test(workspace.to_str().unwrap()).expect("test app");
+
+    app.send_message("/plan verify send_message command routing");
+
+    let composer = app.composer_text();
+    let plan_id = extract_continue_plan_id(&composer);
+    let saved = read_plan_json(&workspace, plan_id);
+    assert_eq!(
+        saved.get("goal").and_then(serde_json::Value::as_str),
+        Some("verify send_message command routing")
+    );
+
+    let _ = std::fs::remove_dir_all(&workspace);
+}
+
+#[test]
+fn chat_runtime_send_message_plan_continue_rebuilds_missing_index() {
+    let workspace = create_unique_test_workspace("send_message_plan_index_rebuild");
+    let mut app = ChatApp::new_for_test(workspace.to_str().unwrap()).expect("test app");
+    app.send_message("/plan verify runtime index rebuild");
+    let plan_id = extract_continue_plan_id(&app.composer_text()).to_owned();
+
+    let index_path = plan_index_path(&workspace);
+    std::fs::remove_file(&index_path).expect("index db should be removable");
+    assert!(!index_path.exists(), "index db should be absent");
+
+    app.send_message(&format!("/plan --continue {plan_id}"));
+
+    let saved = read_plan_json(&workspace, &plan_id);
+    let phase = saved
+        .get("phase")
+        .and_then(serde_json::Value::as_str)
+        .expect("phase should exist")
+        .to_owned();
+    let status = saved
+        .get("status")
+        .and_then(serde_json::Value::as_str)
+        .expect("status should exist")
+        .to_owned();
+    assert!(
+        index_path.exists(),
+        "continuation should recreate missing index"
+    );
+    assert_eq!(
+        read_index_phase_and_status(&index_path, &plan_id),
+        Some((phase, status)),
+        "recreated index row should match saved JSON source of truth"
     );
 
     let _ = std::fs::remove_dir_all(&workspace);
