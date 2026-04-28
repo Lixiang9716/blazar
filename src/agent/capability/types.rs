@@ -351,4 +351,62 @@ mod tests {
 
         assert_eq!(result.text_output(), "timed out");
     }
+
+    #[test]
+    fn text_projection_with_mime_type() {
+        let part = CapabilityContentPart::Resource {
+            uri: "file://a.txt".into(),
+            mime_type: Some("text/plain".into()),
+        };
+        assert_eq!(
+            part.text_projection(),
+            "[resource] file://a.txt (text/plain)"
+        );
+    }
+
+    #[test]
+    fn text_projection_without_mime_type() {
+        let part = CapabilityContentPart::Resource {
+            uri: "file://b.txt".into(),
+            mime_type: None,
+        };
+        assert_eq!(part.text_projection(), "[resource] file://b.txt");
+    }
+
+    #[test]
+    fn from_error_builds_error_result() {
+        let error = CapabilityError::with_code("E01", "something broke");
+        let result = CapabilityResult::from_error(error.clone());
+        assert!(result.is_error);
+        assert_eq!(result.error, Some(error));
+        assert_eq!(
+            result.content,
+            vec![CapabilityContentPart::Text {
+                text: "something broke".into()
+            }]
+        );
+    }
+
+    #[test]
+    fn text_output_joins_text_and_resource_with_newlines() {
+        let result = CapabilityResult {
+            content: vec![
+                CapabilityContentPart::Text {
+                    text: "hello".into(),
+                },
+                CapabilityContentPart::Resource {
+                    uri: "file://x".into(),
+                    mime_type: None,
+                },
+                CapabilityContentPart::Text {
+                    text: "world".into(),
+                },
+            ],
+            exit_code: None,
+            is_error: false,
+            output_truncated: false,
+            error: None,
+        };
+        assert_eq!(result.text_output(), "hello\n[resource] file://x\nworld");
+    }
 }

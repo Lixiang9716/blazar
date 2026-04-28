@@ -247,3 +247,160 @@ fn agent_config_errors_expose_sources() {
     let read_err = load_agents_config_from_path(&missing).expect_err("missing file should fail");
     assert!(read_err.source().is_some());
 }
+
+#[test]
+fn load_mascot_config_rejects_non_string_asset_path() {
+    let path = write_temp_file(
+        "mascot-bad-asset",
+        "json",
+        r#"{"title":"Blazar","mascot":{"assetPath":123,"frameCount":1,"fps":1}}"#,
+    );
+    let err = load_mascot_config_from_path(&path).expect_err("non-string assetPath should fail");
+    match err {
+        ConfigError::InvalidSchema { message, .. } => {
+            assert_eq!(message, "mascot.assetPath must be a string");
+        }
+        other => panic!("unexpected error variant: {other:?}"),
+    }
+    let _ = fs::remove_file(path);
+}
+
+#[test]
+fn load_mascot_config_rejects_non_integer_frame_count() {
+    let path = write_temp_file(
+        "mascot-bad-frame",
+        "json",
+        r#"{"title":"Blazar","mascot":{"assetPath":"a","frameCount":"nope","fps":1}}"#,
+    );
+    let err = load_mascot_config_from_path(&path).expect_err("non-integer frameCount should fail");
+    match err {
+        ConfigError::InvalidSchema { message, .. } => {
+            assert_eq!(message, "mascot.frameCount must be a positive integer");
+        }
+        other => panic!("unexpected error variant: {other:?}"),
+    }
+    let _ = fs::remove_file(path);
+}
+
+#[test]
+fn load_mascot_config_rejects_frame_count_overflow_u32() {
+    let huge = u64::from(u32::MAX) + 1;
+    let json =
+        format!(r#"{{"title":"Blazar","mascot":{{"assetPath":"a","frameCount":{huge},"fps":1}}}}"#);
+    let path = write_temp_file("mascot-frame-overflow", "json", &json);
+    let err = load_mascot_config_from_path(&path).expect_err("u32 overflow should fail");
+    match err {
+        ConfigError::InvalidSchema { message, .. } => {
+            assert_eq!(message, "mascot.frameCount must fit within u32");
+        }
+        other => panic!("unexpected error variant: {other:?}"),
+    }
+    let _ = fs::remove_file(path);
+}
+
+#[test]
+fn load_mascot_config_rejects_non_integer_fps() {
+    let path = write_temp_file(
+        "mascot-bad-fps",
+        "json",
+        r#"{"title":"Blazar","mascot":{"assetPath":"a","frameCount":1,"fps":"nope"}}"#,
+    );
+    let err = load_mascot_config_from_path(&path).expect_err("non-integer fps should fail");
+    match err {
+        ConfigError::InvalidSchema { message, .. } => {
+            assert_eq!(message, "mascot.fps must be a positive integer");
+        }
+        other => panic!("unexpected error variant: {other:?}"),
+    }
+    let _ = fs::remove_file(path);
+}
+
+#[test]
+fn load_mascot_config_rejects_fps_overflow_u16() {
+    let huge = u64::from(u16::MAX) + 1;
+    let json =
+        format!(r#"{{"title":"Blazar","mascot":{{"assetPath":"a","frameCount":1,"fps":{huge}}}}}"#);
+    let path = write_temp_file("mascot-fps-overflow", "json", &json);
+    let err = load_mascot_config_from_path(&path).expect_err("u16 overflow should fail");
+    match err {
+        ConfigError::InvalidSchema { message, .. } => {
+            assert_eq!(message, "mascot.fps must fit within u16");
+        }
+        other => panic!("unexpected error variant: {other:?}"),
+    }
+    let _ = fs::remove_file(path);
+}
+
+#[test]
+fn schema_title_rejects_missing_title() {
+    let schema = serde_json::json!({});
+    let err = schema_title(&schema).expect_err("missing title should fail");
+    match err {
+        ConfigError::InvalidSchema { message, .. } => {
+            assert_eq!(message, "schema title must be a string");
+        }
+        other => panic!("unexpected error variant: {other:?}"),
+    }
+}
+
+#[test]
+fn agent_config_error_display_read_variant() {
+    let err = AgentConfigError::Read {
+        path: PathBuf::from("agents.toml"),
+        source: io::Error::new(io::ErrorKind::NotFound, "not found"),
+    };
+    let msg = err.to_string();
+    assert!(msg.contains("failed to read agent config file"));
+    assert!(msg.contains("agents.toml"));
+}
+
+#[test]
+fn agent_config_error_display_parse_variant() {
+    let toml_err = toml::from_str::<toml::Value>("bad =").unwrap_err();
+    let err = AgentConfigError::Parse {
+        path: PathBuf::from("agents.toml"),
+        source: toml_err,
+    };
+    let msg = err.to_string();
+    assert!(msg.contains("failed to parse agent config file"));
+    assert!(msg.contains("agents.toml"));
+}
+
+#[test]
+fn agent_config_error_display_invalid_config_variant() {
+    let err = AgentConfigError::InvalidConfig {
+        path: PathBuf::from("agents.toml"),
+        message: "bad field".to_string(),
+    };
+    let msg = err.to_string();
+    assert!(msg.contains("invalid agent config"));
+    assert!(msg.contains("bad field"));
+}
+
+#[test]
+fn agent_config_error_source_parse_variant() {
+    let toml_err = toml::from_str::<toml::Value>("bad =").unwrap_err();
+    let err = AgentConfigError::Parse {
+        path: PathBuf::from("agents.toml"),
+        source: toml_err,
+    };
+    assert!(err.source().is_some());
+}
+
+#[test]
+fn agent_config_error_source_invalid_config_returns_none() {
+    let err = AgentConfigError::InvalidConfig {
+        path: PathBuf::from("agents.toml"),
+        message: "bad".to_string(),
+    };
+    assert!(err.source().is_none());
+}
+
+#[test]
+fn config_error_source_invalid_schema_returns_none() {
+    let err = ConfigError::InvalidSchema {
+        path: PathBuf::from("app.json"),
+        message: "bad",
+    };
+    assert!(err.source().is_none());
+}

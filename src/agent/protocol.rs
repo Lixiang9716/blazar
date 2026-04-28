@@ -76,3 +76,17 @@ pub enum AgentEvent {
         error: String,
     },
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn is_retryable_returns_true_only_for_provider_transient() {
+        assert!(RuntimeErrorKind::ProviderTransient.is_retryable());
+        assert!(!RuntimeErrorKind::ProviderFatal.is_retryable());
+        assert!(!RuntimeErrorKind::ProtocolInvalidPayload.is_retryable());
+        assert!(!RuntimeErrorKind::ToolExecution.is_retryable());
+        assert!(!RuntimeErrorKind::Cancelled.is_retryable());
+    }
+}

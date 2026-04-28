@@ -111,3 +111,34 @@ impl TurnObserver for SilentObserver {
     fn on_tool_call_completed(&self, _call_id: &str, _output: &str, _is_error: bool) {}
     fn on_turn_failed(&self, _kind: RuntimeErrorKind, _error: &str) {}
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::provider::ProviderUsage;
+
+    #[test]
+    fn silent_observer_compiles_and_runs_all_methods() {
+        let observer = SilentObserver;
+        observer.on_text_delta("hello");
+        observer.on_thinking_delta("hmm");
+        observer.on_usage(ProviderUsage {
+            prompt_tokens: 1,
+            completion_tokens: 2,
+            total_tokens: 3,
+        });
+        observer.on_tool_call_started(
+            "call-1",
+            "read_file",
+            ToolKind::Local,
+            "{}",
+            ToolCallStartMetadata {
+                batch_id: 0,
+                replay_index: 0,
+                normalized_claims: vec![],
+            },
+        );
+        observer.on_tool_call_completed("call-1", "ok", false);
+        observer.on_turn_failed(RuntimeErrorKind::Cancelled, "cancelled");
+    }
+}
