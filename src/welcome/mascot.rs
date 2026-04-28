@@ -139,4 +139,32 @@ mod tests {
         .expect("fallback rendering should not panic");
         assert!(rendered.is_empty());
     }
+
+    #[test]
+    fn mascot_load_error_display_config() {
+        let err = MascotLoadError::Config(config::ConfigError::Read {
+            path: "test.toml".into(),
+            source: io::Error::new(io::ErrorKind::NotFound, "not found"),
+        });
+        let msg = err.to_string();
+        assert!(!msg.is_empty());
+    }
+
+    #[test]
+    fn mascot_load_error_display_asset_read() {
+        let err = MascotLoadError::AssetRead {
+            path: "/missing/sprite.png".into(),
+            source: io::Error::new(io::ErrorKind::NotFound, "not found"),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("/missing/sprite.png"));
+        assert!(msg.contains("not found"));
+    }
+
+    #[test]
+    fn mascot_load_error_display_sprite_decode() {
+        let err = MascotLoadError::SpriteDecode(SpriteError::InvalidFps);
+        let msg = err.to_string();
+        assert!(msg.contains("fps"));
+    }
 }

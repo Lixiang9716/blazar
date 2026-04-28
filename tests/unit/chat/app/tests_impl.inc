@@ -2677,3 +2677,32 @@ fn apply_completed_skips_mismatched_request_id() {
 
     std::fs::remove_dir_all(&repo_path).ok();
 }
+
+#[test]
+fn turn_failed_app_log_message_covers_all_error_kinds() {
+    use crate::agent::runtime::RuntimeErrorKind;
+
+    let msg = super::events::turn_failed_app_log_message(
+        RuntimeErrorKind::ProtocolInvalidPayload,
+        Some("t1"),
+    );
+    assert!(msg.contains("ProtocolInvalidPayload"));
+
+    let msg = super::events::turn_failed_app_log_message(RuntimeErrorKind::ToolExecution, None);
+    assert!(msg.contains("ToolExecution"));
+
+    let msg =
+        super::events::turn_failed_app_log_message(RuntimeErrorKind::Cancelled, Some("t2"));
+    assert!(msg.contains("Cancelled"));
+}
+
+#[test]
+fn set_context_usage_for_test_stores_values() {
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+    assert!(app.context_usage.is_none());
+    app.set_context_usage_for_test(500, 4096);
+    let usage = app.context_usage.expect("usage should be set");
+    assert_eq!(usage.used_tokens, 500);
+    assert_eq!(usage.max_tokens, 4096);
+}

@@ -371,4 +371,122 @@ mod tests {
         assert_eq!(animation.frame_time, Duration::from_nanos(500_000));
         assert!(animation.frame_time > Duration::ZERO);
     }
+
+    #[test]
+    fn to_plain_string_renders_glyphs_without_ansi() {
+        let frame = TerminalFrame {
+            rows: vec![
+                vec![
+                    TerminalCell {
+                        glyph: '▀',
+                        fg: Some(Rgb(255, 0, 0)),
+                        bg: None,
+                    },
+                    TerminalCell {
+                        glyph: '█',
+                        fg: Some(Rgb(0, 255, 0)),
+                        bg: None,
+                    },
+                ],
+                vec![
+                    TerminalCell {
+                        glyph: ' ',
+                        fg: None,
+                        bg: None,
+                    },
+                    TerminalCell {
+                        glyph: '▄',
+                        fg: Some(Rgb(0, 0, 255)),
+                        bg: Some(Rgb(128, 128, 128)),
+                    },
+                ],
+            ],
+        };
+
+        let plain = frame.to_plain_string();
+        assert_eq!(plain, "▀█\n ▄");
+        assert!(!plain.contains("\u{1b}"));
+    }
+
+    #[test]
+    fn is_empty_returns_false_for_loaded_animation() {
+        let animation = animation_with_frame_time();
+        assert!(!animation.is_empty());
+    }
+
+    #[test]
+    fn frame_returns_current_frame() {
+        let animation = animation_with_frame_time();
+        let frame = animation.frame();
+        assert!(!frame.rows.is_empty());
+    }
+
+    #[test]
+    fn from_png_bytes_rejects_zero_frame_count() {
+        let result = SpriteAnimation::from_png_bytes(
+            include_bytes!("../../assets/spirit/slime/slime_idle.png"),
+            0,
+            8,
+        );
+        assert!(matches!(result, Err(SpriteError::InvalidFrameCount)));
+    }
+
+    #[test]
+    fn from_png_bytes_rejects_zero_fps() {
+        let result = SpriteAnimation::from_png_bytes(
+            include_bytes!("../../assets/spirit/slime/slime_idle.png"),
+            4,
+            0,
+        );
+        assert!(matches!(result, Err(SpriteError::InvalidFps)));
+    }
+
+    #[test]
+    fn from_png_bytes_rejects_indivisible_width() {
+        let result = SpriteAnimation::from_png_bytes(
+            include_bytes!("../../assets/spirit/slime/slime_idle.png"),
+            3,
+            8,
+        );
+        assert!(matches!(result, Err(SpriteError::WidthNotDivisible { .. })));
+    }
+
+    #[test]
+    fn sprite_error_display_formats_all_variants() {
+        assert_eq!(
+            SpriteError::InvalidFrameCount.to_string(),
+            "frame_count must be greater than 0"
+        );
+        assert_eq!(
+            SpriteError::InvalidFps.to_string(),
+            "fps must be greater than 0"
+        );
+        let wnd = SpriteError::WidthNotDivisible {
+            width: 100,
+            frame_count: 3,
+        };
+        assert!(
+            wnd.to_string()
+                .contains("100 is not divisible by frame count 3")
+        );
+    }
+
+    #[test]
+    fn sprite_error_source_returns_none_for_non_decode_variants() {
+        use std::error::Error;
+        assert!(SpriteError::InvalidFrameCount.source().is_none());
+        assert!(SpriteError::InvalidFps.source().is_none());
+    }
+
+    #[test]
+    fn sprite_error_from_image_error() {
+        let bad_bytes = b"not a png";
+        let img_err = image::load_from_memory(bad_bytes).unwrap_err();
+        let sprite_err = SpriteError::from(img_err);
+        assert!(matches!(sprite_err, SpriteError::Decode(_)));
+
+        use std::error::Error;
+        assert!(sprite_err.source().is_some());
+        assert!(sprite_err.to_string().contains("failed to decode"));
+    }
 }

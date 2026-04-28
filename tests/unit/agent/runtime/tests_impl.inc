@@ -2836,3 +2836,16 @@ fn new_surfaces_spawn_errors_instead_of_panicking() {
     let err = runtime.err().expect("runtime should carry a spawn error");
     assert!(matches!(err, AgentRuntimeError::ThreadSpawn(_)));
 }
+
+#[test]
+fn tool_initialization_error_has_no_source() {
+    let err = AgentRuntimeError::ToolInitialization("bad tool setup".to_string());
+    assert!(
+        err.to_string().contains("failed to initialize agent tools"),
+        "ToolInitialization display should describe initialization failure"
+    );
+    assert!(
+        err.source().is_none(),
+        "ToolInitialization should not have a source error"
+    );
+}
