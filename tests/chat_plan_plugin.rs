@@ -5,6 +5,8 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::json;
 use std::path::{Path, PathBuf};
 
+const PLAN_CONTINUATION_LIMIT: usize = 8;
+
 async fn execute_command_for_test(
     app: &mut ChatApp,
     name: &str,
@@ -12,6 +14,29 @@ async fn execute_command_for_test(
 ) -> Result<blazar::chat::commands::CommandResult, CommandError> {
     let registry = CommandRegistry::with_builtins().expect("bootstrap built-ins");
     execute_palette_command(&registry, app, name, args).await
+}
+
+fn run_git_command(workspace: &Path, args: &[&str]) {
+    let command = format!("git {}", args.join(" "));
+    let output = std::process::Command::new("git")
+        .args(args)
+        .current_dir(workspace)
+        .output()
+        .unwrap_or_else(|error| {
+            panic!(
+                "failed to run `{command}` in {}: {error}",
+                workspace.display()
+            )
+        });
+
+    assert!(
+        output.status.success(),
+        "`{command}` failed in {} (exit: {:?})\nstdout:\n{}\nstderr:\n{}",
+        workspace.display(),
+        output.status.code(),
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
 }
 
 fn create_unique_test_workspace(test_name: &str) -> PathBuf {
@@ -30,18 +55,9 @@ fn create_unique_test_workspace(test_name: &str) -> PathBuf {
     let workspace = base.join(unique);
     std::fs::create_dir_all(&workspace).expect("create unique workspace");
 
-    let _ = std::process::Command::new("git")
-        .args(["init"])
-        .current_dir(&workspace)
-        .output();
-    let _ = std::process::Command::new("git")
-        .args(["config", "user.email", "test@example.com"])
-        .current_dir(&workspace)
-        .output();
-    let _ = std::process::Command::new("git")
-        .args(["config", "user.name", "Test User"])
-        .current_dir(&workspace)
-        .output();
+    run_git_command(&workspace, &["init"]);
+    run_git_command(&workspace, &["config", "user.email", "test@example.com"]);
+    run_git_command(&workspace, &["config", "user.name", "Test User"]);
 
     workspace
 }
@@ -97,7 +113,7 @@ async fn plan_segmented_flow_reaches_done_state() {
     .expect("initial /plan should execute");
 
     let plan_id = extract_continue_plan_id(&app.composer_text()).to_owned();
-    for _ in 0..8 {
+    for _ in 0..PLAN_CONTINUATION_LIMIT {
         let saved = read_plan_json(&workspace, &plan_id);
         let phase = saved
             .get("phase")
@@ -119,13 +135,14 @@ async fn plan_segmented_flow_reaches_done_state() {
     }
 
     let saved = read_plan_json(&workspace, &plan_id);
-    assert_eq!(
-        saved.get("phase").and_then(serde_json::Value::as_str),
-        Some("Done"),
-        "segmented /plan flow should eventually reach Done"
+    let final_phase = saved.get("phase").and_then(serde_json::Value::as_str);
+    let final_status = saved.get("status").and_then(serde_json::Value::as_str);
+    assert!(
+        final_phase == Some("Done"),
+        "segmented /plan flow should reach Done within {PLAN_CONTINUATION_LIMIT} continuations; final phase={final_phase:?}, final status={final_status:?}"
     );
     assert_eq!(
-        saved.get("status").and_then(serde_json::Value::as_str),
+        final_status,
         Some("completed"),
         "done plan should have completed status"
     );
