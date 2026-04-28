@@ -2707,3 +2707,61 @@ fn set_context_usage_for_test_stores_values() {
     assert_eq!(usage.used_tokens, 500);
     assert_eq!(usage.max_tokens, 4096);
 }
+
+#[test]
+fn request_quit_sets_should_quit_flag() {
+    let mut app = new_test_app();
+    assert!(!app.should_quit());
+    app.request_quit();
+    assert!(app.should_quit());
+}
+
+#[test]
+fn clear_conversation_resets_messages_and_keeps_banner() {
+    let mut app = new_test_app();
+    
+    // Send a message to populate messages and timeline
+    app.send_message("test message");
+    app.tick();
+    
+    assert!(!app.messages().is_empty(), "messages should be populated");
+    assert!(app.has_user_sent(), "has_user_sent should be true");
+    
+    let banner_count_before = app.timeline().iter()
+        .filter(|e| matches!(e.kind, crate::chat::model::EntryKind::Banner))
+        .count();
+    
+    let total_entries_before = app.timeline().len();
+    assert!(total_entries_before > banner_count_before, "should have non-banner entries");
+    
+    // Clear conversation
+    app.clear_conversation();
+    
+    assert!(app.messages().is_empty(), "messages should be cleared");
+    assert!(!app.has_user_sent(), "has_user_sent should be reset");
+    assert_eq!(app.scroll_offset(), u16::MAX, "scroll should be at sentinel");
+    
+    let banner_count_after = app.timeline().iter()
+        .filter(|e| matches!(e.kind, crate::chat::model::EntryKind::Banner))
+        .count();
+    
+    assert_eq!(banner_count_after, banner_count_before, "banners should be preserved");
+    assert_eq!(app.timeline().len(), banner_count_before, "only banners should remain");
+}
+
+#[test]
+fn push_system_hint_adds_hint_and_scrolls() {
+    let mut app = new_test_app();
+    
+    let initial_count = app.timeline().len();
+    
+    app.push_system_hint("test hint message");
+    
+    assert_eq!(app.timeline().len(), initial_count + 1, "should add one entry");
+    assert_eq!(app.scroll_offset(), u16::MAX, "should auto-scroll");
+    
+    let last = app.timeline().last().expect("should have entries");
+    assert!(matches!(last.kind, crate::chat::model::EntryKind::Hint));
+    assert_eq!(last.body, "test hint message");
+    assert_eq!(last.actor, crate::chat::model::Actor::System);
+}

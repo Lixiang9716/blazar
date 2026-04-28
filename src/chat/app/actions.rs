@@ -157,4 +157,25 @@ impl ChatApp {
             _ => {}
         }
     }
+
+    /// Request application quit. Safe to call at any time.
+    pub fn request_quit(&mut self) {
+        self.should_quit = true;
+    }
+
+    /// Clear all conversation messages and timeline entries, preserving only the welcome banner.
+    pub fn clear_conversation(&mut self) {
+        self.messages.clear();
+        self.timeline
+            .retain(|entry| matches!(entry.kind, crate::chat::model::EntryKind::Banner));
+        self.has_user_sent = false;
+        self.scroll_offset = u16::MAX;
+    }
+
+    /// Push a system hint message to the timeline and auto-scroll.
+    pub fn push_system_hint(&mut self, message: impl Into<String>) {
+        self.timeline
+            .push(crate::chat::model::TimelineEntry::hint(message));
+        self.scroll_offset = u16::MAX;
+    }
 }
