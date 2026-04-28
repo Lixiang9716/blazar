@@ -353,6 +353,63 @@ mod tests {
     }
 
     #[test]
+    fn truncate_triggers_provider_message_limit() {
+        // Lines 143-150: build a list exceeding MAX_CONTEXT_PROVIDER_MESSAGES
+        // with user messages spaced far apart to force the inner tail_start logic.
+        let mut messages = Vec::new();
+        // Add a few user messages at the start, then a huge block of tool results.
+        for i in 0..3 {
+            messages.push(ProviderMessage::User {
+                content: format!("user-{i}"),
+            });
+        }
+        // Fill with tool calls + results to exceed the 80 message limit.
+        for i in 0..90 {
+            messages.push(ProviderMessage::ToolCall {
+                id: format!("tc-{i}"),
+                name: "bash".into(),
+                arguments: "{}".into(),
+            });
+            messages.push(ProviderMessage::ToolResult {
+                tool_call_id: format!("tc-{i}"),
+                output: "ok".into(),
+                is_error: false,
+            });
+        }
+        // Add final user turns at the end.
+        for i in 0..3 {
+            messages.push(ProviderMessage::User {
+                content: format!("final-{i}"),
+            });
+        }
+        let result = truncate_provider_messages(&messages);
+        assert!(
+            result.len() <= MAX_CONTEXT_PROVIDER_MESSAGES,
+            "should respect provider message limit, got {}",
+            result.len()
+        );
+        // The result should start at a User message boundary.
+        assert!(
+            matches!(&result[0], ProviderMessage::User { .. }),
+            "truncated messages should start at a user boundary"
+        );
+    }
+
+    #[test]
+    fn run_git_command_returns_none_for_empty_output() {
+        // Line 84: git command succeeds but returns empty output.
+        let cwd = std::env::current_dir().unwrap();
+        let result = run_git_command(&cwd, &["hash-object", "--stdin"]);
+        // This won't succeed without stdin, so returns None via status check.
+        // Use a command that succeeds with empty stdout:
+        // Actually, let's use `git log --oneline -0` which outputs nothing.
+        let _result = result; // suppress unused warning
+        let result = run_git_command(&cwd, &["log", "--oneline", "-0"]);
+        // On a valid repo, -0 means show 0 commits → empty output → None.
+        assert!(result.is_none(), "empty git output should return None");
+    }
+
+    #[test]
     fn run_git_command_returns_some_for_valid_command() {
         let cwd = std::env::current_dir().unwrap();
         let result = run_git_command(&cwd, &["rev-parse", "--is-inside-work-tree"]);

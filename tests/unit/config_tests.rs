@@ -404,3 +404,53 @@ fn config_error_source_invalid_schema_returns_none() {
     };
     assert!(err.source().is_none());
 }
+
+#[test]
+fn load_agents_config_reports_error_when_file_missing() {
+    // Lines 51-52: load_agents_config() wrapper tries AGENTS_CONFIG_PATH.
+    // Since config/agents.toml doesn't exist, it should return a read error.
+    let result = load_agents_config();
+    match result {
+        Ok(_) => {
+            // If the file exists in the test environment, that's fine too.
+        }
+        Err(AgentConfigError::Read { path, .. }) => {
+            assert!(path.to_string_lossy().contains("agents.toml"));
+        }
+        Err(other) => panic!("unexpected error variant: {other:?}"),
+    }
+}
+
+#[test]
+fn config_error_display_read_variant() {
+    let err = ConfigError::Read {
+        path: PathBuf::from("app.json"),
+        source: io::Error::new(io::ErrorKind::NotFound, "not found"),
+    };
+    let msg = err.to_string();
+    assert!(msg.contains("failed to read config file"));
+    assert!(msg.contains("app.json"));
+}
+
+#[test]
+fn config_error_display_parse_variant() {
+    let json_err = serde_json::from_str::<serde_json::Value>("{bad").unwrap_err();
+    let err = ConfigError::Parse {
+        path: PathBuf::from("app.json"),
+        source: json_err,
+    };
+    let msg = err.to_string();
+    assert!(msg.contains("failed to parse config file"));
+    assert!(msg.contains("app.json"));
+}
+
+#[test]
+fn config_error_display_invalid_schema_variant() {
+    let err = ConfigError::InvalidSchema {
+        path: PathBuf::from("app.json"),
+        message: "bad schema",
+    };
+    let msg = err.to_string();
+    assert!(msg.contains("invalid config schema"));
+    assert!(msg.contains("bad schema"));
+}

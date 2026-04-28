@@ -779,6 +779,23 @@ mod tests {
     }
 
     #[test]
+    fn repair_bash_dollar_only_no_quotes_no_truncation() {
+        // Lines 148-150: dollar escapes only, no quote or truncation issues.
+        // Input has \$ but no unescaped inner quotes → line 123 returns None → falls to 148.
+        let args = r#"{"command": "ls \$HOME/dir"}"#;
+        assert_bash_repair_succeeds(args, "dollar-first: dollar only (no quotes)");
+    }
+
+    #[test]
+    fn repair_bash_dollar_then_truncated() {
+        // Lines 157-160: dollar escapes + truncation (no unescaped quotes in raw).
+        // No inner quotes → line 123 returns None. Has \$ → line 148 fires.
+        // Dollar-repaired result is truncated → line 157 fires.
+        let args = r#"{"command": "ls \$HOME/dir"#;
+        assert_bash_repair_succeeds(args, "dollar-first then truncated");
+    }
+
+    #[test]
     fn plan_tool_call_unrepairable_bash_returns_error() {
         // Line 179: final None return — unrepairable bash args.
         // Line 88: error logging path.

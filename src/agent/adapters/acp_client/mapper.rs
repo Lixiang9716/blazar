@@ -180,6 +180,66 @@ mod tests {
     }
 
     #[test]
+    fn parse_agent_metadata_rejects_empty_id() {
+        // Line 24: empty id returns Err.
+        let err = parse_agent_metadata(&json!({
+            "id": "   ",
+            "name": "agent"
+        }))
+        .expect_err("empty id should fail");
+        assert!(err.contains("agent id must not be empty"));
+    }
+
+    #[test]
+    fn parse_run_status_failed_without_output_generates_message() {
+        // Lines 60-61: failed/cancelled status with no output field.
+        let status = parse_run_status(&json!({
+            "status": "cancelled"
+        }))
+        .expect("cancelled without output should parse");
+        let AcpRunStatus::Complete(result) = status else {
+            panic!("should be complete");
+        };
+        assert!(result.is_error);
+        assert!(result.text_output().contains("cancelled"));
+    }
+
+    #[test]
+    fn parse_tool_result_missing_content_and_text_errors() {
+        // Line 93: output without content or text.
+        let err = parse_run_status(&json!({
+            "status": "completed",
+            "output": { "exit_code": 0 }
+        }))
+        .expect_err("missing content/text should fail");
+        assert!(err.contains("must contain content or text"));
+    }
+
+    #[test]
+    fn parse_content_parts_rejects_non_array_content() {
+        // Line 106: content is not an array.
+        let err = parse_run_status(&json!({
+            "status": "completed",
+            "output": { "content": "not-an-array" }
+        }))
+        .expect_err("non-array content should fail");
+        assert!(err.contains("content must be an array"));
+    }
+
+    #[test]
+    fn parse_content_parts_rejects_unsupported_type() {
+        // Line 135: unsupported content part type.
+        let err = parse_run_status(&json!({
+            "status": "completed",
+            "output": {
+                "content": [{ "type": "image", "url": "http://example.com" }]
+            }
+        }))
+        .expect_err("unsupported type should fail");
+        assert!(err.contains("unsupported ACP content part type: image"));
+    }
+
+    #[test]
     fn parse_run_status_rejects_unknown_status_values() {
         let error = parse_run_status(&json!({
             "status": "mystery-state"
