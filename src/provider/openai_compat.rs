@@ -265,7 +265,7 @@ pub struct OpenAiProvider {
 }
 
 impl OpenAiProvider {
-    pub fn new(config: OpenAiConfig) -> Self {
+    pub fn new(config: OpenAiConfig) -> Result<Self, String> {
         let async_config = AsyncOpenAiConfig::new()
             .with_api_key(&config.api_key)
             .with_api_base(&config.base_url);
@@ -273,12 +273,12 @@ impl OpenAiProvider {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
-            .expect("failed to create tokio runtime");
-        Self {
+            .map_err(|e| format!("failed to create tokio runtime: {e}"))?;
+        Ok(Self {
             config,
             client,
             runtime,
-        }
+        })
     }
 
     pub fn build_request_for_test(

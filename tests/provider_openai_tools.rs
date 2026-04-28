@@ -23,6 +23,7 @@ fn make_provider() -> OpenAiProvider {
         system_prompt: Some("system".into()),
         system_prompt_file: None,
     })
+    .expect("test provider should initialize")
 }
 
 #[test]

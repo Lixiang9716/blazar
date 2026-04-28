@@ -103,10 +103,17 @@ pub fn load_provider(repo_root: &str) -> (Box<dyn LlmProvider>, String) {
                 .provider_type
                 .as_deref()
                 .is_some_and(|t| t.eq_ignore_ascii_case("openrouter"));
-            if is_openrouter {
-                (Box::new(openrouter::OpenRouterProvider::new(cfg)), name)
+            let provider: Result<Box<dyn LlmProvider>, String> = if is_openrouter {
+                openrouter::OpenRouterProvider::new(cfg).map(|p| Box::new(p) as _)
             } else {
-                (Box::new(openai_compat::OpenAiProvider::new(cfg)), name)
+                openai_compat::OpenAiProvider::new(cfg).map(|p| Box::new(p) as _)
+            };
+            match provider {
+                Ok(p) => (p, name),
+                Err(e) => {
+                    log::error!("provider init failed, falling back to echo: {e}");
+                    (Box::new(echo::EchoProvider::default()), "echo".to_owned())
+                }
             }
         }
         Err(_) => (Box::new(echo::EchoProvider::default()), "echo".to_owned()),

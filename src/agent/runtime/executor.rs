@@ -108,7 +108,13 @@ pub(super) fn execute_batch(
     let executed_calls = results
         .into_iter()
         .take(spawned_count)
-        .map(|result| result.expect("batch execution should produce ordered results"))
+        .enumerate()
+        .filter_map(|(i, result)| {
+            if result.is_none() {
+                warn!("batch slot {i} produced no result; tool thread may have panicked");
+            }
+            result
+        })
         .collect();
 
     BatchExecution {

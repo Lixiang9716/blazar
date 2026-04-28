@@ -26,24 +26,24 @@ pub struct OpenRouterProvider {
 }
 
 impl OpenRouterProvider {
-    pub fn new(config: OpenAiConfig) -> Self {
+    pub fn new(config: OpenAiConfig) -> Result<Self, String> {
         let client = OpenRouterClient::builder()
             .api_key(&config.api_key)
             .http_referer("https://github.com/Lixiang9716/blazar")
             .x_title("Blazar")
             .build()
-            .expect("failed to build OpenRouterClient");
+            .map_err(|e| format!("failed to build OpenRouterClient: {e}"))?;
 
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
-            .expect("failed to create tokio runtime");
+            .map_err(|e| format!("failed to create tokio runtime: {e}"))?;
 
-        Self {
+        Ok(Self {
             config,
             client,
             runtime,
-        }
+        })
     }
 }
 

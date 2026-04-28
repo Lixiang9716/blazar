@@ -12,7 +12,7 @@ pub struct DebugEventSnapshot {
     pub session_id: String,
     pub workspace_path: String,
     pub queue_depth: u64,
-    pub event_seq: Option<u64>,
+    pub event_seq: Option<i64>,
 }
 
 #[derive(Debug)]
@@ -22,7 +22,7 @@ pub struct DebugRecorder {
     workspace_path: String,
     current_turn_id: Option<String>,
     current_turn_kind: Option<String>,
-    current_event_seq: u64,
+    current_event_seq: i64,
     active_call_id: Option<String>,
     latest_turn_id: Option<String>,
     latest_error_kind: Option<String>,
@@ -84,7 +84,7 @@ impl DebugRecorder {
                     &self.session_id,
                     turn_id,
                     turn_kind,
-                    queue_depth as u64,
+                    queue_depth as i64,
                     timestamp_seconds()
                 ],
             );
@@ -129,7 +129,7 @@ impl DebugRecorder {
                     tool_name,
                     call_id,
                     error_kind,
-                    queue_depth as u64,
+                    queue_depth as i64,
                     message,
                     timestamp_seconds()
                 ],
@@ -233,12 +233,12 @@ impl DebugRecorder {
             )
             && let Ok(events) = statement.query_map(params![&self.session_id, turn_id], |row| {
                 Ok((
-                    row.get::<_, u64>(0)?,
+                    row.get::<_, i64>(0)?,
                     row.get::<_, String>(1)?,
                     row.get::<_, Option<String>>(2)?,
                     row.get::<_, Option<String>>(3)?,
                     row.get::<_, Option<String>>(4)?,
-                    row.get::<_, u64>(5)?,
+                    row.get::<_, i64>(5)?,
                 ))
             })
         {

@@ -54,7 +54,7 @@ fn deepseek_config() -> OpenAiConfig {
 }
 
 fn test_provider() -> OpenAiProvider {
-    OpenAiProvider::new(test_config())
+    OpenAiProvider::new(test_config()).expect("test provider should initialize")
 }
 
 fn sample_messages() -> Vec<ProviderMessage> {
@@ -259,7 +259,7 @@ fn render_system_prompt_appends_runtime_context_block() {
 
 #[test]
 fn build_request_serializes_messages_tools_and_tool_choice() {
-    let provider = OpenAiProvider::new(test_config());
+    let provider = OpenAiProvider::new(test_config()).expect("test provider");
     let messages = vec![
         ProviderMessage::User {
             content: "read file".to_owned(),
@@ -304,7 +304,7 @@ fn build_request_serializes_messages_tools_and_tool_choice() {
 
 #[test]
 fn build_request_uses_deepseek_thinking_fields_without_tools() {
-    let provider = OpenAiProvider::new(deepseek_config());
+    let provider = OpenAiProvider::new(deepseek_config()).expect("test provider");
     let request = provider.build_request_for_test(
         &[ProviderMessage::User {
             content: "hello".to_owned(),
@@ -321,7 +321,7 @@ fn build_request_uses_deepseek_thinking_fields_without_tools() {
 
 #[test]
 fn build_request_disables_deepseek_thinking_when_tools_are_available() {
-    let provider = OpenAiProvider::new(deepseek_config());
+    let provider = OpenAiProvider::new(deepseek_config()).expect("test provider");
     let request = provider.build_request_for_test(
         &[ProviderMessage::User {
             content: "inspect Cargo.toml".to_owned(),

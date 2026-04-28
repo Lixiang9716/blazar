@@ -40,7 +40,7 @@ pub struct StructuredEventContext<'a> {
     pub session_id: Option<&'a str>,
     pub workspace_path: Option<&'a str>,
     pub queue_depth: Option<u64>,
-    pub event_seq: Option<u64>,
+    pub event_seq: Option<i64>,
     pub turn_kind: Option<&'a str>,
 }
 
