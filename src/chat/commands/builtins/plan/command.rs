@@ -12,6 +12,7 @@ use crate::chat::commands::types::{
     CommandError, CommandExecFuture, CommandResult, CommandSpec, PaletteCommand,
 };
 
+use super::session::PlanPhase;
 use super::store::PlanStore;
 
 struct PlanCommand {
@@ -25,6 +26,8 @@ struct PlanArgs {
     goal: Option<String>,
     #[serde(default)]
     continue_id: Option<String>,
+    #[serde(default)]
+    review: Option<String>,
 }
 
 impl PaletteCommand for PlanCommand {
@@ -58,6 +61,9 @@ impl PaletteCommand for PlanCommand {
             if let Some(goal) = parsed.goal {
                 session.set_goal(goal);
             }
+            if let Some(review_decision) = parsed.review {
+                session.record_review_decision(review_decision);
+            }
 
             let decision = session.run_one_segment();
             let plan_id = session
@@ -75,6 +81,18 @@ impl PaletteCommand for PlanCommand {
                 decision.summary,
                 decision.phase.as_str()
             ));
+            if decision.phase == PlanPhase::Clarify {
+                ctx.app.push_system_hint(
+                    "Clarification required. Re-run `/plan --continue <plan-id> --goal \"...\"` with the missing goal details."
+                        .to_owned(),
+                );
+            }
+            if decision.phase == PlanPhase::Review {
+                ctx.app.push_system_hint(
+                    "Review required. Re-run with `/plan --continue <plan-id> --review continue|revise|fail`."
+                        .to_owned(),
+                );
+            }
             ctx.app.push_system_hint(format!(
                 "Continue this plan with `{continue_command}`. This workflow is intentionally staged; deeper steps are deferred until you run the continue command."
             ));
@@ -112,9 +130,24 @@ fn parse_plan_args(args: serde_json::Value) -> Result<PlanArgs, CommandError> {
         ));
     }
 
+    let review = parsed.review.map(|value| value.trim().to_ascii_lowercase());
+    if let Some(review) = review.as_deref() {
+        if review.is_empty() {
+            return Err(CommandError::InvalidArgs(
+                "review must not be blank when provided".to_owned(),
+            ));
+        }
+        if !matches!(review, "continue" | "revise" | "fail") {
+            return Err(CommandError::InvalidArgs(
+                "review must be one of: continue, revise, fail".to_owned(),
+            ));
+        }
+    }
+
     Ok(PlanArgs {
         goal: parsed.goal.map(|value| value.trim().to_owned()),
         continue_id: parsed.continue_id.map(|value| value.trim().to_owned()),
+        review,
     })
 }
 
@@ -181,7 +214,8 @@ inventory::submit! {
                         "additionalProperties": false,
                         "properties": {
                             "goal": { "type": "string" },
-                            "continue_id": { "type": "string" }
+                            "continue_id": { "type": "string" },
+                            "review": { "type": "string", "enum": ["continue", "revise", "fail"] }
                         }
                     }),
                 },

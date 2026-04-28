@@ -66,6 +66,16 @@ fn read_plan_json(workspace: &Path, plan_id: &str) -> serde_json::Value {
     serde_json::from_str(&raw).expect("plan json should parse")
 }
 
+fn write_plan_json(workspace: &Path, plan_id: &str, payload: serde_json::Value) {
+    let plans_dir = workspace.join(".blazar").join("plans");
+    std::fs::create_dir_all(&plans_dir).expect("plan directory should exist");
+    std::fs::write(
+        plans_dir.join(format!("{plan_id}.json")),
+        serde_json::to_string_pretty(&payload).expect("payload should serialize"),
+    )
+    .expect("fixture plan json should write");
+}
+
 #[tokio::test]
 async fn execute_plan_command_bootstraps_session_and_sets_continue_guidance() {
     let workspace = create_unique_test_workspace("plan_bootstrap");
@@ -109,6 +119,27 @@ async fn execute_plan_command_bootstraps_session_and_sets_continue_guidance() {
 }
 
 #[tokio::test]
+async fn execute_plan_command_without_goal_enters_clarify_phase() {
+    let workspace = create_unique_test_workspace("plan_clarify");
+    let mut app = ChatApp::new_for_test(workspace.to_str().unwrap()).expect("app");
+
+    let result = execute_command_for_test(&mut app, "/plan", json!({}))
+        .await
+        .expect("plan command should execute");
+
+    let plan_id = extract_continue_plan_id(&app.composer_text()).to_owned();
+    let saved = read_plan_json(&workspace, &plan_id);
+
+    assert!(result.summary.contains("Clarify"));
+    assert_eq!(
+        saved.get("phase").and_then(serde_json::Value::as_str),
+        Some("Clarify")
+    );
+
+    let _ = std::fs::remove_dir_all(&workspace);
+}
+
+#[tokio::test]
 async fn execute_plan_command_continue_id_loads_and_advances_existing_session() {
     let workspace = create_unique_test_workspace("plan_continue");
     let mut app = ChatApp::new_for_test(workspace.to_str().unwrap()).expect("app");
@@ -144,12 +175,121 @@ async fn execute_plan_command_continue_id_loads_and_advances_existing_session() 
 }
 
 #[tokio::test]
+async fn execute_plan_command_continue_id_handles_review_transitions() {
+    let workspace = create_unique_test_workspace("plan_review_transitions");
+    let mut app = ChatApp::new_for_test(workspace.to_str().unwrap()).expect("app");
+
+    let continue_id = "plan-review-continue";
+    write_plan_json(
+        &workspace,
+        continue_id,
+        json!({
+            "id": continue_id,
+            "phase": "Review",
+            "status": "executing",
+            "goal": "ship segmented workflow",
+            "current_step": 0,
+            "steps": [
+                {"title": "step-1", "status": "done"},
+                {"title": "step-2", "status": "pending"}
+            ],
+            "events": []
+        }),
+    );
+
+    execute_command_for_test(
+        &mut app,
+        "/plan",
+        json!({"continue_id": continue_id, "review": "continue"}),
+    )
+    .await
+    .expect("continue command should execute for review continue");
+    let saved_continue = read_plan_json(&workspace, continue_id);
+    assert_eq!(
+        saved_continue
+            .get("phase")
+            .and_then(serde_json::Value::as_str),
+        Some("ExecuteStep")
+    );
+
+    let revise_id = "plan-review-revise";
+    write_plan_json(
+        &workspace,
+        revise_id,
+        json!({
+            "id": revise_id,
+            "phase": "Review",
+            "status": "executing",
+            "goal": "ship segmented workflow",
+            "current_step": 0,
+            "steps": [{"title": "step-1", "status": "done"}],
+            "events": []
+        }),
+    );
+
+    execute_command_for_test(
+        &mut app,
+        "/plan",
+        json!({"continue_id": revise_id, "review": "revise"}),
+    )
+    .await
+    .expect("continue command should execute for review revise");
+    let saved_revise = read_plan_json(&workspace, revise_id);
+    assert_eq!(
+        saved_revise
+            .get("phase")
+            .and_then(serde_json::Value::as_str),
+        Some("DraftStep")
+    );
+
+    let fail_id = "plan-review-fail";
+    write_plan_json(
+        &workspace,
+        fail_id,
+        json!({
+            "id": fail_id,
+            "phase": "Review",
+            "status": "executing",
+            "goal": "ship segmented workflow",
+            "current_step": 0,
+            "steps": [{"title": "step-1", "status": "done"}],
+            "events": []
+        }),
+    );
+
+    execute_command_for_test(
+        &mut app,
+        "/plan",
+        json!({"continue_id": fail_id, "review": "fail"}),
+    )
+    .await
+    .expect("continue command should execute for review fail");
+    let saved_fail = read_plan_json(&workspace, fail_id);
+    assert_eq!(
+        saved_fail.get("phase").and_then(serde_json::Value::as_str),
+        Some("Done")
+    );
+    assert_eq!(
+        saved_fail.get("status").and_then(serde_json::Value::as_str),
+        Some("failed")
+    );
+
+    let _ = std::fs::remove_dir_all(&workspace);
+}
+
+#[tokio::test]
 async fn execute_plan_command_rejects_invalid_args() {
     let mut app = ChatApp::new_for_test(REPO_ROOT).expect("app");
 
     let err = execute_command_for_test(&mut app, "/plan", json!({"goal": 123}))
         .await
         .expect_err("non-string goal should fail");
+
+    assert!(matches!(err, CommandError::InvalidArgs(_)));
+
+    let err = execute_command_for_test(&mut app, "/plan", json!({"review": "maybe"}))
+        .await
+        .expect_err("unsupported review choice should fail");
 
     assert!(matches!(err, CommandError::InvalidArgs(_)));
 }
