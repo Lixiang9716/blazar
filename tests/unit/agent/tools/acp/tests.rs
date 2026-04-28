@@ -21,6 +21,62 @@ fn sample_metadata() -> AcpAgentMetadata {
 }
 
 #[test]
+fn acp_tool_kind_returns_agent_acp() {
+    let server = MockServer::start();
+    let tool = AcpAgentTool::new("test_tool", server.base_url(), sample_metadata())
+        .expect("tool transport should initialize");
+    assert_eq!(tool.kind(), ToolKind::Agent { is_acp: true });
+}
+
+#[test]
+fn acp_tool_returns_failure_when_create_run_fails() {
+    let server = MockServer::start();
+
+    // create_run returns a server error
+    server.mock(|when, then| {
+        when.method(POST).path("/runs");
+        then.status(500);
+    });
+
+    let tool = AcpAgentTool::new("configured_reviewer", server.base_url(), sample_metadata())
+        .expect("tool transport should initialize");
+    let result = tool.execute(json!({ "prompt": "hello" }));
+
+    assert!(result.is_error);
+    assert!(
+        result.text_output().contains("agent unreachable"),
+        "expected 'agent unreachable' in: {}",
+        result.text_output()
+    );
+}
+
+#[test]
+fn acp_tool_returns_failure_when_poll_run_errors() {
+    let server = MockServer::start();
+
+    server.mock(|when, then| {
+        when.method(POST).path("/runs");
+        then.status(200).json_body(json!({ "id": "run-err" }));
+    });
+    // get_run returns a server error so poll_run_to_completion fails
+    server.mock(|when, then| {
+        when.method(GET).path("/runs/run-err");
+        then.status(500);
+    });
+
+    let tool = AcpAgentTool::new("configured_reviewer", server.base_url(), sample_metadata())
+        .expect("tool transport should initialize");
+    let result = tool.execute(json!({ "prompt": "hello" }));
+
+    assert!(result.is_error);
+    assert!(
+        result.text_output().contains("ACP run failed"),
+        "expected 'ACP run failed' in: {}",
+        result.text_output()
+    );
+}
+
+#[test]
 fn acp_tool_executes_run_to_completion() {
     let server = MockServer::start();
 

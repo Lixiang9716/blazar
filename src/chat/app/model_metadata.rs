@@ -189,3 +189,61 @@ impl ModelMetadataState {
         }
     }
 }
+
+#[cfg(test)]
+impl ModelMetadataState {
+    /// Expose `in_flight` for testing early-return in `schedule_refresh`.
+    pub(super) fn set_in_flight_for_test(&mut self, value: bool) {
+        self.in_flight = value;
+    }
+
+    /// Install a finished (already-joined) stalled handle.
+    pub(super) fn set_stalled_handle_finished_for_test(&mut self) {
+        self.stalled_handle = Some(std::thread::spawn(|| {}));
+        // Spin briefly until the spawned thread completes.
+        while !self.stalled_handle.as_ref().unwrap().is_finished() {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+
+    /// Install a long-running stalled handle that won't finish during the test.
+    pub(super) fn set_stalled_handle_running_for_test(&mut self) {
+        self.stalled_handle = Some(std::thread::spawn(|| {
+            std::thread::sleep(Duration::from_secs(30));
+        }));
+    }
+
+    /// Force the refresh into a timed-out state by back-dating `started_at`.
+    pub(super) fn force_timeout_for_test(&mut self) {
+        self.in_flight = true;
+        self.started_at = Some(Instant::now() - self.timeout - Duration::from_millis(10));
+        // Install a long-running handle so `expire_stale_refresh` doesn't
+        // short-circuit on a finished handle.
+        self.handle = Some(std::thread::spawn(|| {
+            std::thread::sleep(Duration::from_secs(30));
+        }));
+    }
+
+    /// Inject a result with a specific `request_id` into the channel so
+    /// `apply_completed` can observe a mismatched id.
+    pub(super) fn inject_result_for_test(&self, request_id: u64) {
+        let _ = self.tx.send(ModelMetadataRefreshResult {
+            request_id,
+            available_models: vec![],
+            config_max_tokens: None,
+        });
+    }
+
+    /// Current active request id for assertions.
+    pub(super) fn active_request_id_for_test(&self) -> u64 {
+        self.active_request_id
+    }
+
+    pub(super) fn in_flight_for_test(&self) -> bool {
+        self.in_flight
+    }
+
+    pub(super) fn has_stalled_handle_for_test(&self) -> bool {
+        self.stalled_handle.is_some()
+    }
+}

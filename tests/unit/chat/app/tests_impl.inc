@@ -2529,3 +2529,151 @@ fn agent_runtime_implements_runtime_port_trait() {
     // compile-time check that AgentRuntime implements the runtime port trait
     assert_impl::<crate::agent::runtime::AgentRuntime>();
 }
+
+// ── model_metadata coverage: stale handles, timeout, mismatched request id ──
+
+#[test]
+fn schedule_refresh_skips_when_already_in_flight() {
+    let repo_path = create_provider_config_repo(
+        r#"{ "api_key": "k", "base_url": "https://example.com/v1", "model": "m", "max_tokens": 100 }"#,
+        "meta-in-flight",
+    );
+    let fake = FakeRuntime::with_events(vec![]);
+    let repo_str = repo_path.to_string_lossy().to_string();
+    let mut app = ChatApp::new_with_runtime_for_test(&repo_str, Box::new(fake), "echo")
+        .expect("init");
+
+    // Force in_flight = true, then call on_model_changed which calls schedule_refresh.
+    app.model_metadata.set_in_flight_for_test(true);
+    let id_before = app.model_metadata.active_request_id_for_test();
+    app.model_metadata
+        .on_model_changed(std::path::Path::new(&repo_str), "m");
+    // active_request_id should NOT have changed because schedule_refresh returned early.
+    assert_eq!(
+        app.model_metadata.active_request_id_for_test(),
+        id_before,
+        "schedule_refresh must early-return when in_flight is true"
+    );
+
+    std::fs::remove_dir_all(&repo_path).ok();
+}
+
+#[test]
+fn schedule_refresh_clears_finished_stalled_handle() {
+    let repo_path = create_provider_config_repo(
+        r#"{ "api_key": "k", "base_url": "https://example.com/v1", "model": "m", "max_tokens": 100 }"#,
+        "meta-stalled-finished",
+    );
+    let fake = FakeRuntime::with_events(vec![]);
+    let repo_str = repo_path.to_string_lossy().to_string();
+    let mut app = ChatApp::new_with_runtime_for_test(&repo_str, Box::new(fake), "echo")
+        .expect("init");
+
+    // Install a finished stalled handle and mark retry_exhausted.
+    app.model_metadata.set_stalled_handle_finished_for_test();
+    app.model_metadata.retry_exhausted = true;
+    assert!(app.model_metadata.has_stalled_handle_for_test());
+
+    // Calling schedule_refresh (via on_model_changed) should detect the finished
+    // stalled handle, clear it, and reset retry_exhausted.
+    app.model_metadata
+        .on_model_changed(std::path::Path::new(&repo_str), "m");
+
+    assert!(
+        !app.model_metadata.has_stalled_handle_for_test(),
+        "finished stalled handle should have been cleared"
+    );
+    assert!(
+        !app.model_metadata.retry_exhausted,
+        "retry_exhausted should be reset after stalled handle finishes"
+    );
+
+    std::fs::remove_dir_all(&repo_path).ok();
+}
+
+#[test]
+fn schedule_refresh_returns_early_when_retry_exhausted_and_stalled() {
+    let repo_path = create_provider_config_repo(
+        r#"{ "api_key": "k", "base_url": "https://example.com/v1", "model": "m", "max_tokens": 100 }"#,
+        "meta-retry-exhausted",
+    );
+    let fake = FakeRuntime::with_events(vec![]);
+    let repo_str = repo_path.to_string_lossy().to_string();
+    let mut app = ChatApp::new_with_runtime_for_test(&repo_str, Box::new(fake), "echo")
+        .expect("init");
+
+    // Install a still-running stalled handle and mark retry_exhausted.
+    app.model_metadata.set_stalled_handle_running_for_test();
+    app.model_metadata.retry_exhausted = true;
+
+    let id_before = app.model_metadata.active_request_id_for_test();
+    app.model_metadata
+        .on_model_changed(std::path::Path::new(&repo_str), "m");
+    assert_eq!(
+        app.model_metadata.active_request_id_for_test(),
+        id_before,
+        "schedule_refresh must skip when retry_exhausted and stalled handle still running"
+    );
+
+    std::fs::remove_dir_all(&repo_path).ok();
+}
+
+#[test]
+fn expire_stale_refresh_sets_retry_exhausted_when_two_stalled() {
+    let repo_path = create_provider_config_repo(
+        r#"{ "api_key": "k", "base_url": "https://example.com/v1", "model": "m", "max_tokens": 100 }"#,
+        "meta-double-stall",
+    );
+    let fake = FakeRuntime::with_events(vec![]);
+    let repo_str = repo_path.to_string_lossy().to_string();
+    let mut app = ChatApp::new_with_runtime_for_test(&repo_str, Box::new(fake), "echo")
+        .expect("init");
+
+    // First: install a running stalled handle (simulates a previous timeout).
+    app.model_metadata.set_stalled_handle_running_for_test();
+    // Second: force current refresh into timed-out state with its own running handle.
+    app.model_metadata.force_timeout_for_test();
+
+    let ws = std::path::Path::new(&repo_str);
+    // tick → expire_stale_refresh should see both handles running → set retry_exhausted.
+    app.model_metadata.tick(ws, "m");
+
+    assert!(
+        app.model_metadata.retry_exhausted,
+        "retry_exhausted must be true when two stalled handles are running"
+    );
+    assert!(
+        !app.model_metadata.in_flight_for_test(),
+        "in_flight should be cleared after expiration"
+    );
+
+    std::fs::remove_dir_all(&repo_path).ok();
+}
+
+#[test]
+fn apply_completed_skips_mismatched_request_id() {
+    let repo_path = create_provider_config_repo(
+        r#"{ "api_key": "k", "base_url": "https://example.com/v1", "model": "m", "max_tokens": 100 }"#,
+        "meta-mismatch-id",
+    );
+    let fake = FakeRuntime::with_events(vec![]);
+    let repo_str = repo_path.to_string_lossy().to_string();
+    let mut app = ChatApp::new_with_runtime_for_test(&repo_str, Box::new(fake), "echo")
+        .expect("init");
+
+    // Inject a result with a request_id that doesn't match the active one.
+    let current_id = app.model_metadata.active_request_id_for_test();
+    app.model_metadata
+        .inject_result_for_test(current_id.wrapping_add(42));
+
+    // tick should discard the mismatched result — available_models stays empty.
+    let ws = std::path::Path::new(&repo_str);
+    app.model_metadata.tick(ws, "m");
+
+    assert!(
+        app.model_metadata.available_models.is_empty(),
+        "result with wrong request_id must be skipped"
+    );
+
+    std::fs::remove_dir_all(&repo_path).ok();
+}

@@ -137,3 +137,99 @@ fn load_uses_session_id_environment_and_prefers_tool_args_intent() {
     }
     std::fs::remove_dir_all(home_dir).expect("cleanup home dir");
 }
+
+// ── coverage: session edge cases ──
+
+#[test]
+fn load_from_dir_uses_repo_path_display_when_not_dot() {
+    let session_dir = unique_session_dir();
+    std::fs::create_dir_all(&session_dir).expect("create session dir");
+    std::fs::write(
+        session_dir.join("workspace.yaml"),
+        "label: test-repo-path\n",
+    )
+    .expect("write workspace yaml");
+
+    // Use a concrete repo path instead of "." to hit line 55.
+    let summary =
+        SessionSummary::load_from_dir(Path::new("/some/concrete/path"), Some(&session_dir));
+    assert_eq!(
+        summary.cwd, "/some/concrete/path",
+        "cwd should come from repo_path.display() when not '.'"
+    );
+
+    std::fs::remove_dir_all(session_dir).ok();
+}
+
+#[test]
+fn load_from_dir_returns_zero_todos_for_corrupt_db() {
+    let session_dir = unique_session_dir();
+    std::fs::create_dir_all(&session_dir).expect("create session dir");
+    std::fs::write(session_dir.join("workspace.yaml"), "label: corrupt-db\n")
+        .expect("write workspace yaml");
+    // Write invalid bytes so the SQLite open succeeds but the db is corrupt.
+    std::fs::write(session_dir.join("session.db"), "this is not a sqlite file")
+        .expect("write corrupt db");
+
+    let summary = SessionSummary::load_from_dir(Path::new("."), Some(&session_dir));
+    assert_eq!(summary.ready_todos, 0);
+    assert_eq!(summary.in_progress_todos, 0);
+    assert_eq!(summary.done_todos, 0);
+
+    std::fs::remove_dir_all(session_dir).ok();
+}
+
+#[test]
+fn load_from_dir_returns_zero_todos_when_table_missing() {
+    let session_dir = unique_session_dir();
+    std::fs::create_dir_all(&session_dir).expect("create session dir");
+    std::fs::write(session_dir.join("workspace.yaml"), "label: no-table\n")
+        .expect("write workspace yaml");
+    // Create a valid but empty sqlite db (no todos table).
+    let conn = Connection::open(session_dir.join("session.db")).expect("open db");
+    conn.execute("CREATE TABLE other_table (x TEXT)", [])
+        .expect("create dummy table");
+    drop(conn);
+
+    let summary = SessionSummary::load_from_dir(Path::new("."), Some(&session_dir));
+    assert_eq!(summary.ready_todos, 0);
+    assert_eq!(summary.in_progress_todos, 0);
+    assert_eq!(summary.done_todos, 0);
+
+    std::fs::remove_dir_all(session_dir).ok();
+}
+
+#[test]
+fn load_from_dir_ignores_unknown_todo_status() {
+    let session_dir = unique_session_dir();
+    std::fs::create_dir_all(&session_dir).expect("create session dir");
+    std::fs::write(
+        session_dir.join("workspace.yaml"),
+        "label: unknown-status\n",
+    )
+    .expect("write workspace yaml");
+
+    let conn = Connection::open(session_dir.join("session.db")).expect("open db");
+    conn.execute("CREATE TABLE todos (id TEXT, status TEXT)", [])
+        .expect("create table");
+    conn.execute("INSERT INTO todos (id, status) VALUES ('a', 'pending')", [])
+        .expect("insert pending");
+    conn.execute(
+        "INSERT INTO todos (id, status) VALUES ('b', 'unknown_status')",
+        [],
+    )
+    .expect("insert unknown");
+    conn.execute("INSERT INTO todos (id, status) VALUES ('c', 'done')", [])
+        .expect("insert done");
+    drop(conn);
+
+    let summary = SessionSummary::load_from_dir(Path::new("."), Some(&session_dir));
+    assert_eq!(summary.ready_todos, 1, "only 'pending' should count");
+    assert_eq!(summary.done_todos, 1, "only 'done' should count");
+    assert_eq!(
+        summary.in_progress_todos, 0,
+        "unknown status should be ignored"
+    );
+
+    std::fs::remove_dir_all(session_dir).ok();
+}
