@@ -259,3 +259,144 @@ async fn execute_log_command_adds_timeline_hint() {
             .any(|entry| entry.body.contains("logs viewer"))
     );
 }
+
+// Task 5 command tests
+
+#[tokio::test]
+async fn execute_copy_command_without_messages_returns_unavailable() {
+    let mut app = ChatApp::new_for_test(REPO_ROOT).expect("app");
+
+    let err = execute_command_for_test(&mut app, "/copy", json!({}))
+        .await
+        .expect_err("copy should fail without assistant messages");
+
+    assert!(matches!(
+        err,
+        CommandError::Unavailable(message) if message.contains("No assistant message")
+    ));
+}
+
+#[tokio::test]
+async fn execute_init_command_creates_instructions_file() {
+    let mut app = ChatApp::new_for_test(REPO_ROOT).expect("app");
+    let instructions_path = app.workspace_root().join("blazar-instructions.md");
+
+    // Clean up any existing file
+    let _ = std::fs::remove_file(&instructions_path);
+
+    let result = execute_command_for_test(&mut app, "/init", json!({}))
+        .await
+        .expect("init command should execute");
+
+    assert!(result.summary.contains("Created"));
+    assert!(instructions_path.exists());
+    assert!(
+        app.timeline()
+            .iter()
+            .any(|entry| entry.body.contains("Created blazar-instructions.md"))
+    );
+
+    // Clean up
+    let _ = std::fs::remove_file(&instructions_path);
+}
+
+#[tokio::test]
+async fn execute_init_command_when_file_exists() {
+    let mut app = ChatApp::new_for_test(REPO_ROOT).expect("app");
+    let instructions_path = app.workspace_root().join("blazar-instructions.md");
+
+    // Create the file first
+    std::fs::write(&instructions_path, "existing content").expect("write file");
+
+    let result = execute_command_for_test(&mut app, "/init", json!({}))
+        .await
+        .expect("init command should execute");
+
+    assert!(result.summary.contains("already exists"));
+    assert!(
+        app.timeline()
+            .iter()
+            .any(|entry| entry.body.contains("already exists"))
+    );
+
+    // Clean up
+    let _ = std::fs::remove_file(&instructions_path);
+}
+
+#[tokio::test]
+async fn execute_git_command_shows_status() {
+    let mut app = ChatApp::new_for_test(REPO_ROOT).expect("app");
+    let baseline_len = app.timeline().len();
+
+    let result = execute_command_for_test(&mut app, "/git", json!({}))
+        .await
+        .expect("git command should execute");
+
+    assert!(result.summary.contains("clean") || result.summary.contains("changed"));
+    assert!(app.timeline().len() > baseline_len);
+    assert!(
+        app.timeline()
+            .iter()
+            .any(|entry| entry.body.contains("branch:"))
+    );
+}
+
+#[tokio::test]
+async fn execute_diff_command_shows_changes_or_none() {
+    let mut app = ChatApp::new_for_test(REPO_ROOT).expect("app");
+
+    let result = execute_command_for_test(&mut app, "/diff", json!({}))
+        .await
+        .expect("diff command should execute");
+
+    assert!(result.summary.contains("No changes") || result.summary.contains("changed"));
+}
+
+#[tokio::test]
+async fn execute_undo_command_shows_hint() {
+    let mut app = ChatApp::new_for_test(REPO_ROOT).expect("app");
+    let baseline_len = app.timeline().len();
+
+    let result = execute_command_for_test(&mut app, "/undo", json!({}))
+        .await
+        .expect("undo command should execute");
+
+    assert_eq!(result.summary, "Undo hint displayed");
+    assert!(app.timeline().len() > baseline_len);
+    assert!(
+        app.timeline()
+            .iter()
+            .any(|entry| entry.body.contains("undo tracking"))
+    );
+}
+
+#[tokio::test]
+async fn execute_export_command_creates_json_file() {
+    let mut app = ChatApp::new_for_test(REPO_ROOT).expect("app");
+
+    let result = execute_command_for_test(&mut app, "/export", json!({}))
+        .await
+        .expect("export command should execute");
+
+    assert!(result.summary.contains("Exported"));
+    assert!(
+        app.timeline()
+            .iter()
+            .any(|entry| entry.body.contains("Exported conversation"))
+    );
+
+    // Clean up exported files
+    let workspace = app.workspace_root();
+    for entry in std::fs::read_dir(workspace).expect("read workspace") {
+        let entry = entry.expect("dir entry");
+        let path = entry.path();
+        if path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(|n| n.starts_with("blazar-export-") && n.ends_with(".json"))
+            .unwrap_or(false)
+        {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+}

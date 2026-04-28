@@ -14,10 +14,15 @@ pub mod agents;
 pub mod clear;
 pub mod config;
 pub mod context;
+pub mod copy;
 pub mod debug;
+pub mod diff;
 pub mod discover;
+pub mod export;
+pub mod git;
 pub mod help;
 pub mod history;
+pub mod init;
 pub mod log;
 pub mod mcp;
 pub mod model;
@@ -27,6 +32,7 @@ pub mod skills;
 pub mod terminal;
 pub mod theme;
 pub mod tools;
+pub mod undo;
 
 fn spec(name: &str, description: &str) -> CommandSpec {
     CommandSpec {
@@ -84,14 +90,8 @@ macro_rules! register_forward_command {
     };
 }
 
-// Task 5 commands (workspace side effects - to be implemented)
-register_forward_command!("/copy", "Copy the last response to the clipboard");
-register_forward_command!("/init", "Generate a blazar-instructions.md file");
-register_forward_command!("/export", "Export conversation to file");
+// Task 6 command (workspace side effect - to be implemented)
 register_forward_command!("/compact", "Compact conversation context");
-register_forward_command!("/diff", "Show pending file changes");
-register_forward_command!("/git", "Show git repository status");
-register_forward_command!("/undo", "Undo last file change");
 
 /// Compatibility shim for manual registration.
 ///

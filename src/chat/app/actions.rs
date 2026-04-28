@@ -178,4 +178,50 @@ impl ChatApp {
             .push(crate::chat::model::TimelineEntry::hint(message));
         self.scroll_offset = u16::MAX;
     }
+
+    /// Push a system hint with details to the timeline and auto-scroll.
+    pub fn push_system_hint_with_details(
+        &mut self,
+        message: impl Into<String>,
+        details: impl Into<String>,
+    ) {
+        self.timeline
+            .push(crate::chat::model::TimelineEntry::hint(message).with_details(details));
+        self.scroll_offset = u16::MAX;
+    }
+
+    /// Returns the workspace root path for file operations.
+    pub fn workspace_root(&self) -> &std::path::Path {
+        &self.workspace_root
+    }
+
+    /// Find the last assistant message body from the timeline.
+    pub fn last_assistant_message(&self) -> Option<String> {
+        self.timeline
+            .iter()
+            .rev()
+            .find(|entry| {
+                entry.actor == crate::chat::model::Actor::Assistant
+                    && matches!(entry.kind, crate::chat::model::EntryKind::Message)
+            })
+            .map(|entry| entry.body.clone())
+    }
+
+    /// Export conversation messages as JSON for /export command.
+    pub fn export_conversation_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "workspace": self.display_path,
+            "branch": self.branch,
+            "model": self.model_name,
+            "messages": self.messages.iter().map(|msg| {
+                serde_json::json!({
+                    "author": match msg.author {
+                        crate::chat::model::Author::User => "user",
+                        crate::chat::model::Author::Spirit => "assistant",
+                    },
+                    "body": msg.body,
+                })
+            }).collect::<Vec<_>>(),
+        })
+    }
 }

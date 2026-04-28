@@ -34,6 +34,7 @@ termimad = "0.34.1"
 nix = { version = "0.31", features = ["process", "signal"] }
 toml = "1"
 inventory = "0.3"
+arboard = "3.4"
 console-subscriber = { version = "0.5", optional = true }
 
 [dev-dependencies]

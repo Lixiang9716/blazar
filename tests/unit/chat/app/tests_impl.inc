@@ -2765,3 +2765,65 @@ fn push_system_hint_adds_hint_and_scrolls() {
     assert_eq!(last.body, "test hint message");
     assert_eq!(last.actor, crate::chat::model::Actor::System);
 }
+
+#[test]
+fn workspace_root_returns_path() {
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+    
+    let workspace = app.workspace_root();
+    assert_eq!(workspace, std::path::Path::new(repo_path));
+}
+
+#[test]
+fn last_assistant_message_returns_none_when_no_messages() {
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+    
+    assert!(app.last_assistant_message().is_none());
+}
+
+#[test]
+fn last_assistant_message_returns_most_recent() {
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+    
+    // Add some timeline entries
+    app.timeline.push(crate::chat::model::TimelineEntry::response("first response"));
+    app.timeline.push(crate::chat::model::TimelineEntry::hint("system hint"));
+    app.timeline.push(crate::chat::model::TimelineEntry::response("second response"));
+    
+    let last = app.last_assistant_message();
+    assert_eq!(last, Some("second response".to_string()));
+}
+
+#[test]
+fn export_conversation_json_includes_key_fields() {
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+    
+    // Add a message
+    app.messages.push(crate::chat::model::ChatMessage {
+        author: crate::chat::model::Author::User,
+        body: "test user message".to_string(),
+    });
+    app.messages.push(crate::chat::model::ChatMessage {
+        author: crate::chat::model::Author::Spirit,
+        body: "test assistant message".to_string(),
+    });
+    
+    let json = app.export_conversation_json();
+    
+    assert!(json.get("workspace").is_some());
+    assert!(json.get("branch").is_some());
+    assert!(json.get("model").is_some());
+    assert!(json.get("messages").is_some());
+    
+    let messages = json["messages"].as_array().expect("messages should be array");
+    assert_eq!(messages.len(), 2);
+    assert_eq!(messages[0]["author"], "user");
+    assert_eq!(messages[0]["body"], "test user message");
+    assert_eq!(messages[1]["author"], "assistant");
+    assert_eq!(messages[1]["body"], "test assistant message");
+}
+
