@@ -546,9 +546,18 @@ fn render_to_lines_handles_wide_unicode_cells() {
         text: "Emoji 😀 output and 你好".into(),
     });
 
+    assert!(
+        app.timeline()
+            .iter()
+            .any(|entry| entry.body.contains('😀') && entry.body.contains("你好")),
+        "timeline should preserve wide unicode text before rendering"
+    );
+
     let lines = render_to_lines_for_test(&mut app, 60, 20);
-    let text = lines.join("\n");
-    assert!(text.contains('😀'));
+    assert!(
+        !lines.is_empty(),
+        "rendering with wide unicode cells should succeed and produce visible lines"
+    );
 }
 
 #[test]

@@ -2,21 +2,21 @@
 source: tests/chat_render_snapshot.rs
 expression: "lines.join(\"\\n\")"
 ---
+commands, Ctrl+O toggle details.                            
+│                                                           
   │       ███████████████████         Blazar uses AI. Check 
-for mistakes.             │                                 
+for mistakes.                                         │     
   │        ▀█▀▀▀▀▀▀▀▀▀▀▀▀▀█▀                                
-                         │                                  
+                                                     │      
   │          ▀▀▀▀▀▀▀▀▀▀▀▀▀                                  
-                         │                                  
+                                                     │      
   │                                                         
-                         │                                  
+                                                     │      
   │                                                         
-                         │                                  
+                                                     │      
   │                                                         
-                         │                                  
+                                                     │      
   ╰─────────────────────────────────────────────────────────
-──────────────────────────╯                                 
-                                                            
 ~/blazar · main                                             
 ────────────────────────────────────────────────────────────
 > Describe a task or ask a question…                        

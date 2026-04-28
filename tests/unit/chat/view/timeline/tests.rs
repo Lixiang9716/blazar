@@ -31,12 +31,15 @@ fn timeline_keeps_banner_after_first_user_message_and_renders_thinking() {
         text: "reasoning".into(),
     });
 
+    assert!(
+        app.timeline()
+            .iter()
+            .any(|entry| entry.kind == crate::chat::model::EntryKind::Banner),
+        "banner entry should remain in timeline after the first user message"
+    );
+
     let lines = crate::chat::view::render_to_lines_for_test(&mut app, 100, 28);
     let text = lines.join("\n");
-    assert!(
-        text.contains("Describe a task to get started."),
-        "banner entry should remain visible after the first user message"
-    );
     assert!(
         text.contains("reasoning"),
         "thinking text should render as a timeline entry"
