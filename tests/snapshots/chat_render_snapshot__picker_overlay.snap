@@ -13,7 +13,7 @@ for mistakes.                                         │
   ╭ Commands ──────────────────────────────────────╮        
   │› /agents  List running background agents       │ │      
   │  /clear  Clear the conversation history        │        
-  │  /compact  Compact conversation context        │ │      
+  │  /compact  Compact conversation context with lo│ │      
   │  /config  Open configuration settings          │        
   │  /context  Show current context window usage   │ │      
   │  /copy  Copy the last response to the clipboard│────────
