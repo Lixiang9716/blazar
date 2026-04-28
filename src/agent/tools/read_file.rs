@@ -88,3 +88,93 @@ impl Tool for ReadFileTool {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn fresh_workspace(label: &str) -> PathBuf {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("target")
+            .join("test-workspaces")
+            .join(format!("blazar-read-file-{label}-{suffix}"));
+        fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    #[test]
+    fn execute_reads_utf8_file_successfully() {
+        let ws = fresh_workspace("happy");
+        fs::write(ws.join("hello.txt"), "Hello, world!").unwrap();
+
+        let tool = ReadFileTool::new(ws);
+        let result = tool.execute(json!({"path": "hello.txt"}));
+
+        assert!(!result.is_error);
+        assert_eq!(result.text_output(), "Hello, world!");
+    }
+
+    #[test]
+    fn execute_returns_error_for_missing_file() {
+        let ws = fresh_workspace("missing");
+
+        let tool = ReadFileTool::new(ws);
+        let result = tool.execute(json!({"path": "nonexistent.txt"}));
+
+        assert!(result.is_error);
+        assert!(result.text_output().contains("cannot resolve"));
+    }
+
+    #[test]
+    fn execute_rejects_path_escaping_workspace() {
+        let ws = fresh_workspace("escape");
+
+        let tool = ReadFileTool::new(ws);
+        let result = tool.execute(json!({"path": "../../etc/passwd"}));
+
+        assert!(result.is_error);
+    }
+
+    #[test]
+    fn execute_rejects_file_exceeding_size_limit() {
+        let ws = fresh_workspace("large");
+        let large_content = "x".repeat(MAX_FILE_BYTES + 1);
+        fs::write(ws.join("large.txt"), large_content).unwrap();
+
+        let tool = ReadFileTool::new(ws);
+        let result = tool.execute(json!({"path": "large.txt"}));
+
+        assert!(result.is_error);
+        assert!(result.text_output().contains("exceeds 100KB limit"));
+    }
+
+    #[test]
+    fn execute_rejects_non_utf8_file() {
+        let ws = fresh_workspace("binary");
+        // Write invalid UTF-8 bytes
+        fs::write(ws.join("binary.bin"), [0xFF, 0xFE, 0x80, 0x81]).unwrap();
+
+        let tool = ReadFileTool::new(ws);
+        let result = tool.execute(json!({"path": "binary.bin"}));
+
+        assert!(result.is_error);
+        assert!(result.text_output().contains("not valid UTF-8"));
+    }
+
+    #[test]
+    fn execute_returns_error_for_missing_path_param() {
+        let ws = fresh_workspace("no-param");
+
+        let tool = ReadFileTool::new(ws);
+        let result = tool.execute(json!({}));
+
+        assert!(result.is_error);
+        assert!(result.text_output().contains("requires a string path"));
+    }
+}
