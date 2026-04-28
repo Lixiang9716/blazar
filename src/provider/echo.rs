@@ -53,3 +53,74 @@ impl LlmProvider for EchoProvider {
         let _ = tx.send(ProviderEvent::TurnComplete);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::mpsc;
+
+    #[test]
+    fn echo_provider_echoes_last_user_message() {
+        let provider = EchoProvider::new(0);
+        let messages = vec![
+            ProviderMessage::User {
+                content: "first".into(),
+            },
+            ProviderMessage::Assistant {
+                content: "ignored".into(),
+            },
+            ProviderMessage::User {
+                content: "hello world".into(),
+            },
+        ];
+        let (tx, rx) = mpsc::channel();
+        provider.stream_turn("echo", &messages, &[], tx);
+
+        let mut text = String::new();
+        for event in rx {
+            match event {
+                ProviderEvent::TextDelta(delta) => text.push_str(&delta),
+                ProviderEvent::TurnComplete => break,
+                _ => {}
+            }
+        }
+        assert_eq!(text, "Echo: hello world");
+    }
+
+    #[test]
+    fn echo_provider_handles_empty_messages() {
+        let provider = EchoProvider::new(0);
+        let (tx, rx) = mpsc::channel();
+        provider.stream_turn("echo", &[], &[], tx);
+
+        let mut text = String::new();
+        for event in rx {
+            match event {
+                ProviderEvent::TextDelta(delta) => text.push_str(&delta),
+                ProviderEvent::TurnComplete => break,
+                _ => {}
+            }
+        }
+        assert_eq!(text, "Echo: ");
+    }
+
+    #[test]
+    fn echo_provider_skips_non_user_messages() {
+        let provider = EchoProvider::new(0);
+        let messages = vec![ProviderMessage::Assistant {
+            content: "only assistant".into(),
+        }];
+        let (tx, rx) = mpsc::channel();
+        provider.stream_turn("echo", &messages, &[], tx);
+
+        let mut text = String::new();
+        for event in rx {
+            match event {
+                ProviderEvent::TextDelta(delta) => text.push_str(&delta),
+                ProviderEvent::TurnComplete => break,
+                _ => {}
+            }
+        }
+        assert_eq!(text, "Echo: ");
+    }
+}

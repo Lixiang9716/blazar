@@ -198,3 +198,172 @@ fn has_repeated_successful_tool_calls(messages: &[ProviderMessage]) -> bool {
 
     false
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn render_system_prompt_appends_context() {
+        let result = render_system_prompt("You are a helpful assistant.");
+        // build_runtime_context_block always returns Some in a normal env
+        // (current_dir succeeds), so the result should contain the base prompt
+        // plus a Runtime Context section.
+        assert!(result.starts_with("You are a helpful assistant."));
+        assert!(result.contains("## Runtime Context"));
+    }
+
+    #[test]
+    fn render_system_prompt_preserves_base_when_no_context() {
+        // We can't easily force build_runtime_context_block to return None
+        // in a normal test environment (current_dir always succeeds).
+        // Instead, we verify the base prompt is always present.
+        let base = "Base prompt only.";
+        let result = render_system_prompt(base);
+        assert!(result.contains(base));
+    }
+
+    #[test]
+    fn truncate_empty_returns_empty() {
+        let result = truncate_provider_messages(&[]);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn truncate_preserves_small_message_list() {
+        let messages = vec![
+            ProviderMessage::User {
+                content: "hello".into(),
+            },
+            ProviderMessage::Assistant {
+                content: "hi".into(),
+            },
+        ];
+        let result = truncate_provider_messages(&messages);
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn truncate_trims_excess_user_turns() {
+        // Build a message list with more than MAX_CONTEXT_USER_TURNS user messages.
+        let mut messages = Vec::new();
+        for i in 0..MAX_CONTEXT_USER_TURNS + 5 {
+            messages.push(ProviderMessage::User {
+                content: format!("msg-{i}"),
+            });
+            messages.push(ProviderMessage::Assistant {
+                content: format!("reply-{i}"),
+            });
+        }
+        let result = truncate_provider_messages(&messages);
+        let user_count = result
+            .iter()
+            .filter(|m| matches!(m, ProviderMessage::User { .. }))
+            .count();
+        assert!(
+            user_count <= MAX_CONTEXT_USER_TURNS,
+            "should have at most {MAX_CONTEXT_USER_TURNS} user turns, got {user_count}"
+        );
+    }
+
+    #[test]
+    fn truncate_respects_max_provider_messages() {
+        // Build a list exceeding MAX_CONTEXT_PROVIDER_MESSAGES.
+        let mut messages = Vec::new();
+        for i in 0..MAX_CONTEXT_PROVIDER_MESSAGES + 20 {
+            messages.push(ProviderMessage::User {
+                content: format!("u-{i}"),
+            });
+        }
+        let result = truncate_provider_messages(&messages);
+        assert!(
+            result.len() <= MAX_CONTEXT_PROVIDER_MESSAGES,
+            "should have at most {} messages, got {}",
+            MAX_CONTEXT_PROVIDER_MESSAGES,
+            result.len()
+        );
+    }
+
+    #[test]
+    fn merge_tool_call_fragment_builds_incrementally() {
+        let mut tool_calls = Vec::new();
+        let delta = DeltaToolCall {
+            index: 0,
+            id: Some("call-1".into()),
+            call_type: Some("function".into()),
+            function: Some(super::super::DeltaFunction {
+                name: Some("my_tool".into()),
+                arguments: Some("{\"key\":".into()),
+            }),
+        };
+        merge_tool_call_fragment(&mut tool_calls, &delta);
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(tool_calls[0].function.name, "my_tool");
+
+        // Append more arguments
+        let delta2 = DeltaToolCall {
+            index: 0,
+            id: None,
+            call_type: None,
+            function: Some(super::super::DeltaFunction {
+                name: None,
+                arguments: Some("\"val\"}".into()),
+            }),
+        };
+        merge_tool_call_fragment(&mut tool_calls, &delta2);
+        assert_eq!(tool_calls[0].function.arguments, "{\"key\":\"val\"}");
+    }
+
+    #[test]
+    fn collect_tool_call_batch_gathers_consecutive_calls() {
+        let messages = vec![
+            ProviderMessage::ToolCall {
+                id: "c1".into(),
+                name: "tool_a".into(),
+                arguments: "{}".into(),
+            },
+            ProviderMessage::ToolCall {
+                id: "c2".into(),
+                name: "tool_b".into(),
+                arguments: "{}".into(),
+            },
+            ProviderMessage::User {
+                content: "stop".into(),
+            },
+        ];
+        let (batch, next_index) = collect_tool_call_batch(&messages, 0);
+        assert_eq!(batch.len(), 2);
+        assert_eq!(next_index, 2);
+        assert_eq!(batch[0].function.name, "tool_a");
+        assert_eq!(batch[1].function.name, "tool_b");
+    }
+
+    #[test]
+    fn determine_tool_choice_returns_none_without_tools() {
+        assert!(determine_tool_choice(&[], false).is_none());
+    }
+
+    #[test]
+    fn determine_tool_choice_returns_auto_for_fresh_conversation() {
+        let messages = vec![ProviderMessage::User {
+            content: "hi".into(),
+        }];
+        let choice = determine_tool_choice(&messages, true);
+        assert_eq!(choice, Some(ToolChoice::Auto));
+    }
+
+    #[test]
+    fn run_git_command_returns_some_for_valid_command() {
+        let cwd = std::env::current_dir().unwrap();
+        let result = run_git_command(&cwd, &["rev-parse", "--is-inside-work-tree"]);
+        // In the blazar repo this should return "true"
+        assert_eq!(result, Some("true".to_owned()));
+    }
+
+    #[test]
+    fn run_git_command_returns_none_for_invalid_command() {
+        let cwd = std::env::current_dir().unwrap();
+        let result = run_git_command(&cwd, &["no-such-subcommand"]);
+        assert!(result.is_none());
+    }
+}

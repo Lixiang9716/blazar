@@ -247,3 +247,100 @@ pub fn configured_max_tokens(repo_root: &str) -> Option<u32> {
         .ok()
         .map(|cfg| cfg.max_tokens)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_provider_config_available_models_returns_vec() {
+        let config = DefaultProviderConfig;
+        // With test behavior set, we can control the return value.
+        let models = with_available_models_behavior_for_test(
+            AvailableModelsTestBehavior::Return(vec![ModelInfo {
+                id: "test-model".into(),
+                description: "A test model".into(),
+                context_length: Some(4096),
+            }]),
+            || config.available_models("."),
+        );
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].id, "test-model");
+    }
+
+    #[test]
+    fn default_provider_config_configured_max_tokens() {
+        let config = DefaultProviderConfig;
+        // Without a valid config file, this returns None.
+        let result = config.configured_max_tokens("/nonexistent/path");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn resolve_model_context_length_finds_matching_model() {
+        let models = vec![
+            ModelInfo {
+                id: "gpt-4".into(),
+                description: "GPT-4".into(),
+                context_length: Some(8192),
+            },
+            ModelInfo {
+                id: "gpt-3.5".into(),
+                description: "GPT-3.5".into(),
+                context_length: Some(4096),
+            },
+        ];
+        let config = DefaultProviderConfig;
+        assert_eq!(
+            config.resolve_model_context_length(&models, "gpt-4"),
+            Some(8192)
+        );
+        assert_eq!(
+            config.resolve_model_context_length(&models, "gpt-3.5"),
+            Some(4096)
+        );
+        assert_eq!(
+            config.resolve_model_context_length(&models, "unknown"),
+            None
+        );
+    }
+
+    #[test]
+    fn resolve_model_context_length_free_fn() {
+        let models = vec![ModelInfo {
+            id: "m1".into(),
+            description: "Model 1".into(),
+            context_length: Some(2048),
+        }];
+        assert_eq!(
+            resolve_model_context_length_from_models(&models, "m1"),
+            Some(2048)
+        );
+        assert_eq!(
+            resolve_model_context_length_from_models(&models, "missing"),
+            None
+        );
+    }
+
+    #[test]
+    fn resolve_model_context_length_integration() {
+        // Uses the top-level resolve_model_context_length which calls available_models.
+        let result = with_available_models_behavior_for_test(
+            AvailableModelsTestBehavior::Return(vec![ModelInfo {
+                id: "test-model".into(),
+                description: "test".into(),
+                context_length: Some(16384),
+            }]),
+            || resolve_model_context_length(".", "test-model"),
+        );
+        assert_eq!(result, Some(16384));
+    }
+
+    #[test]
+    fn echo_provider_implements_llm_provider_trait() {
+        let provider = echo::EchoProvider::default();
+        // list_models default returns empty vec
+        let models = provider.list_models().unwrap();
+        assert!(models.is_empty());
+    }
+}

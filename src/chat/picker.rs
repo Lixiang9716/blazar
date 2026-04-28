@@ -309,4 +309,94 @@ mod tests {
             "command palette should expose /discover-agents"
         );
     }
+
+    #[test]
+    fn selected_item_empty_picker() {
+        let picker = ModalPicker::new("Empty", vec![]);
+        assert!(picker.select_current().is_none());
+        assert!(picker.selected_index().is_none());
+    }
+
+    #[test]
+    fn list_state_accessors() {
+        let mut picker = ModalPicker::new("Test", vec![PickerItem::new("a", "desc")]);
+        // Read-only accessor returns default state
+        let _ = picker.list_state();
+        // Mutable accessor allows selection changes
+        picker.list_state_mut().select(Some(0));
+        assert_eq!(picker.selected_index(), Some(0));
+    }
+
+    #[test]
+    fn move_up_on_empty_picker_is_noop() {
+        let mut picker = ModalPicker::new("Empty", vec![]);
+        picker.move_up();
+        assert_eq!(picker.selected_index(), None);
+    }
+
+    #[test]
+    fn move_down_on_empty_picker_is_noop() {
+        let mut picker = ModalPicker::new("Empty", vec![]);
+        picker.move_down();
+        assert_eq!(picker.selected_index(), None);
+    }
+
+    #[test]
+    fn move_up_at_top_wraps_to_bottom() {
+        let items = vec![
+            PickerItem::new("a", "first"),
+            PickerItem::new("b", "second"),
+        ];
+        let mut picker =
+            ModalPicker::with_context("Test", items, super::PickerContext::ThemeSelect);
+        picker.open();
+        // Selection starts at 0 after open
+        assert_eq!(picker.selected_index(), Some(0));
+        // move_up from 0 wraps to last item
+        picker.move_up();
+        assert_eq!(picker.selected_index(), Some(1));
+    }
+
+    #[test]
+    fn move_down_at_bottom_wraps_to_top() {
+        let items = vec![
+            PickerItem::new("a", "first"),
+            PickerItem::new("b", "second"),
+        ];
+        let mut picker =
+            ModalPicker::with_context("Test", items, super::PickerContext::ThemeSelect);
+        picker.open();
+        picker.move_down(); // 0 -> 1
+        assert_eq!(picker.selected_index(), Some(1));
+        picker.move_down(); // 1 -> 0 (wraps)
+        assert_eq!(picker.selected_index(), Some(0));
+    }
+
+    #[test]
+    fn visible_window_with_many_items() {
+        let items: Vec<PickerItem> = (0..20)
+            .map(|i| PickerItem::new(format!("item-{i}"), format!("desc-{i}")))
+            .collect();
+        let mut picker = ModalPicker::with_context("Big", items, super::PickerContext::ThemeSelect);
+        picker.open();
+
+        // Initially at index 0 — window starts at offset 0
+        let (window, offset) = picker.visible_window();
+        assert_eq!(offset, 0);
+        assert_eq!(window.len(), super::PICKER_PAGE_SIZE);
+        assert_eq!(window[0].label, "item-0");
+
+        assert!(!picker.has_scroll_up());
+        assert!(picker.has_scroll_down());
+
+        // Navigate past page size to trigger scroll
+        for _ in 0..super::PICKER_PAGE_SIZE + 2 {
+            picker.move_down();
+        }
+        let (window, offset) = picker.visible_window();
+        assert!(offset > 0, "should have scrolled");
+        assert_eq!(window.len(), super::PICKER_PAGE_SIZE);
+
+        assert!(picker.has_scroll_up());
+    }
 }
