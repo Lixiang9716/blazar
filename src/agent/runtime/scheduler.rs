@@ -693,4 +693,125 @@ mod tests {
             _ => panic!("expected Immediate for repeated success"),
         }
     }
+
+    // ── repair_bash_arguments chain tests ──
+
+    /// Helper: assert that plan_tool_call for "bash" with the given args
+    /// succeeds via repair (Execute with was_repaired=true).
+    fn assert_bash_repair_succeeds(args: &str, description: &str) {
+        let registry = empty_registry();
+        let mut failures = HashMap::new();
+        let successes = HashSet::new();
+        let result = plan_tool_call(&registry, pending("bash", args), &successes, &mut failures);
+        match &result.item.action {
+            PlannedToolAction::Execute { was_repaired, .. } => {
+                assert!(was_repaired, "expected repair for: {description}");
+            }
+            PlannedToolAction::Immediate(cap) => {
+                panic!(
+                    "expected Execute (repair) for {description}, got Immediate: {}",
+                    cap.text_output()
+                );
+            }
+        }
+        // Line 68: successful repair clears the failure counter.
+        assert!(
+            failures.is_empty(),
+            "failures should be cleared after repair"
+        );
+    }
+
+    #[test]
+    fn plan_tool_call_repairs_bash_invalid_dollar_escapes() {
+        // Lines 148-150: dollar escapes only path.
+        let args = r#"{"command": "echo \$HOME"}"#;
+        assert_bash_repair_succeeds(args, "dollar escapes only");
+    }
+
+    #[test]
+    fn plan_tool_call_repairs_bash_truncated_payload() {
+        // Lines 173-176: truncated only path.
+        let args = r#"{"command": "echo hello"#;
+        assert_bash_repair_succeeds(args, "truncated payload only");
+    }
+
+    #[test]
+    fn plan_tool_call_repairs_bash_quotes_plus_dollar() {
+        // Lines 127-130: unescaped quotes + dollar escapes combo.
+        let args = r#"{"command": "echo "hello" \$HOME"}"#;
+        assert_bash_repair_succeeds(args, "unescaped quotes + dollar escapes");
+    }
+
+    #[test]
+    fn plan_tool_call_repairs_bash_quotes_plus_truncated() {
+        // Lines 132-135: unescaped quotes + truncated payload.
+        let args = r#"{"command": "echo "hello" world"#;
+        assert_bash_repair_succeeds(args, "unescaped quotes + truncated");
+    }
+
+    #[test]
+    fn plan_tool_call_repairs_bash_dollar_plus_truncated() {
+        // Lines 157-160: dollar escapes + truncated.
+        let args = r#"{"command": "echo \$HOME"#;
+        assert_bash_repair_succeeds(args, "dollar escapes + truncated");
+    }
+
+    #[test]
+    fn plan_tool_call_repairs_bash_quotes_plus_dollar_plus_truncated() {
+        // Lines 137-144: unescaped quotes + dollar + truncated (full combo).
+        let args = r#"{"command": "echo "hello" \$HOME"#;
+        assert_bash_repair_succeeds(args, "quotes + dollar + truncated");
+    }
+
+    #[test]
+    fn plan_tool_call_repairs_bash_dollar_plus_quotes_plus_truncated() {
+        // Lines 162-168: dollar escapes + unescaped quotes + truncated.
+        // Craft input where dollar repair happens first, then quotes, then truncation.
+        let args = r#"{"command": "for i in \$(seq 1 3); do echo "item $i"; done"#;
+        assert_bash_repair_succeeds(args, "dollar escapes + unescaped quotes + truncated");
+    }
+
+    #[test]
+    fn plan_tool_call_repairs_bash_dollar_plus_quotes() {
+        // Lines 152-155: dollar escapes + unescaped quotes (no truncation).
+        let args = r#"{"command": "echo "value is \$HOME""}"#;
+        assert_bash_repair_succeeds(args, "dollar escapes + unescaped quotes");
+    }
+
+    #[test]
+    fn plan_tool_call_unrepairable_bash_returns_error() {
+        // Line 179: final None return — unrepairable bash args.
+        // Line 88: error logging path.
+        let registry = empty_registry();
+        let mut failures = HashMap::new();
+        let successes = HashSet::new();
+        let args = "completely broken {{{not json";
+        let result = plan_tool_call(&registry, pending("bash", args), &successes, &mut failures);
+        match result.item.action {
+            PlannedToolAction::Immediate(cap) => {
+                assert!(cap.text_output().contains("JSON PARSE ERROR"));
+            }
+            _ => panic!("expected Immediate for unrepairable bash"),
+        }
+    }
+
+    #[test]
+    fn schedule_batches_batch_conflicts_check() {
+        // Line 249: batch_conflicts with non-empty batch having conflicting claims.
+        let batches = schedule_batches(vec![
+            call("a", vec![claim_rw("fs:x")]),
+            call("b", vec![claim_rw("fs:x")]),
+            call("c", vec![]),
+        ]);
+        // a and b conflict (both rw on same resource), c has no claims → goes with b.
+        assert_eq!(batches.len(), 2);
+        assert_eq!(
+            batches[0].iter().map(|s| s.item).collect::<Vec<_>>(),
+            vec!["a"]
+        );
+        assert_eq!(
+            batches[1].iter().map(|s| s.item).collect::<Vec<_>>(),
+            vec!["b", "c"]
+        );
+    }
 }

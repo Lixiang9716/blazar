@@ -373,3 +373,224 @@ pub(super) fn preview_text(text: &str, max_chars: usize) -> &str {
         None => text,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── parse_or_repair_json ──
+
+    #[test]
+    fn parse_or_repair_json_valid_json_fast_path() {
+        // Line 74: normal successful parse (no extraction, no repair).
+        let raw = r#"{"key": "value"}"#;
+        let result = parse_or_repair_json(raw).unwrap();
+        assert!(!result.was_repaired);
+        assert_eq!(result.value["key"], "value");
+    }
+
+    #[test]
+    fn parse_or_repair_json_repairs_control_chars_in_strings() {
+        // Line 63: control-character repair retry path — first parse fails,
+        // repair_control_chars fixes literal newline/tab inside a string value.
+        let raw = "{\"command\": \"echo\thello\nworld\"}";
+        let result = parse_or_repair_json(raw).unwrap();
+        assert!(result.was_repaired);
+        assert!(result.value["command"].as_str().unwrap().contains("hello"));
+    }
+
+    #[test]
+    fn parse_or_repair_json_returns_error_for_truly_broken_json() {
+        // Neither control-char repair nor extraction can save this.
+        let raw = "{{{{not json at all";
+        assert!(parse_or_repair_json(raw).is_err());
+    }
+
+    // ── repair_control_chars ──
+
+    #[test]
+    fn repair_control_chars_escapes_tab_newline_cr() {
+        // Lines 173-175: \n → \\n, \r → \\r, \t → \\t
+        let raw = "{\"a\": \"line1\nline2\rline3\tend\"}";
+        let repaired = repair_control_chars(raw).unwrap();
+        assert!(repaired.contains("\\n"));
+        assert!(repaired.contains("\\r"));
+        assert!(repaired.contains("\\t"));
+        // Should now be valid JSON.
+        serde_json::from_str::<serde_json::Value>(&repaired).unwrap();
+    }
+
+    #[test]
+    fn repair_control_chars_escapes_generic_control_char() {
+        // Lines 176-178: generic \u00XX escape for control chars other than \n/\r/\t.
+        // Use 0x01 (SOH) inside a string.
+        let raw = format!("{{\"a\": \"hello{}world\"}}", '\x01');
+        let repaired = repair_control_chars(&raw).unwrap();
+        assert!(repaired.contains("\\u0001"));
+        serde_json::from_str::<serde_json::Value>(&repaired).unwrap();
+    }
+
+    #[test]
+    fn repair_control_chars_returns_none_when_no_change() {
+        let raw = r#"{"key": "value"}"#;
+        assert!(repair_control_chars(raw).is_none());
+    }
+
+    // ── repair_truncated_json_closure ──
+
+    #[test]
+    fn repair_truncated_closure_closes_missing_brace() {
+        // Lines 200-254: truncated JSON with missing closing brace.
+        let raw = r#"{"command": "ls""#;
+        let repaired = repair_truncated_json_closure(raw).unwrap();
+        serde_json::from_str::<serde_json::Value>(&repaired).unwrap();
+    }
+
+    #[test]
+    fn repair_truncated_closure_closes_missing_bracket() {
+        // Line 227: array bracket matching.
+        let raw = r#"[{"a": 1}, {"b": 2}"#;
+        let repaired = repair_truncated_json_closure(raw).unwrap();
+        serde_json::from_str::<serde_json::Value>(&repaired).unwrap();
+    }
+
+    #[test]
+    fn repair_truncated_closure_deeply_nested() {
+        // Lines 211-216: deeply nested with backslash inside string.
+        let raw = r#"{"a": {"b": {"c": "val with \" escaped""#;
+        let repaired = repair_truncated_json_closure(raw).unwrap();
+        serde_json::from_str::<serde_json::Value>(&repaired).unwrap();
+    }
+
+    #[test]
+    fn repair_truncated_closure_unterminated_string() {
+        // Truncated mid-string: should close the string then the braces.
+        let raw = r#"{"command": "echo hello"#;
+        let repaired = repair_truncated_json_closure(raw).unwrap();
+        serde_json::from_str::<serde_json::Value>(&repaired).unwrap();
+    }
+
+    #[test]
+    fn repair_truncated_closure_returns_none_for_non_json() {
+        // Line 200: input doesn't start with { or [.
+        assert!(repair_truncated_json_closure("not json").is_none());
+    }
+
+    #[test]
+    fn repair_truncated_closure_returns_none_when_already_complete() {
+        // Line 253: no delta means nothing to repair.
+        let raw = r#"{"key": "value"}"#;
+        assert!(repair_truncated_json_closure(raw).is_none());
+    }
+
+    #[test]
+    fn repair_truncated_closure_returns_none_for_dangling_backslash() {
+        // Line 240: in_string && prev_backslash → None.
+        let raw = r#"{"a": "val\"#;
+        assert!(repair_truncated_json_closure(raw).is_none());
+    }
+
+    #[test]
+    fn repair_truncated_closure_returns_none_when_delta_too_large() {
+        // Line 260: delta exceeds max_delta (15% of length or 8).
+        // A very short payload missing many closers.
+        let raw = r#"{"a":[[[[[[[[[["#;
+        assert!(repair_truncated_json_closure(raw).is_none());
+    }
+
+    #[test]
+    fn repair_truncated_closure_returns_none_for_mismatched_brackets() {
+        // Mismatch: open { but see ] → returns None from the pop check.
+        let raw = r#"{"a": 1]"#;
+        assert!(repair_truncated_json_closure(raw).is_none());
+    }
+
+    // ── repair_invalid_dollar_escapes ──
+
+    #[test]
+    fn repair_dollar_escapes_removes_backslash_before_dollar() {
+        let raw = r#"{"command": "echo \$HOME"}"#;
+        let repaired = repair_invalid_dollar_escapes(raw).unwrap();
+        assert!(repaired.contains("$HOME"));
+        assert!(!repaired.contains(r"\$HOME"));
+        serde_json::from_str::<serde_json::Value>(&repaired).unwrap();
+    }
+
+    #[test]
+    fn repair_dollar_escapes_returns_none_when_no_change() {
+        let raw = r#"{"command": "echo $HOME"}"#;
+        assert!(repair_invalid_dollar_escapes(raw).is_none());
+    }
+
+    // ── repair_unescaped_inner_quotes ──
+
+    #[test]
+    fn repair_unescaped_inner_quotes_escapes_inner_quotes() {
+        let raw = r#"{"command": "echo "hello" world"}"#;
+        let repaired = repair_unescaped_inner_quotes(raw).unwrap();
+        serde_json::from_str::<serde_json::Value>(&repaired).unwrap();
+    }
+
+    #[test]
+    fn repair_unescaped_inner_quotes_returns_none_when_no_change() {
+        let raw = r#"{"key": "value"}"#;
+        assert!(repair_unescaped_inner_quotes(raw).is_none());
+    }
+
+    #[test]
+    fn is_probable_string_terminator_at_end_of_input() {
+        // Line 363: idx >= bytes.len() → true (quote at end of input).
+        let raw = r#"{"a": "hello"}"#;
+        // The last `"` before `}` is a terminator; test the function directly.
+        let bytes = raw.as_bytes();
+        // Find the quote right before the final `}`.
+        let last_quote = raw.rfind('"').unwrap();
+        assert!(is_probable_string_terminator(bytes, last_quote));
+    }
+
+    #[test]
+    fn is_probable_string_terminator_returns_true_at_eof() {
+        // Line 363: quote at exact end of input.
+        let raw = r#""hello""#;
+        let bytes = raw.as_bytes();
+        let last = raw.len() - 1;
+        assert!(is_probable_string_terminator(bytes, last));
+    }
+
+    // ── Combined repair scenarios ──
+
+    #[test]
+    fn combined_control_chars_and_extraction() {
+        // JSON with trailing junk and control chars.
+        let raw = "{\"a\": \"val\tue\"}</tool_call>";
+        let result = parse_or_repair_json(raw).unwrap();
+        assert!(result.was_repaired);
+    }
+
+    #[test]
+    fn extract_json_payload_strips_leading_trailing_text() {
+        let raw = r#"some junk {"key": "value"} more junk"#;
+        let extracted = extract_json_payload(raw).unwrap();
+        serde_json::from_str::<serde_json::Value>(extracted).unwrap();
+    }
+
+    #[test]
+    fn extract_json_payload_returns_none_for_concatenated() {
+        let raw = r#"{"a":1}{"b":2}"#;
+        assert!(extract_json_payload(raw).is_none());
+    }
+
+    #[test]
+    fn strip_thinking_tags_removes_think_block() {
+        let raw = r#"<think>reasoning here</think>{"key": "value"}"#;
+        let cleaned = strip_thinking_tags(raw);
+        assert!(cleaned.starts_with('{'));
+    }
+
+    #[test]
+    fn strip_thinking_tags_extracts_json_from_prose() {
+        let raw = r#"Here is the JSON: {"key": "value"}"#;
+        let cleaned = strip_thinking_tags(raw);
+        assert!(cleaned.starts_with('{'));
+    }
+}
