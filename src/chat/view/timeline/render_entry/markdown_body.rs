@@ -15,13 +15,33 @@ pub(super) fn render_markdown_block<'a>(
     first_prefix: Vec<Span<'a>>,
     cont_prefix: Vec<Span<'a>>,
 ) -> Vec<Line<'a>> {
-    render_markdown_block_with_mode(
+    render_markdown_block_with_mode_and_text_style(
         text,
         theme,
         width,
         first_prefix,
         cont_prefix,
         MarkdownTextMode::NormalizeParagraphs,
+        None,
+    )
+}
+
+pub(super) fn render_markdown_block_with_text_style<'a>(
+    text: &str,
+    theme: &ChatTheme,
+    width: u16,
+    first_prefix: Vec<Span<'a>>,
+    cont_prefix: Vec<Span<'a>>,
+    text_style: Style,
+) -> Vec<Line<'a>> {
+    render_markdown_block_with_mode_and_text_style(
+        text,
+        theme,
+        width,
+        first_prefix,
+        cont_prefix,
+        MarkdownTextMode::NormalizeParagraphs,
+        Some(text_style),
     )
 }
 
@@ -32,23 +52,25 @@ pub(super) fn render_markdown_block_preserve_lines<'a>(
     first_prefix: Vec<Span<'a>>,
     cont_prefix: Vec<Span<'a>>,
 ) -> Vec<Line<'a>> {
-    render_markdown_block_with_mode(
+    render_markdown_block_with_mode_and_text_style(
         text,
         theme,
         width,
         first_prefix,
         cont_prefix,
         MarkdownTextMode::PreserveLines,
+        None,
     )
 }
 
-fn render_markdown_block_with_mode<'a>(
+fn render_markdown_block_with_mode_and_text_style<'a>(
     text: &str,
     theme: &ChatTheme,
     width: u16,
     first_prefix: Vec<Span<'a>>,
     cont_prefix: Vec<Span<'a>>,
     text_mode: MarkdownTextMode,
+    text_style_override: Option<Style>,
 ) -> Vec<Line<'a>> {
     let body = text.trim();
     if body.is_empty() {
@@ -87,7 +109,12 @@ fn render_markdown_block_with_mode<'a>(
                 }
                 let md_lines =
                     rat_skin.parse(ratskin::RatSkin::parse_text(&rendered_text), text_width);
-                for md_line in md_lines {
+                for mut md_line in md_lines {
+                    if let Some(style) = text_style_override {
+                        for span in &mut md_line.spans {
+                            span.style = span.style.patch(style);
+                        }
+                    }
                     let mut result_spans = if is_first_line {
                         is_first_line = false;
                         first_prefix.clone()

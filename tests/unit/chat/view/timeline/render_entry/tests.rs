@@ -25,7 +25,20 @@ fn first_line_marker_style(lines: &[Line<'_>]) -> Option<Style> {
 fn first_body_span_style(lines: &[Line<'_>]) -> Option<Style> {
     lines
         .first()
-        .and_then(|line| line.spans.iter().skip(2).find(|span| !span.content.is_empty()))
+        .and_then(|line| {
+            line.spans
+                .iter()
+                .skip(2)
+                .find(|span| !span.content.is_empty())
+        })
+        .map(|span| span.style)
+}
+
+fn span_style_containing(lines: &[Line<'_>], needle: &str) -> Option<Style> {
+    lines
+        .iter()
+        .flat_map(|line| line.spans.iter())
+        .find(|span| span.content.contains(needle))
         .map(|span| span.style)
 }
 
@@ -79,15 +92,29 @@ fn thinking_entry_body_uses_streaming_highlight_style() {
 }
 
 #[test]
+fn thinking_entry_preserves_inline_markdown_styles_under_highlight() {
+    let theme = crate::chat::theme::build_theme();
+    let assistant_lines = render_entry(&TimelineEntry::response("**strong**"), &theme, 70);
+    let thinking_lines = render_entry(&TimelineEntry::thinking("**strong**"), &theme, 70);
+
+    let assistant_style = span_style_containing(&assistant_lines, "strong")
+        .expect("assistant markdown span should exist");
+    let thinking_style = span_style_containing(&thinking_lines, "strong")
+        .expect("thinking markdown span should exist");
+
+    assert_ne!(assistant_style, theme.body_text);
+    assert_eq!(thinking_style, assistant_style.patch(theme.marker_thinking));
+}
+
+#[test]
 fn assistant_message_body_style_remains_default_after_thinking_color_change() {
     let theme = crate::chat::theme::build_theme();
     let entry = TimelineEntry::response("normal assistant text");
     let lines = render_entry(&entry, &theme, 70);
 
-    let text_span_style =
-        first_body_span_style(&lines).expect("assistant body span should exist");
+    let text_span_style = first_body_span_style(&lines).expect("assistant body span should exist");
 
-    assert_ne!(text_span_style, theme.marker_thinking);
+    assert_eq!(text_span_style, theme.body_text);
 }
 
 #[test]
