@@ -1,5 +1,7 @@
+use serde::{Deserialize, Serialize};
+
 #[allow(dead_code)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 enum PlanPhase {
     Discover,
     Clarify,
@@ -31,7 +33,7 @@ struct PlanTransitionError {
     signal: PlanSignal,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub(super) struct PlanSession {
     phase: PlanPhase,
 }
