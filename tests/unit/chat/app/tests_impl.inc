@@ -1591,9 +1591,35 @@ fn slash_input_switches_to_inline_command_status_mode() {
 
     assert_eq!(users_rows[0].trim(), "~/blazar · main");
     // Commands are now sorted alphabetically via inventory registration
-    assert_eq!(users_rows[1].trim(), "• /agents");
+    assert_eq!(users_rows[1].trim(), "> /agents");
     assert_eq!(users_rows[2].trim(), "• /clear");
     assert_eq!(users_rows[3].trim(), "• /compact");
+}
+
+#[test]
+fn slash_command_list_supports_arrow_key_selection() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+    app.handle_action(InputAction::Key(KeyEvent::new(
+        KeyCode::Char('/'),
+        KeyModifiers::NONE,
+    )));
+
+    assert_eq!(app.users_command_scroll_offset(), 0);
+
+    app.handle_action(InputAction::from_key_event(KeyEvent::new(
+        KeyCode::Down,
+        KeyModifiers::NONE,
+    )));
+    assert_eq!(app.users_command_scroll_offset(), 1);
+
+    app.handle_action(InputAction::from_key_event(KeyEvent::new(
+        KeyCode::Up,
+        KeyModifiers::NONE,
+    )));
+    assert_eq!(app.users_command_scroll_offset(), 0);
 }
 
 #[test]
@@ -1701,6 +1727,34 @@ fn slash_query_matching_normalizes_crlf_and_whitespace() {
     assert!(
         app.inline_command_matches().iter().any(|name| name == "/help"),
         "CR/LF + whitespace query should still match /help after normalization"
+    );
+}
+
+#[test]
+fn slash_submit_uses_selected_inline_command_match() {
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+    app.set_composer_text("/");
+
+    assert_eq!(app.users_status_snapshot().status_mode, StatusMode::CommandList);
+    assert_eq!(app.users_command_scroll_offset(), 0);
+    let help_index = app
+        .inline_command_matches()
+        .iter()
+        .position(|name| name == "/help")
+        .expect("/help command should be available");
+    for _ in 0..help_index {
+        app.scroll_users_command_window(1);
+    }
+
+    app.submit_composer();
+
+    assert!(
+        app.timeline.iter().any(|entry| {
+            entry.body
+                .contains("Command reference and keyboard shortcuts available")
+        }),
+        "submitting a slash query should dispatch the currently selected command"
     );
 }
 

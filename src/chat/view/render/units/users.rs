@@ -17,7 +17,9 @@ impl RenderUnit for UsersTopRenderUnit {
         area: Rect,
         ctx: &mut RenderCtx<'_>,
     ) -> Result<(), RenderError> {
-        users::top_panel::render_top_panel(frame, area, ctx.app(), ctx.theme(), ctx.users_policy());
+        let theme = ctx.theme().clone();
+        let policy = ctx.users_policy();
+        users::top_panel::render_top_panel(frame, area, ctx.app_mut(), &theme, policy);
         Ok(())
     }
 }

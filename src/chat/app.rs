@@ -13,6 +13,7 @@ use ratatui_textarea::TextArea;
 use std::cell::Cell;
 use std::collections::VecDeque;
 use std::path::PathBuf;
+use tui_widget_list::ListState;
 
 mod actions;
 mod events;
@@ -57,7 +58,7 @@ pub struct ChatApp {
     pub(super) model_metadata: ModelMetadataState,
     user_mode: UserMode,
     users_status_mode: StatusMode,
-    users_command_scroll_offset: usize,
+    users_command_list_state: ListState,
     inline_command_matches: Vec<String>,
     git_pr_label: Option<String>,
     referenced_files: Vec<String>,
@@ -155,7 +156,7 @@ impl ChatApp {
             agent_state: AgentRuntimeState::default(),
             pending_messages: VecDeque::new(),
             users_status_mode: StatusMode::Normal,
-            users_command_scroll_offset: 0,
+            users_command_list_state: ListState::default(),
             inline_command_matches: Vec::new(),
             referenced_files: Vec::new(),
             context_usage: None,
@@ -333,19 +334,33 @@ impl ChatApp {
     }
 
     pub(crate) fn users_command_scroll_offset(&self) -> usize {
-        self.users_command_scroll_offset
+        self.users_command_list_state.selected.unwrap_or(0)
+    }
+
+    pub(crate) fn users_command_list_state_mut(&mut self) -> &mut ListState {
+        &mut self.users_command_list_state
     }
 
     pub(crate) fn scroll_users_command_window(&mut self, delta: isize) {
-        let max_offset = self.inline_command_matches.len().saturating_sub(1);
+        let count = self.inline_command_matches.len();
+        if count == 0 {
+            self.users_command_list_state.select(None);
+            return;
+        }
+
+        let current = self
+            .users_command_list_state
+            .selected
+            .unwrap_or(0)
+            .min(count.saturating_sub(1));
         let next = if delta.is_negative() {
-            self.users_command_scroll_offset
-                .saturating_sub(delta.unsigned_abs())
+            current.saturating_sub(delta.unsigned_abs())
         } else {
-            self.users_command_scroll_offset
+            current
                 .saturating_add(delta as usize)
+                .min(count.saturating_sub(1))
         };
-        self.users_command_scroll_offset = next.min(max_offset);
+        self.users_command_list_state.select(Some(next));
     }
 
     pub(crate) fn ingest_referenced_files_from_claims(&mut self, normalized_claims: &[String]) {
@@ -448,6 +463,7 @@ impl ChatApp {
     pub fn submit_composer(&mut self) {
         let text = self.composer_text();
         let trimmed = text.trim().to_owned();
+        let dispatch_text = self.resolve_inline_command_submit_target(&trimmed);
         self.composer = new_composer();
         self.sync_users_status_from_composer();
 
@@ -455,11 +471,11 @@ impl ChatApp {
             return;
         }
 
-        if self.try_dispatch_composer_slash_command(&trimmed) {
+        if self.try_dispatch_composer_slash_command(&dispatch_text) {
             return;
         }
 
-        self.send_message(&trimmed);
+        self.send_message(&dispatch_text);
     }
 
     pub(crate) fn sync_users_status_from_composer(&mut self) {
@@ -467,13 +483,20 @@ impl ChatApp {
         if query.starts_with('/') {
             self.users_status_mode = StatusMode::CommandList;
             self.refresh_inline_command_matches(&query);
-            self.users_command_scroll_offset = self
-                .users_command_scroll_offset
-                .min(self.inline_command_matches.len().saturating_sub(1));
+            if self.inline_command_matches.is_empty() {
+                self.users_command_list_state.select(None);
+            } else {
+                let selected = self
+                    .users_command_list_state
+                    .selected
+                    .unwrap_or(0)
+                    .min(self.inline_command_matches.len().saturating_sub(1));
+                self.users_command_list_state.select(Some(selected));
+            }
         } else {
             self.users_status_mode = StatusMode::Normal;
             self.inline_command_matches.clear();
-            self.users_command_scroll_offset = 0;
+            self.users_command_list_state.select(None);
         }
     }
 
@@ -491,6 +514,31 @@ impl ChatApp {
                 .into_iter()
                 .map(str::to_owned)
                 .collect();
+    }
+
+    fn resolve_inline_command_submit_target(&self, trimmed: &str) -> String {
+        if self.users_status_mode != StatusMode::CommandList || !trimmed.starts_with('/') {
+            return trimmed.to_owned();
+        }
+
+        if self.command_registry.find(trimmed).is_some() {
+            return trimmed.to_owned();
+        }
+
+        if crate::chat::commands::builtins::plan::parse_plan_command_dispatch_args(trimmed)
+            .is_some()
+        {
+            return trimmed.to_owned();
+        }
+
+        let Some(selected) = self
+            .inline_command_matches
+            .get(self.users_command_scroll_offset())
+        else {
+            return trimmed.to_owned();
+        };
+
+        selected.clone()
     }
 
     fn active_turn_kind_label(&self) -> Option<&'static str> {

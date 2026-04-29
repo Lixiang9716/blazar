@@ -138,6 +138,26 @@ impl ChatApp {
                     self.scroll_offset = self.scroll_offset.saturating_add(3);
                 }
             }
+            InputAction::PickerUp => {
+                if self.users_status_mode == StatusMode::CommandList {
+                    self.scroll_users_command_window(-1);
+                } else {
+                    self.composer.input(crossterm::event::KeyEvent::new(
+                        crossterm::event::KeyCode::Up,
+                        crossterm::event::KeyModifiers::NONE,
+                    ));
+                }
+            }
+            InputAction::PickerDown => {
+                if self.users_status_mode == StatusMode::CommandList {
+                    self.scroll_users_command_window(1);
+                } else {
+                    self.composer.input(crossterm::event::KeyEvent::new(
+                        crossterm::event::KeyCode::Down,
+                        crossterm::event::KeyModifiers::NONE,
+                    ));
+                }
+            }
             InputAction::Key(key) => {
                 self.composer.input(key);
                 self.sync_users_status_from_composer();
@@ -154,7 +174,6 @@ impl ChatApp {
                 self.composer.insert_str(&text);
                 self.sync_users_status_from_composer();
             }
-            _ => {}
         }
     }
 

@@ -8,12 +8,13 @@ use ratatui_core::{
     text::{Line, Span},
 };
 use ratatui_widgets::paragraph::Paragraph;
+use tui_widget_list::{ListBuilder, ListView};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 pub(in crate::chat::view) fn render_top_panel(
     frame: &mut Frame,
     area: Rect,
-    app: &ChatApp,
+    app: &mut ChatApp,
     theme: &ChatTheme,
     policy: UsersLayoutPolicy,
 ) {
@@ -45,16 +46,8 @@ pub(in crate::chat::view) fn render_top_panel(
         );
 
     let command_count = app.inline_command_matches().len();
-    let start = if command_count == 0 {
-        0
-    } else {
-        app.users_command_scroll_offset()
-            .min(command_count.saturating_sub(visible_rows))
-    };
-    let end = (start + visible_rows).min(command_count);
-    let visible_commands = &app.inline_command_matches()[start..end];
 
-    if visible_commands.is_empty() {
+    if command_count == 0 {
         render_row(
             frame,
             Rect::new(area.x, area.y.saturating_add(1), area.width, 1),
@@ -64,18 +57,26 @@ pub(in crate::chat::view) fn render_top_panel(
         return;
     }
 
-    for (index, command) in visible_commands.iter().enumerate() {
-        let y = area.y.saturating_add(1 + index as u16);
-        if y >= area.y.saturating_add(area.height) {
-            break;
-        }
-        render_row(
-            frame,
-            Rect::new(area.x, y, area.width, 1),
-            &format!("• {command}"),
-            theme.status_bar,
-        );
-    }
+    let list_height = visible_rows.min(command_count) as u16;
+    let list_area = Rect::new(area.x, area.y.saturating_add(1), area.width, list_height);
+    let command_labels: Vec<String> = app.inline_command_matches().to_vec();
+    let list_builder = ListBuilder::new(|context| {
+        let marker = if context.is_selected { ">" } else { "•" };
+        let style = if context.is_selected {
+            theme.bold_text
+        } else {
+            theme.status_bar
+        };
+        (
+            Line::from(Span::styled(
+                format!("{marker} {}", command_labels[context.index]),
+                style,
+            )),
+            1,
+        )
+    });
+    let list = ListView::new(list_builder, command_count).scroll_padding(1);
+    frame.render_stateful_widget(list, list_area, app.users_command_list_state_mut());
 }
 
 fn format_top_title(current_path: &str, branch: &str) -> String {
