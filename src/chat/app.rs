@@ -521,6 +521,10 @@ impl ChatApp {
             return trimmed.to_owned();
         }
 
+        if self.user_mode == UserMode::Plan {
+            return trimmed.to_owned();
+        }
+
         if self.command_registry.find(trimmed).is_some() {
             return trimmed.to_owned();
         }

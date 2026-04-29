@@ -1717,6 +1717,47 @@ fn submit_in_plan_mode_uses_plan_prompt_path() {
 }
 
 #[test]
+fn slash_query_submit_in_plan_mode_keeps_plan_runtime_path() {
+    let captured_prompt = Arc::new(Mutex::new(None));
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+    app.agent_runtime = Box::new(
+        AgentRuntime::new(
+            Box::new(CapturePromptProvider {
+                prompt: captured_prompt.clone(),
+            }),
+            PathBuf::from(repo_path),
+            "echo".to_owned(),
+        )
+        .expect("runtime should initialize"),
+    );
+
+    app.handle_action(InputAction::ToggleMode);
+    app.set_composer_text("/");
+    app.submit_composer();
+
+    let captured = wait_until(TEST_WAIT_TIMEOUT, || {
+        app.tick();
+        captured_prompt
+            .lock()
+            .expect("prompt mutex poisoned")
+            .is_some()
+    });
+    assert!(
+        captured,
+        "slash query submit in plan mode should still dispatch planning runtime prompt"
+    );
+
+    let prompt = captured_prompt
+        .lock()
+        .expect("prompt mutex poisoned")
+        .clone()
+        .expect("provider should capture a prompt");
+    assert!(prompt.contains("planning mode"));
+    assert!(prompt.contains("User request:\n/"));
+}
+
+#[test]
 fn slash_query_matching_normalizes_crlf_and_whitespace() {
     let repo_path = env!("CARGO_MANIFEST_DIR");
     let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
