@@ -2900,7 +2900,10 @@ fn turn_complete_unwraps_structured_response_for_plan_entries() {
 
     let last = app.timeline.last().expect("assistant entry should exist");
     assert_eq!(last.title.as_deref(), Some("Plan command simplification"));
-    assert_eq!(last.body, "Plan command simplification");
+    assert_eq!(
+        last.body,
+        "1. Add parser tests\n2. Handle structured response rendering"
+    );
     assert!(!last.body.contains("<assistant_response>"));
 }
 
@@ -3148,6 +3151,29 @@ fn non_echo_raw_markup_uses_safety_strip_not_legacy_contract_parse() {
     assert!(!last.body.contains("Raw next"));
     assert!(!last.body.contains("Tool summary: Raw tool"));
     assert!(!last.body.contains("Next step: Raw next"));
+}
+
+#[test]
+fn non_echo_plan_raw_markup_keeps_nextstep_text_without_label() {
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+    app.model_name = "gpt-5".to_owned();
+    app.apply_agent_event_for_test(AgentEvent::TurnStarted {
+        turn_id: "turn-non-echo-plan-strip".into(),
+    });
+    app.active_turn_kind = Some(TurnKind::Plan);
+
+    app.apply_agent_event_for_test(AgentEvent::TextDelta {
+        text: "<assistant_response><summary>Plan title</summary><tool_summary>Raw tool</tool_summary><nextstep>1. Step one\n2. Step two</nextstep></assistant_response>".into(),
+    });
+    app.apply_agent_event_for_test(AgentEvent::TurnComplete);
+
+    let last = app.timeline.last().expect("assistant entry should exist");
+    assert!(last.body.contains("1. Step one"));
+    assert!(last.body.contains("2. Step two"));
+    assert!(!last.body.contains("Raw tool"));
+    assert!(!last.body.contains("Next step:"));
+    assert!(!last.body.contains('<'));
 }
 
 #[test]

@@ -97,7 +97,8 @@ impl ChatApp {
                 }
 
                 if self.contract_side_channel_expected() && looks_like_contract_markup(&text) {
-                    let stripped = strip_contract_markup(&text);
+                    let keep_nextstep_text = self.active_turn_kind == Some(TurnKind::Plan);
+                    let stripped = strip_contract_markup(&text, keep_nextstep_text);
                     if !stripped.trim().is_empty() {
                         self.append_assistant_text_delta(&stripped);
                     }
@@ -447,7 +448,6 @@ impl ChatApp {
         };
 
         let summary = contract.summary.trim();
-        let _tool_summary = contract.tool_summary.trim();
         let nextstep = contract.nextstep.trim();
         let question = contract.question.trim();
         let error = contract.error.trim();
@@ -457,6 +457,9 @@ impl ChatApp {
             Some(TurnKind::Plan) => {
                 if !summary.is_empty() {
                     entry.title = Some(summary.to_owned());
+                }
+                if !nextstep.is_empty() {
+                    sections.push(nextstep.to_owned());
                 }
                 if contract.needs_user_input && !question.is_empty() {
                     sections.push(format!("Question: {question}"));
@@ -613,16 +616,17 @@ impl ChatApp {
         if assistant_indices.is_empty() {
             return;
         }
+        let keep_nextstep_text = self.active_turn_kind == Some(TurnKind::Plan);
 
         let fallback_from_raw = self
             .current_turn_structured_response_raw
             .as_deref()
-            .map(strip_contract_markup)
+            .map(|text| strip_contract_markup(text, keep_nextstep_text))
             .filter(|text| !text.trim().is_empty());
         let fallback_from_entries = assistant_indices
             .iter()
             .filter_map(|index| self.timeline.get(*index))
-            .map(|entry| strip_contract_markup(&entry.body))
+            .map(|entry| strip_contract_markup(&entry.body, keep_nextstep_text))
             .filter(|text| !text.trim().is_empty())
             .collect::<Vec<_>>()
             .join("\n");
@@ -1072,14 +1076,18 @@ fn looks_like_contract_markup(text: &str) -> bool {
     .any(|needle| lowered.contains(needle))
 }
 
-fn strip_contract_markup(text: &str) -> String {
+fn strip_contract_markup(text: &str, keep_nextstep_text: bool) -> String {
     let mut stripped = String::new();
     let mut inside_tag = false;
     let mut tag_buffer = String::new();
     let mut suppress_content_depth = 0usize;
 
-    fn should_suppress_contract_tag(tag_name: &str) -> bool {
-        matches!(tag_name, "tool_summary" | "nextstep")
+    fn should_suppress_contract_tag(tag_name: &str, keep_nextstep_text: bool) -> bool {
+        match tag_name {
+            "tool_summary" => true,
+            "nextstep" => !keep_nextstep_text,
+            _ => false,
+        }
     }
 
     for ch in text.chars() {
@@ -1100,7 +1108,7 @@ fn strip_contract_markup(text: &str) -> String {
                     .next()
                     .unwrap_or_default()
                     .to_ascii_lowercase();
-                if should_suppress_contract_tag(&tag_name) {
+                if should_suppress_contract_tag(&tag_name, keep_nextstep_text) {
                     if is_closing {
                         suppress_content_depth = suppress_content_depth.saturating_sub(1);
                     } else if !is_self_closing {
