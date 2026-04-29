@@ -1,6 +1,7 @@
 use super::turns::{
-    extract_plan_action_names, extract_plan_title_and_body, extract_tool_call_metadata_line,
-    format_tool_call_details, parse_next_step_name_line, short_action_name_from_text,
+    build_plan_execution_prompt, extract_plan_action_names, extract_plan_title_and_body,
+    extract_tool_call_metadata_line, format_tool_call_details, parse_next_step_name_line,
+    short_action_name_from_text,
 };
 use super::*;
 use crate::agent::runtime::RuntimeErrorKind;
@@ -327,6 +328,7 @@ impl ChatApp {
                         self.finalize_compact_response();
                     }
                 }
+                self.maybe_enqueue_auto_plan_execution(normalized_structured_response);
                 self.thinking_action_name = None;
                 self.current_turn_has_thinking_entry = false;
                 self.current_turn_timeline_start = None;
@@ -609,6 +611,69 @@ impl ChatApp {
         let index = self.timeline.len().saturating_sub(1);
         self.current_turn_structured_entry_index = Some(index);
         index
+    }
+
+    fn maybe_enqueue_auto_plan_execution(&mut self, normalized_structured_response: bool) {
+        if self.user_mode != UserMode::Plan
+            || self.active_turn_kind != Some(TurnKind::Plan)
+            || !normalized_structured_response
+            || !self.is_latest_plan_response_actionable()
+        {
+            return;
+        }
+
+        let plan_context = self.latest_assistant_plan_context();
+        let runtime_prompt = build_plan_execution_prompt("auto-continue", plan_context.as_deref());
+        self.user_mode = UserMode::Auto;
+        self.timeline.push(TimelineEntry::hint(
+            "Plan ready. Auto-executing the approved steps...",
+        ));
+        self.pending_messages.push_back(PendingTurn {
+            user_text: "auto-execute-plan".to_owned(),
+            dispatch: PendingDispatch::Runtime {
+                runtime_prompt,
+                kind: TurnKind::Chat,
+            },
+            timeline_inserted: true,
+        });
+    }
+
+    fn is_latest_plan_response_actionable(&self) -> bool {
+        let assistant_index = match self
+            .current_turn_assistant_message_indices()
+            .last()
+            .copied()
+        {
+            Some(index) => index,
+            None => return false,
+        };
+        let Some(entry) = self.timeline.get(assistant_index) else {
+            return false;
+        };
+
+        let body = entry.body.trim();
+        if body.is_empty() || body == "…" || body.contains("Question:") {
+            return false;
+        }
+
+        if let Some(title) = entry.title.as_deref()
+            && !title.trim().is_empty()
+            && title.trim() == body
+        {
+            return false;
+        }
+
+        let mut needs_user_input = false;
+        let mut status = "ok";
+        for line in entry.details.lines() {
+            if let Some(value) = line.strip_prefix("needs_user_input=") {
+                needs_user_input = value.trim() == "true";
+            } else if let Some(value) = line.strip_prefix("status=") {
+                status = value.trim();
+            }
+        }
+
+        !needs_user_input && !matches!(status, "blocked" | "failed")
     }
 
     fn sanitize_internal_contract_markup(&mut self) {

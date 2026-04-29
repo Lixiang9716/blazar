@@ -144,6 +144,7 @@ struct FakeRuntime {
     events: std::sync::Arc<std::sync::Mutex<VecDeque<crate::agent::protocol::AgentEvent>>>,
     cancel_called: std::sync::Arc<std::sync::atomic::AtomicBool>,
     set_model_calls: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+    submitted_prompts: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
 }
 
 impl FakeRuntime {
@@ -152,6 +153,7 @@ impl FakeRuntime {
             events: std::sync::Arc::new(std::sync::Mutex::new(events.into_iter().collect())),
             cancel_called: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             set_model_calls: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+            submitted_prompts: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         }
     }
 
@@ -162,10 +164,18 @@ impl FakeRuntime {
     fn last_set_model(&self) -> Option<String> {
         self.set_model_calls.lock().unwrap().last().cloned()
     }
+
+    fn submitted_prompts(&self) -> Vec<String> {
+        self.submitted_prompts.lock().unwrap().clone()
+    }
 }
 
 impl crate::chat::runtime_port::AgentRuntimePort for FakeRuntime {
-    fn submit_turn(&self, _prompt: &str) -> Result<(), String> {
+    fn submit_turn(&self, prompt: &str) -> Result<(), String> {
+        self.submitted_prompts
+            .lock()
+            .unwrap()
+            .push(prompt.to_owned());
         Ok(())
     }
 
@@ -1887,6 +1897,86 @@ fn execute_keyword_in_plan_mode_dispatches_after_busy_turn_drains() {
         captured,
         "queued execution prompt should dispatch once busy turn completes"
     );
+}
+
+#[test]
+fn actionable_plan_turn_auto_executes_without_manual_execute_keyword() {
+    let fake = FakeRuntime::with_events(vec![]);
+    let probe = fake.clone();
+    let mut app = ChatApp::new_with_runtime_for_test(
+        env!("CARGO_MANIFEST_DIR"),
+        Box::new(fake),
+        "echo",
+    )
+    .expect("init");
+    app.user_mode = UserMode::Plan;
+    app.active_turn_kind = Some(TurnKind::Plan);
+    app.timeline.push(TimelineEntry::response(
+        r#"<assistant_response>
+<intent>plan</intent>
+<summary>Plan command simplification</summary>
+<tool_summary>Checked parser scope.</tool_summary>
+<nextstep>1. Add parser tests
+2. Refactor structured stream handling</nextstep>
+<needs_user_input>false</needs_user_input>
+<question></question>
+<status>ok</status>
+<error></error>
+</assistant_response>"#,
+    ));
+
+    app.apply_agent_event_for_test(AgentEvent::TurnComplete);
+
+    let prompts = probe.submitted_prompts();
+    assert_eq!(prompts.len(), 1, "plan completion should auto-dispatch execute turn");
+    assert!(prompts[0].contains("Execute the approved plan"));
+    assert!(prompts[0].contains("Plan command simplification"));
+    assert_eq!(
+        app.users_status_snapshot().mode,
+        UserMode::Auto,
+        "auto-execution should switch mode back to AUTO"
+    );
+    assert!(
+        app.timeline
+            .iter()
+            .any(|entry| entry.body.contains("Auto-executing the approved steps")),
+        "timeline should show explicit auto-execution action"
+    );
+}
+
+#[test]
+fn blocked_plan_turn_does_not_auto_execute() {
+    let fake = FakeRuntime::with_events(vec![]);
+    let probe = fake.clone();
+    let mut app = ChatApp::new_with_runtime_for_test(
+        env!("CARGO_MANIFEST_DIR"),
+        Box::new(fake),
+        "echo",
+    )
+    .expect("init");
+    app.user_mode = UserMode::Plan;
+    app.active_turn_kind = Some(TurnKind::Plan);
+    app.timeline.push(TimelineEntry::response(
+        r#"<assistant_response>
+<intent>clarify</intent>
+<summary>Need a model choice first.</summary>
+<tool_summary>Checked provider config.</tool_summary>
+<nextstep>1. Confirm model
+2. Continue implementation</nextstep>
+<needs_user_input>true</needs_user_input>
+<question>Use deepseek-v4-pro or qwen3-8b?</question>
+<status>blocked</status>
+<error>Waiting for user decision.</error>
+</assistant_response>"#,
+    ));
+
+    app.apply_agent_event_for_test(AgentEvent::TurnComplete);
+
+    assert!(
+        probe.submitted_prompts().is_empty(),
+        "blocked plan turns should wait for user input and must not auto-execute"
+    );
+    assert_eq!(app.users_status_snapshot().mode, UserMode::Plan);
 }
 
 #[test]

@@ -277,7 +277,7 @@ fn is_plan_execution_trigger(input: &str) -> bool {
     )
 }
 
-fn build_plan_execution_prompt(approval: &str, plan_context: Option<&str>) -> String {
+pub(super) fn build_plan_execution_prompt(approval: &str, plan_context: Option<&str>) -> String {
     match plan_context {
         Some(plan_context) => format!(
             "Execute the approved plan.\n\
@@ -309,7 +309,7 @@ fn build_compact_prompt() -> String {
 }
 
 impl ChatApp {
-    fn latest_assistant_plan_context(&self) -> Option<String> {
+    pub(super) fn latest_assistant_plan_context(&self) -> Option<String> {
         self.timeline.iter().rev().find_map(|entry| {
             if entry.actor != Actor::Assistant || entry.kind != EntryKind::Message {
                 return None;
