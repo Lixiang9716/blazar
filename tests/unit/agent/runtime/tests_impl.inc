@@ -2657,6 +2657,133 @@ fn provider_that_sends_no_terminal_event_gets_auto_complete() {
 }
 
 #[test]
+fn execute_turn_retries_invalid_response_contract_and_recovers() {
+    struct RetryContractProvider {
+        attempts: Arc<AtomicU32>,
+    }
+
+    impl LlmProvider for RetryContractProvider {
+        fn stream_turn(
+            &self,
+            _model: &str,
+            _messages: &[ProviderMessage],
+            _tools: &[ToolSpec],
+            tx: Sender<ProviderEvent>,
+        ) {
+            let attempt = self.attempts.fetch_add(1, Ordering::SeqCst);
+            if attempt == 0 {
+                let _ = tx.send(ProviderEvent::TextDelta("plain text".into()));
+                let _ = tx.send(ProviderEvent::TurnComplete);
+                return;
+            }
+
+            let _ = tx.send(ProviderEvent::TextDelta(
+                "<assistant_response><intent>execute</intent><summary>done</summary><tool_summary></tool_summary><nextstep>commit</nextstep><needs_user_input>false</needs_user_input><question></question><status>ok</status><error></error></assistant_response>".into(),
+            ));
+            let _ = tx.send(ProviderEvent::TurnComplete);
+        }
+    }
+
+    let provider = RetryContractProvider {
+        attempts: Arc::new(AtomicU32::new(0)),
+    };
+    let attempts_ref = Arc::clone(&provider.attempts);
+    let mut messages = user_messages("enforce response contract");
+    let cancel = Arc::new(AtomicBool::new(false));
+    let (event_tx, _event_rx) = mpsc::channel();
+
+    let outcome = execute_turn(
+        &mut messages,
+        &provider,
+        "gpt-5",
+        &empty_registry(),
+        &ChannelObserver { tx: &event_tx },
+        &cancel,
+    );
+
+    assert!(matches!(outcome, TurnOutcome::Complete));
+    assert_eq!(
+        attempts_ref.load(Ordering::SeqCst),
+        2,
+        "should retry once after initial contract violation"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|message| matches!(message, ProviderMessage::Assistant { content } if content.contains("<assistant_response>"))),
+        "final compliant assistant response should be preserved"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|message| matches!(message, ProviderMessage::User { content } if content.contains("violated the required XML response contract"))),
+        "retry feedback should be injected as a user message"
+    );
+}
+
+#[test]
+fn execute_turn_fails_after_response_contract_retry_budget_exhausted() {
+    struct AlwaysInvalidContractProvider {
+        attempts: Arc<AtomicU32>,
+    }
+
+    impl LlmProvider for AlwaysInvalidContractProvider {
+        fn stream_turn(
+            &self,
+            _model: &str,
+            _messages: &[ProviderMessage],
+            _tools: &[ToolSpec],
+            tx: Sender<ProviderEvent>,
+        ) {
+            self.attempts.fetch_add(1, Ordering::SeqCst);
+            let _ = tx.send(ProviderEvent::TextDelta("still invalid".into()));
+            let _ = tx.send(ProviderEvent::TurnComplete);
+        }
+    }
+
+    let provider = AlwaysInvalidContractProvider {
+        attempts: Arc::new(AtomicU32::new(0)),
+    };
+    let attempts_ref = Arc::clone(&provider.attempts);
+    let mut messages = user_messages("fail on repeated contract violations");
+    let cancel = Arc::new(AtomicBool::new(false));
+    let (event_tx, _event_rx) = mpsc::channel();
+
+    let outcome = execute_turn(
+        &mut messages,
+        &provider,
+        "gpt-5",
+        &empty_registry(),
+        &ChannelObserver { tx: &event_tx },
+        &cancel,
+    );
+
+    assert!(
+        matches!(
+            &outcome,
+            TurnOutcome::FatalError {
+                kind: RuntimeErrorKind::ToolExecution,
+                ..
+            }
+        ),
+        "repeated contract violations should fail as ToolExecution"
+    );
+
+    if let TurnOutcome::FatalError { error, .. } = &outcome {
+        assert!(
+            error.contains("response contract validation failed"),
+            "fatal error should mention response contract failure"
+        );
+    }
+
+    assert_eq!(
+        attempts_ref.load(Ordering::SeqCst),
+        3,
+        "should stop after initial try plus two retries"
+    );
+}
+
+#[test]
 fn strip_thinking_tags_removes_think_block() {
     let raw = "<think>\nreasoning here\n</think>\n{\"path\": \"hello.py\"}";
     assert_eq!(strip_thinking_tags(raw), "{\"path\": \"hello.py\"}");

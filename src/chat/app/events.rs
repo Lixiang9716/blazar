@@ -185,13 +185,15 @@ impl ChatApp {
                     is_error,
                     output.len()
                 );
+                let error_kind =
+                    is_error.then_some(runtime_error_kind_label(RuntimeErrorKind::ToolExecution));
                 let message =
                     format!("chat tool call completed call_id={call_id} is_error={is_error}");
                 let debug_event = self.debug_recorder.record_event(
                     "tool_call_completed",
                     completed_tool_name.as_deref(),
                     Some(&call_id),
-                    None,
+                    error_kind,
                     self.pending_messages.len(),
                     &message,
                 );

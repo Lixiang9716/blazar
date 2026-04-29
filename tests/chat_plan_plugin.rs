@@ -62,10 +62,23 @@ fn create_unique_test_workspace(test_name: &str) -> PathBuf {
     workspace
 }
 
-fn extract_continue_plan_id(composer_text: &str) -> &str {
-    composer_text
-        .strip_prefix("/plan --continue ")
-        .expect("composer should contain continue command")
+fn latest_plan_id(workspace: &Path) -> String {
+    let plans_dir = workspace.join(".blazar").join("plans");
+    let mut ids = std::fs::read_dir(plans_dir)
+        .expect("plans dir should exist")
+        .filter_map(|entry| entry.ok())
+        .filter_map(|entry| {
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+                return None;
+            }
+            path.file_stem()
+                .and_then(|stem| stem.to_str())
+                .map(str::to_owned)
+        })
+        .collect::<Vec<_>>();
+    ids.sort();
+    ids.pop().expect("at least one plan should exist")
 }
 
 fn read_plan_json(workspace: &Path, plan_id: &str) -> serde_json::Value {
@@ -112,7 +125,8 @@ async fn plan_segmented_flow_reaches_done_state() {
     .await
     .expect("initial /plan should execute");
 
-    let plan_id = extract_continue_plan_id(&app.composer_text()).to_owned();
+    let plan_id = latest_plan_id(&workspace);
+    assert_eq!(app.composer_text(), "/plan");
     for _ in 0..PLAN_CONTINUATION_LIMIT {
         let saved = read_plan_json(&workspace, &plan_id);
         let phase = saved
@@ -159,7 +173,8 @@ async fn plan_rebuilds_sqlite_index_from_json_when_stale_or_missing() {
         .await
         .expect("initial /plan should execute");
 
-    let plan_id = extract_continue_plan_id(&app.composer_text()).to_owned();
+    let plan_id = latest_plan_id(&workspace);
+    assert_eq!(app.composer_text(), "/plan");
     let index_path = plan_index_path(&workspace);
 
     {

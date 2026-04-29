@@ -14,6 +14,8 @@ use super::executor::execute_batch;
 use super::scheduler::{PendingToolCall, plan_tool_call, schedule_batches};
 use super::{MAX_TOOL_ITERATIONS, REPEATED_TIMEOUT_GUIDANCE, RuntimeErrorKind, TIMEOUT_NOTE};
 
+const MAX_RESPONSE_CONTRACT_RETRIES: usize = 2;
+
 pub(crate) enum TurnOutcome {
     Complete,
     Cancelled,
@@ -56,6 +58,7 @@ pub(crate) fn execute_turn(
 ) -> TurnOutcome {
     let tool_specs = tools.specs();
     let mut tool_iterations = 0usize;
+    let mut response_contract_retries = 0usize;
     // Track (tool_name, raw_args) → consecutive failure count for duplicate detection.
     let mut consecutive_failures: HashMap<(String, String), usize> = HashMap::new();
     let mut consecutive_timeout_failures: HashMap<(String, String), usize> = HashMap::new();
@@ -79,6 +82,26 @@ pub(crate) fn execute_turn(
         match pass.outcome {
             TurnOutcome::Complete => {
                 if pass.tool_calls.is_empty() {
+                    if response_contract_enforced(model)
+                        && let Err(violations) = validate_response_contract(&pass.assistant_text)
+                    {
+                        if response_contract_retries >= MAX_RESPONSE_CONTRACT_RETRIES {
+                            return TurnOutcome::FatalError {
+                                kind: RuntimeErrorKind::ToolExecution,
+                                error: format!(
+                                    "response contract validation failed after {MAX_RESPONSE_CONTRACT_RETRIES} retries: {}",
+                                    violations.join(", ")
+                                ),
+                            };
+                        }
+
+                        response_contract_retries += 1;
+                        messages.push(ProviderMessage::User {
+                            content: format_response_contract_retry_prompt(&violations),
+                        });
+                        continue;
+                    }
+
                     if !pass.assistant_text.is_empty() {
                         messages.push(ProviderMessage::Assistant {
                             content: pass.assistant_text,
@@ -196,6 +219,134 @@ pub(crate) fn execute_turn(
             }
         }
     }
+}
+
+pub(crate) fn response_contract_enforced(model: &str) -> bool {
+    !model.eq_ignore_ascii_case("echo")
+}
+
+fn format_response_contract_retry_prompt(violations: &[String]) -> String {
+    let mut listed = String::new();
+    for violation in violations {
+        listed.push_str("- ");
+        listed.push_str(violation);
+        listed.push('\n');
+    }
+
+    format!(
+        "Your previous response violated the required XML response contract.\n\
+         Violations:\n\
+         {listed}\n\
+         Re-send a full response using EXACTLY this schema with no text outside tags:\n\
+         <assistant_response>\n\
+           <intent>plan|clarify|execute|report</intent>\n\
+           <summary>...</summary>\n\
+           <tool_summary>...</tool_summary>\n\
+           <nextstep>...</nextstep>\n\
+           <needs_user_input>true|false</needs_user_input>\n\
+           <question>...</question>\n\
+           <status>ok|blocked|failed</status>\n\
+           <error>...</error>\n\
+         </assistant_response>\n\
+         Rule reminders: summary/nextstep must be non-empty; if needs_user_input=true then question must be non-empty; if status=failed then error must be non-empty."
+    )
+}
+
+fn validate_response_contract(payload: &str) -> Result<(), Vec<String>> {
+    let trimmed = payload.trim();
+    let mut violations = Vec::new();
+    if trimmed.is_empty() {
+        violations.push("empty_response".to_owned());
+        return Err(violations);
+    }
+
+    let Some(inner) = trimmed
+        .strip_prefix("<assistant_response>")
+        .and_then(|rest| rest.strip_suffix("</assistant_response>"))
+    else {
+        return Err(vec!["missing_assistant_response_root".to_owned()]);
+    };
+
+    let mut rest = inner;
+    let intent = consume_tag(&mut rest, "intent", &mut violations);
+    let summary = consume_tag(&mut rest, "summary", &mut violations);
+    let _tool_summary = consume_tag(&mut rest, "tool_summary", &mut violations);
+    let nextstep = consume_tag(&mut rest, "nextstep", &mut violations);
+    let needs_user_input = consume_tag(&mut rest, "needs_user_input", &mut violations);
+    let question = consume_tag(&mut rest, "question", &mut violations);
+    let status = consume_tag(&mut rest, "status", &mut violations);
+    let error = consume_tag(&mut rest, "error", &mut violations);
+
+    if !rest.trim().is_empty() {
+        violations.push("unexpected_content_after_error".to_owned());
+    }
+
+    let intent = intent.trim();
+    if !matches!(intent, "plan" | "clarify" | "execute" | "report") {
+        violations.push("invalid_intent".to_owned());
+    }
+
+    if summary.trim().is_empty() {
+        violations.push("empty_summary".to_owned());
+    }
+    if nextstep.trim().is_empty() {
+        violations.push("empty_nextstep".to_owned());
+    }
+
+    let needs_user_input = match needs_user_input.trim() {
+        "true" => Some(true),
+        "false" => Some(false),
+        _ => {
+            violations.push("invalid_needs_user_input".to_owned());
+            None
+        }
+    };
+
+    let status = match status.trim() {
+        "ok" => Some("ok"),
+        "blocked" => Some("blocked"),
+        "failed" => Some("failed"),
+        _ => {
+            violations.push("invalid_status".to_owned());
+            None
+        }
+    };
+
+    if matches!(needs_user_input, Some(true)) && question.trim().is_empty() {
+        violations.push("question_required_when_needs_user_input_true".to_owned());
+    }
+
+    if matches!(status, Some("failed")) && error.trim().is_empty() {
+        violations.push("error_required_when_status_failed".to_owned());
+    }
+
+    if violations.is_empty() {
+        Ok(())
+    } else {
+        Err(violations)
+    }
+}
+
+fn consume_tag(rest: &mut &str, tag: &str, violations: &mut Vec<String>) -> String {
+    let working = rest.trim_start();
+    let open = format!("<{tag}>");
+    let close = format!("</{tag}>");
+
+    if !working.starts_with(&open) {
+        violations.push(format!("missing_or_out_of_order_{tag}"));
+        return String::new();
+    }
+
+    let after_open = &working[open.len()..];
+    let Some(close_index) = after_open.find(&close) else {
+        violations.push(format!("missing_closing_{tag}"));
+        *rest = "";
+        return String::new();
+    };
+
+    let value = after_open[..close_index].to_owned();
+    *rest = &after_open[close_index + close.len()..];
+    value
 }
 
 fn annotate_timeout_failure(

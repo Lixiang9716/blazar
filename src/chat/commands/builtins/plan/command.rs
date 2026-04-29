@@ -125,14 +125,28 @@ impl PaletteCommand for PlanCommand {
         Box::pin(async move {
             let parsed = parse_plan_args(args)?;
             let store = PlanStore::for_workspace(ctx.app.workspace_root());
-            let resumed = parsed.continue_id.is_some();
+            let explicit_continue_id = parsed.continue_id.clone();
+            let mut resumed = explicit_continue_id.is_some();
 
-            let mut session = if let Some(continue_id) = parsed.continue_id.as_deref() {
+            let mut session = if let Some(continue_id) = explicit_continue_id.as_deref() {
                 let mut session = load_continued_session(&store, continue_id)?;
                 if session.plan_id().is_none() {
                     session.set_plan_id(continue_id.to_owned());
                 }
                 session
+            } else if parsed.goal.is_none() {
+                if let Some((plan_id, mut session)) = load_latest_open_session(&store)? {
+                    resumed = true;
+                    if session.plan_id().is_none() {
+                        session.set_plan_id(plan_id);
+                    }
+                    session
+                } else {
+                    let mut session = store.create_session();
+                    let plan_id = generate_plan_id(&store)?;
+                    session.set_plan_id(plan_id);
+                    session
+                }
             } else {
                 let mut session = store.create_session();
                 let plan_id = generate_plan_id(&store)?;
@@ -143,13 +157,21 @@ impl PaletteCommand for PlanCommand {
             if let Some(goal) = parsed.goal {
                 session.set_goal(goal);
             }
+            let has_review_decision = parsed.review.is_some();
             if let Some(review_decision) = parsed.review
                 && session.phase() == PlanPhase::Review
             {
                 session.record_review_decision(review_decision);
             }
 
-            let decision = session.run_one_segment();
+            let mut decision = session.run_one_segment();
+            if decision.phase == PlanPhase::Review
+                && explicit_continue_id.is_none()
+                && !has_review_decision
+            {
+                session.record_review_decision("continue".to_owned());
+                decision = session.run_one_segment();
+            }
             let plan_id = session
                 .plan_id()
                 .ok_or_else(|| CommandError::ExecutionFailed("plan id missing".to_owned()))?
@@ -159,7 +181,6 @@ impl PaletteCommand for PlanCommand {
                 .save_session_json(&plan_id, &session)
                 .map_err(map_store_save_error)?;
 
-            let continue_command = format!("/plan --continue {plan_id}");
             ctx.app.push_system_hint(format!(
                 "Plan {plan_id}: {} (phase: {}).",
                 decision.summary,
@@ -167,25 +188,20 @@ impl PaletteCommand for PlanCommand {
             ));
             if decision.phase == PlanPhase::Clarify {
                 ctx.app.push_system_hint(
-                    "Clarification required. Re-run `/plan --continue <plan-id> --goal \"...\"` with the missing goal details."
+                    "Clarification required. Re-run `/plan <goal>` with the missing goal details."
                         .to_owned(),
                 );
             }
-            if decision.phase == PlanPhase::Review {
-                ctx.app.push_system_hint(
-                    "Review required. Re-run with `/plan --continue <plan-id> --review continue|retry|revise|cancel`."
-                        .to_owned(),
-                );
+            if decision.phase != PlanPhase::Done {
+                ctx.app
+                    .push_system_hint("Continue this plan with `/plan`.".to_owned());
             }
-            ctx.app.push_system_hint(format!(
-                "Continue this plan with `{continue_command}`. This workflow is intentionally staged; deeper steps are deferred until you run the continue command."
-            ));
-            ctx.app.set_composer_text(&continue_command);
+            ctx.app.set_composer_text("/plan");
 
             let lifecycle = if resumed { "continued" } else { "started" };
             Ok(CommandResult {
                 summary: format!(
-                    "Plan {plan_id} {lifecycle}: {} (phase: {}). Continuation is intentionally staged; deeper steps remain deferred until `/plan --continue`.",
+                    "Plan {plan_id} {lifecycle}: {} (phase: {}).",
                     decision.summary,
                     decision.phase.as_str()
                 ),
@@ -252,6 +268,31 @@ fn load_continued_session(
                 "failed to load plan session {continue_id}: {error}"
             )),
         })
+}
+
+fn load_latest_open_session(
+    store: &PlanStore,
+) -> Result<Option<(String, super::session::PlanSession)>, CommandError> {
+    let mut plan_ids = store.list_plan_ids().map_err(|error| {
+        CommandError::ExecutionFailed(format!("failed to list plan sessions: {error}"))
+    })?;
+    plan_ids.sort();
+
+    for plan_id in plan_ids.into_iter().rev() {
+        let Ok(mut session) = store.load_session_json(&plan_id) else {
+            continue;
+        };
+
+        if session.plan_id().is_none() {
+            session.set_plan_id(plan_id.clone());
+        }
+
+        if session.phase() != PlanPhase::Done {
+            return Ok(Some((plan_id, session)));
+        }
+    }
+
+    Ok(None)
 }
 
 fn map_store_save_error(error: std::io::Error) -> CommandError {

@@ -40,10 +40,23 @@ fn create_unique_test_workspace(test_name: &str) -> PathBuf {
     workspace
 }
 
-fn extract_continue_plan_id(composer_text: &str) -> &str {
-    composer_text
-        .strip_prefix("/plan --continue ")
-        .expect("composer should contain continue command")
+fn latest_plan_id(workspace: &Path) -> String {
+    let plans_dir = workspace.join(".blazar").join("plans");
+    let mut ids = std::fs::read_dir(plans_dir)
+        .expect("plans dir should exist")
+        .filter_map(|entry| entry.ok())
+        .filter_map(|entry| {
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+                return None;
+            }
+            path.file_stem()
+                .and_then(|stem| stem.to_str())
+                .map(str::to_owned)
+        })
+        .collect::<Vec<_>>();
+    ids.sort();
+    ids.pop().expect("at least one plan should exist")
 }
 
 fn read_plan_json(workspace: &Path, plan_id: &str) -> serde_json::Value {
@@ -248,12 +261,13 @@ fn chat_runtime_submit_exact_plan_from_composer_dispatches_plan_command() {
     app.handle_action(InputAction::Submit);
 
     let composer = app.composer_text();
-    let plan_id = extract_continue_plan_id(&composer);
+    let plan_id = latest_plan_id(&workspace);
     assert!(
         !plan_id.is_empty(),
-        "exact /plan submit should route through command path and prefill continue command"
+        "exact /plan submit should route through command path and create a session"
     );
-    let saved = read_plan_json(&workspace, plan_id);
+    assert_eq!(composer, "/plan");
+    let saved = read_plan_json(&workspace, &plan_id);
     assert_eq!(
         saved.get("phase").and_then(serde_json::Value::as_str),
         Some("Clarify")
@@ -270,12 +284,10 @@ fn chat_runtime_submit_plan_goal_from_composer_dispatches_plan_command() {
     app.handle_action(InputAction::Submit);
 
     let composer = app.composer_text();
-    let plan_id = extract_continue_plan_id(&composer);
-    assert!(
-        !plan_id.is_empty(),
-        "plan command should leave continue command in composer"
-    );
-    let saved = read_plan_json(&workspace, plan_id);
+    let plan_id = latest_plan_id(&workspace);
+    assert!(!plan_id.is_empty(), "plan command should create a session");
+    assert_eq!(composer, "/plan");
+    let saved = read_plan_json(&workspace, &plan_id);
     assert_eq!(
         saved.get("goal").and_then(serde_json::Value::as_str),
         Some("ship command arg parsing")
@@ -290,7 +302,7 @@ fn chat_runtime_submit_plan_continue_from_composer_dispatches_plan_command() {
     let mut app = ChatApp::new_for_test(workspace.to_str().unwrap()).expect("test app");
     app.set_composer_text("/plan bootstrap command flow");
     app.handle_action(InputAction::Submit);
-    let seed_plan_id = extract_continue_plan_id(&app.composer_text()).to_owned();
+    let seed_plan_id = latest_plan_id(&workspace);
 
     app.set_composer_text(&format!(
         "/plan --continue {seed_plan_id} finish composer dispatch"
@@ -298,12 +310,13 @@ fn chat_runtime_submit_plan_continue_from_composer_dispatches_plan_command() {
     app.handle_action(InputAction::Submit);
 
     let composer = app.composer_text();
-    let resumed_plan_id = extract_continue_plan_id(&composer);
+    let resumed_plan_id = latest_plan_id(&workspace);
     assert_eq!(
         resumed_plan_id, seed_plan_id,
         "continuation should keep using the same plan id"
     );
-    let saved = read_plan_json(&workspace, resumed_plan_id);
+    assert_eq!(composer, "/plan");
+    let saved = read_plan_json(&workspace, &resumed_plan_id);
     assert_eq!(
         saved.get("goal").and_then(serde_json::Value::as_str),
         Some("finish composer dispatch")
@@ -320,8 +333,9 @@ fn chat_runtime_send_message_plan_goal_dispatches_plan_command() {
     app.send_message("/plan verify send_message command routing");
 
     let composer = app.composer_text();
-    let plan_id = extract_continue_plan_id(&composer);
-    let saved = read_plan_json(&workspace, plan_id);
+    let plan_id = latest_plan_id(&workspace);
+    assert_eq!(composer, "/plan");
+    let saved = read_plan_json(&workspace, &plan_id);
     assert_eq!(
         saved.get("goal").and_then(serde_json::Value::as_str),
         Some("verify send_message command routing")
@@ -335,13 +349,13 @@ fn chat_runtime_send_message_plan_continue_rebuilds_missing_index() {
     let workspace = create_unique_test_workspace("send_message_plan_index_rebuild");
     let mut app = ChatApp::new_for_test(workspace.to_str().unwrap()).expect("test app");
     app.send_message("/plan verify runtime index rebuild");
-    let plan_id = extract_continue_plan_id(&app.composer_text()).to_owned();
+    let plan_id = latest_plan_id(&workspace);
 
     let index_path = plan_index_path(&workspace);
     std::fs::remove_file(&index_path).expect("index db should be removable");
     assert!(!index_path.exists(), "index db should be absent");
 
-    app.send_message(&format!("/plan --continue {plan_id}"));
+    app.send_message("/plan");
 
     let saved = read_plan_json(&workspace, &plan_id);
     let phase = saved
@@ -372,12 +386,12 @@ fn chat_runtime_busy_queue_plan_continue_runs_command_after_turn_completes() {
     let workspace = create_unique_test_workspace("send_message_busy_plan_continue");
     let mut app = ChatApp::new_for_test(workspace.to_str().unwrap()).expect("test app");
     app.send_message("/plan queue-safe continuation");
-    let plan_id = extract_continue_plan_id(&app.composer_text()).to_owned();
+    let plan_id = latest_plan_id(&workspace);
 
     app.apply_agent_event_for_test(blazar::agent::protocol::AgentEvent::TurnStarted {
         turn_id: "busy-turn".into(),
     });
-    app.send_message(&format!("/plan --continue {plan_id}"));
+    app.send_message("/plan");
 
     let before = read_plan_json(&workspace, &plan_id);
     assert_eq!(
@@ -391,13 +405,9 @@ fn chat_runtime_busy_queue_plan_continue_runs_command_after_turn_completes() {
     assert_eq!(
         after.get("phase").and_then(serde_json::Value::as_str),
         Some("FinalizePlan"),
-        "queued /plan --continue should execute command path after busy turn drains"
+        "queued /plan should execute command path after busy turn drains"
     );
-    assert!(
-        app.composer_text()
-            .starts_with(&format!("/plan --continue {plan_id}")),
-        "plan continuation command should prefill composer after queued command executes"
-    );
+    assert_eq!(app.composer_text(), "/plan");
 
     let _ = std::fs::remove_dir_all(&workspace);
 }

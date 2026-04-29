@@ -51,10 +51,23 @@ fn create_unique_test_workspace(test_name: &str) -> PathBuf {
     workspace
 }
 
-fn extract_continue_plan_id(composer_text: &str) -> &str {
-    composer_text
-        .strip_prefix("/plan --continue ")
-        .expect("composer should contain continue command")
+fn latest_plan_id(workspace: &Path) -> String {
+    let plans_dir = workspace.join(".blazar").join("plans");
+    let mut ids = std::fs::read_dir(plans_dir)
+        .expect("plans dir should exist")
+        .filter_map(|entry| entry.ok())
+        .filter_map(|entry| {
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+                return None;
+            }
+            path.file_stem()
+                .and_then(|stem| stem.to_str())
+                .map(str::to_owned)
+        })
+        .collect::<Vec<_>>();
+    ids.sort();
+    ids.pop().expect("at least one plan should exist")
 }
 
 fn read_plan_json(workspace: &Path, plan_id: &str) -> serde_json::Value {
@@ -86,14 +99,15 @@ async fn execute_plan_command_bootstraps_session_and_sets_continue_guidance() {
         .expect("plan command should execute");
 
     let composer = app.composer_text();
-    let plan_id = extract_continue_plan_id(&composer);
+    let plan_id = latest_plan_id(&workspace);
     assert!(!plan_id.is_empty(), "continue id should be present");
+    assert_eq!(composer, "/plan");
     assert!(
-        result.summary.contains(plan_id),
+        result.summary.contains(&plan_id),
         "summary should mention plan id"
     );
 
-    let saved = read_plan_json(&workspace, plan_id);
+    let saved = read_plan_json(&workspace, &plan_id);
     assert_eq!(
         saved.get("goal").and_then(serde_json::Value::as_str),
         Some("wire orchestration")
@@ -105,14 +119,8 @@ async fn execute_plan_command_bootstraps_session_and_sets_continue_guidance() {
     assert!(
         app.timeline()
             .iter()
-            .any(|entry| entry.body.contains("/plan --continue") && entry.body.contains(plan_id)),
+            .any(|entry| { entry.body.contains("Continue this plan with `/plan`") }),
         "timeline should include continue hint"
-    );
-    assert!(
-        app.timeline()
-            .iter()
-            .any(|entry| entry.body.to_ascii_lowercase().contains("deferred")),
-        "timeline guidance should explicitly call out deferred continuation semantics"
     );
 
     let _ = std::fs::remove_dir_all(&workspace);
@@ -127,7 +135,7 @@ async fn execute_plan_command_without_goal_enters_clarify_phase() {
         .await
         .expect("plan command should execute");
 
-    let plan_id = extract_continue_plan_id(&app.composer_text()).to_owned();
+    let plan_id = latest_plan_id(&workspace);
     let saved = read_plan_json(&workspace, &plan_id);
 
     assert!(result.summary.contains("Clarify"));
@@ -147,7 +155,7 @@ async fn execute_plan_command_continue_id_loads_and_advances_existing_session() 
     execute_command_for_test(&mut app, "/plan", json!({}))
         .await
         .expect("initial bootstrap should succeed");
-    let plan_id = extract_continue_plan_id(&app.composer_text()).to_owned();
+    let plan_id = latest_plan_id(&workspace);
 
     let result = execute_command_for_test(
         &mut app,
@@ -161,7 +169,7 @@ async fn execute_plan_command_continue_id_loads_and_advances_existing_session() 
         result.summary.contains("continued"),
         "continue summary should communicate resumed execution"
     );
-    let saved = read_plan_json(&workspace, extract_continue_plan_id(&app.composer_text()));
+    let saved = read_plan_json(&workspace, &plan_id);
     assert_eq!(
         saved.get("goal").and_then(serde_json::Value::as_str),
         Some("finish command orchestration")
@@ -169,6 +177,63 @@ async fn execute_plan_command_continue_id_loads_and_advances_existing_session() 
     assert_eq!(
         saved.get("phase").and_then(serde_json::Value::as_str),
         Some("DraftStep")
+    );
+
+    let _ = std::fs::remove_dir_all(&workspace);
+}
+
+#[tokio::test]
+async fn execute_plan_command_without_args_prefills_simple_continue_command() {
+    let workspace = create_unique_test_workspace("plan_simple_continue");
+    let mut app = ChatApp::new_for_test(workspace.to_str().unwrap()).expect("app");
+
+    execute_command_for_test(&mut app, "/plan", json!({"goal": "ship simpler UX"}))
+        .await
+        .expect("plan command should execute");
+
+    assert_eq!(
+        app.composer_text(),
+        "/plan",
+        "plan command should prefill simple continuation command"
+    );
+    assert!(
+        app.timeline()
+            .iter()
+            .all(|entry| !entry.body.contains("--continue")),
+        "timeline hints should not require --continue command"
+    );
+
+    let _ = std::fs::remove_dir_all(&workspace);
+}
+
+#[tokio::test]
+async fn execute_plan_command_without_args_continues_latest_open_session() {
+    let workspace = create_unique_test_workspace("plan_simple_resume");
+    let mut app = ChatApp::new_for_test(workspace.to_str().unwrap()).expect("app");
+
+    execute_command_for_test(&mut app, "/plan", json!({"goal": "resume with /plan"}))
+        .await
+        .expect("initial /plan should execute");
+    let plan_id = latest_plan_id(&workspace);
+    let before = read_plan_json(&workspace, &plan_id);
+    let before_phase = before
+        .get("phase")
+        .and_then(serde_json::Value::as_str)
+        .expect("phase should be present")
+        .to_owned();
+
+    execute_command_for_test(&mut app, "/plan", json!({}))
+        .await
+        .expect("/plan without args should continue latest open session");
+
+    let after = read_plan_json(&workspace, &plan_id);
+    let after_phase = after
+        .get("phase")
+        .and_then(serde_json::Value::as_str)
+        .expect("phase should be present");
+    assert_ne!(
+        after_phase, before_phase,
+        "continuation should advance the same plan session"
     );
 
     let _ = std::fs::remove_dir_all(&workspace);

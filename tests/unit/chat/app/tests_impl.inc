@@ -120,6 +120,25 @@ fn create_provider_config_repo(config_body: &str, name_prefix: &str) -> std::pat
     repo_path
 }
 
+fn latest_plan_id(workspace: &std::path::Path) -> String {
+    let plans_dir = workspace.join(".blazar").join("plans");
+    let mut ids = std::fs::read_dir(plans_dir)
+        .expect("plans dir should exist")
+        .filter_map(|entry| entry.ok())
+        .filter_map(|entry| {
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+                return None;
+            }
+            path.file_stem()
+                .and_then(|stem| stem.to_str())
+                .map(str::to_owned)
+        })
+        .collect::<Vec<_>>();
+    ids.sort();
+    ids.pop().expect("at least one plan should exist")
+}
+
 #[derive(Clone)]
 struct FakeRuntime {
     events: std::sync::Arc<std::sync::Mutex<VecDeque<crate::agent::protocol::AgentEvent>>>,
@@ -1161,10 +1180,8 @@ fn plan_command_send_message_dispatches_to_plugin_command_path() {
     app.send_message("/plan add minimax provider");
 
     let composer = app.composer_text();
-    let plan_id = composer
-        .strip_prefix("/plan --continue ")
-        .expect("plan command should prefill continuation")
-        .to_owned();
+    let plan_id = latest_plan_id(&workspace);
+    assert_eq!(composer, "/plan");
     let plan_path = workspace
         .join(".blazar")
         .join("plans")
@@ -1555,9 +1572,10 @@ fn picker_plan_command_prefills_composer_shortcut() {
 
     app.handle_action(InputAction::Submit);
     let composer = app.composer_text();
+    assert_eq!(composer, "/plan", "expected simplified plan shortcut");
     assert!(
-        composer.starts_with("/plan --continue plan-"),
-        "expected continue shortcut, got {composer:?}"
+        !latest_plan_id(&unique_workspace).is_empty(),
+        "submitting /plan command should create a plan session"
     );
 
     let _ = std::fs::remove_dir_all(unique_workspace);
@@ -1712,6 +1730,7 @@ fn submit_in_plan_mode_uses_plan_prompt_path() {
 
     assert!(prompt.contains("planning mode"));
     assert!(prompt.contains("short plain-text title"));
+    assert!(prompt.contains("ask concise clarifying questions first"));
     assert!(prompt.contains("User request:"));
     assert!(prompt.contains("optimize parser"));
 }
@@ -1755,6 +1774,113 @@ fn slash_query_submit_in_plan_mode_keeps_plan_runtime_path() {
         .expect("provider should capture a prompt");
     assert!(prompt.contains("planning mode"));
     assert!(prompt.contains("User request:\n/"));
+}
+
+#[test]
+fn execute_keyword_in_plan_mode_switches_to_chat_execution_prompt() {
+    let captured_prompt = Arc::new(Mutex::new(None));
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+    app.agent_runtime = Box::new(
+        AgentRuntime::new(
+            Box::new(CapturePromptProvider {
+                prompt: captured_prompt.clone(),
+            }),
+            PathBuf::from(repo_path),
+            "echo".to_owned(),
+        )
+        .expect("runtime should initialize"),
+    );
+
+    app.timeline.push(
+        TimelineEntry::response("1. Add parser tests\n2. Fix command dispatch")
+            .with_title("Plan command simplification"),
+    );
+    app.handle_action(InputAction::ToggleMode);
+    app.set_composer_text("执行");
+    app.submit_composer();
+
+    let captured = wait_until(TEST_WAIT_TIMEOUT, || {
+        app.tick();
+        captured_prompt
+            .lock()
+            .expect("prompt mutex poisoned")
+            .is_some()
+    });
+    assert!(captured, "execution prompt was not captured within timeout");
+
+    let prompt = captured_prompt
+        .lock()
+        .expect("prompt mutex poisoned")
+        .clone()
+        .expect("provider should capture a prompt");
+
+    assert!(
+        !prompt.contains("planning mode"),
+        "execution keyword should switch out of planning prompt path"
+    );
+    assert!(
+        prompt.contains("Execute the approved plan"),
+        "execution prompt should include explicit execution instruction"
+    );
+    assert!(
+        prompt.contains("Plan command simplification"),
+        "execution prompt should include latest plan title context"
+    );
+    assert_eq!(
+        app.users_status_snapshot().mode,
+        UserMode::Auto,
+        "execution keyword should switch mode back to AUTO"
+    );
+}
+
+#[test]
+fn execute_keyword_in_plan_mode_dispatches_after_busy_turn_drains() {
+    let captured_prompt = Arc::new(Mutex::new(None));
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+    app.agent_runtime = Box::new(
+        AgentRuntime::new(
+            Box::new(CapturePromptProvider {
+                prompt: captured_prompt.clone(),
+            }),
+            PathBuf::from(repo_path),
+            "echo".to_owned(),
+        )
+        .expect("runtime should initialize"),
+    );
+
+    app.timeline.push(
+        TimelineEntry::response("1. Implement parser fallback")
+            .with_title("Plan execution handoff"),
+    );
+    app.handle_action(InputAction::ToggleMode);
+    app.apply_agent_event_for_test(AgentEvent::TurnStarted {
+        turn_id: "busy-turn".into(),
+    });
+
+    app.set_composer_text("执行");
+    app.submit_composer();
+    assert!(
+        captured_prompt
+            .lock()
+            .expect("prompt mutex poisoned")
+            .is_none(),
+        "execution prompt should stay queued while runtime is busy"
+    );
+
+    app.apply_agent_event_for_test(AgentEvent::TurnComplete);
+    let captured = wait_until(TEST_WAIT_TIMEOUT, || {
+        app.tick();
+        captured_prompt
+            .lock()
+            .expect("prompt mutex poisoned")
+            .is_some()
+    });
+    assert!(
+        captured,
+        "queued execution prompt should dispatch once busy turn completes"
+    );
 }
 
 #[test]
@@ -2410,6 +2536,58 @@ fn tool_call_completed_logs_include_turn_and_resolved_tool_name() {
             .get("event_seq")
             .and_then(serde_json::Value::as_u64),
         Some(2)
+    );
+}
+
+#[test]
+fn errored_tool_call_completed_logs_include_error_kind() {
+    let (_, captured) = crate::observability::logging::with_captured_structured_events_for_test(|| {
+        let mut app = new_test_app();
+
+        app.apply_agent_event_for_test(AgentEvent::TurnStarted {
+            turn_id: "turn-tool-error-kind".into(),
+        });
+        app.apply_agent_event_for_test(AgentEvent::ToolCallStarted {
+            call_id: "call-error-kind".into(),
+            tool_name: "bash".into(),
+            kind: crate::agent::tools::ToolKind::Local,
+            arguments: r#"{"command":"exit 1"}"#.into(),
+            batch_id: 0,
+            replay_index: 0,
+            normalized_claims: Vec::new(),
+        });
+        app.apply_agent_event_for_test(AgentEvent::ToolCallCompleted {
+            call_id: "call-error-kind".into(),
+            output: "exit status 1".into(),
+            is_error: true,
+        });
+    });
+
+    let tool_completed = captured
+        .into_iter()
+        .filter_map(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+        .find(|event| {
+            event
+                .get("event")
+                .and_then(serde_json::Value::as_str)
+                == Some("tool_call_completed")
+                && event
+                    .get("turn_id")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("turn-tool-error-kind")
+                && event
+                    .get("tool_name")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("bash")
+        })
+        .expect("expected errored tool_call_completed event");
+
+    assert_eq!(
+        tool_completed
+            .get("error_kind")
+            .and_then(serde_json::Value::as_str),
+        Some("ToolExecution"),
+        "errored tool completion logs should include error_kind for diagnostics"
     );
 }
 

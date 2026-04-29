@@ -50,7 +50,20 @@ impl ChatApp {
             }
         }
 
-        let turn = build_pending_turn_for_mode(trimmed, self.user_mode);
+        let turn = if self.user_mode == UserMode::Plan && is_plan_execution_trigger(trimmed) {
+            self.user_mode = UserMode::Auto;
+            let plan_context = self.latest_assistant_plan_context();
+            PendingTurn {
+                user_text: trimmed.to_owned(),
+                dispatch: PendingDispatch::Runtime {
+                    runtime_prompt: build_plan_execution_prompt(trimmed, plan_context.as_deref()),
+                    kind: TurnKind::Chat,
+                },
+                timeline_inserted: false,
+            }
+        } else {
+            build_pending_turn_for_mode(trimmed, self.user_mode)
+        };
 
         info!(
             "send_message: len={} preview={:.60}",
@@ -231,11 +244,48 @@ fn build_plan_prompt(request: &str) -> String {
     format!(
         "You are in planning mode.\n\
          Generate a concise implementation plan only.\n\
+         If requirements are ambiguous, ask concise clarifying questions first.\n\
          First line must be a short plain-text title with no markdown, no numbering, and no label.\n\
          After a blank line, write the plan body as concise ordered steps.\n\
          Keep the answer focused on planning.\n\n\
          User request:\n{request}"
     )
+}
+
+fn is_plan_execution_trigger(input: &str) -> bool {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+
+    if matches!(
+        trimmed,
+        "执行" | "继续执行" | "开始执行" | "执行计划" | "开始" | "继续"
+    ) {
+        return true;
+    }
+
+    let lowered = trimmed.to_ascii_lowercase();
+    matches!(
+        lowered.as_str(),
+        "execute" | "run" | "start" | "continue" | "go" | "yes" | "y"
+    )
+}
+
+fn build_plan_execution_prompt(approval: &str, plan_context: Option<&str>) -> String {
+    match plan_context {
+        Some(plan_context) => format!(
+            "Execute the approved plan.\n\
+             The user approved execution with: {approval}\n\
+             Plan context:\n{plan_context}\n\n\
+             Continue with concrete implementation steps and report progress with actionable updates."
+        ),
+        None => format!(
+            "Execute the approved plan.\n\
+             The user approved execution with: {approval}\n\
+             There is no explicit prior plan context in history, so infer the best next implementation steps and proceed."
+        ),
+    }
 }
 
 fn build_compact_prompt() -> String {
@@ -246,6 +296,21 @@ fn build_compact_prompt() -> String {
      Focus on information that would be valuable for continuing this conversation later.\n\
      Keep the summary focused and under 200 words."
         .to_owned()
+}
+
+impl ChatApp {
+    fn latest_assistant_plan_context(&self) -> Option<String> {
+        self.timeline.iter().rev().find_map(|entry| {
+            if entry.actor != Actor::Assistant || entry.kind != EntryKind::Message {
+                return None;
+            }
+
+            Some(match entry.title.as_deref() {
+                Some(title) if !title.trim().is_empty() => format!("{title}\n\n{}", entry.body),
+                _ => entry.body.clone(),
+            })
+        })
+    }
 }
 
 pub(super) fn extract_plan_title_and_body(text: &str) -> Option<(String, String)> {
