@@ -2861,6 +2861,43 @@ fn stream_provider_pass_detects_split_contract_opening_tag_across_chunks() {
 }
 
 #[test]
+fn stream_provider_pass_handles_utf8_text_without_panicking() {
+    struct Utf8DeltaProvider;
+
+    impl LlmProvider for Utf8DeltaProvider {
+        fn stream_turn(
+            &self,
+            _model: &str,
+            _messages: &[ProviderMessage],
+            _tools: &[ToolSpec],
+            tx: Sender<ProviderEvent>,
+        ) {
+            let _ = tx.send(ProviderEvent::TextDelta("和".into()));
+            let _ = tx.send(ProviderEvent::TurnComplete);
+        }
+    }
+
+    let (event_tx, event_rx) = mpsc::channel();
+    let cancel = Arc::new(AtomicBool::new(false));
+
+    let pass = stream_provider_pass(
+        &Utf8DeltaProvider,
+        "gpt-5",
+        &user_messages("utf8"),
+        &[],
+        &ChannelObserver { tx: &event_tx },
+        &cancel,
+    );
+    assert!(matches!(pass.outcome, TurnOutcome::Complete));
+    assert_eq!(pass.assistant_text, "和");
+
+    let has_text_delta = event_rx
+        .try_iter()
+        .any(|event| matches!(event, AgentEvent::TextDelta { text } if text == "和"));
+    assert!(has_text_delta, "utf8 text delta should be forwarded normally");
+}
+
+#[test]
 fn execute_turn_retries_invalid_response_contract_and_recovers() {
     struct RetryContractProvider {
         attempts: Arc<AtomicU32>,

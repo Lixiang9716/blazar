@@ -521,9 +521,13 @@ fn find_contract_open_marker_start(text: &str) -> Option<usize> {
 
 fn contract_open_probe_tail(text: &str) -> String {
     const MARKER: &str = "<assistant_response";
-    let max_len = MARKER.len().saturating_sub(1).min(text.len());
-    for len in (1..=max_len).rev() {
-        let suffix = &text[text.len() - len..];
+    let max_len = MARKER.len().saturating_sub(1);
+    for (start, _) in text.char_indices().rev() {
+        let len = text.len() - start;
+        if len > max_len {
+            break;
+        }
+        let suffix = &text[start..];
         if MARKER.starts_with(suffix) {
             return suffix.to_owned();
         }
