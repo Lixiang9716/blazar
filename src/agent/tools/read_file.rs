@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 use std::fs;
 use std::path::PathBuf;
 
-const MAX_FILE_BYTES: usize = 100 * 1024;
+const MAX_FILE_BYTES: u64 = 512 * 1024 * 1024;
 
 inventory::submit! {
     BuiltinToolDescriptor {
@@ -70,9 +70,9 @@ impl Tool for ReadFileTool {
         };
 
         match fs::metadata(&full_path) {
-            Ok(metadata) if metadata.len() > MAX_FILE_BYTES as u64 => {
-                ToolResult::failure("file exceeds 100KB limit")
-            }
+            Ok(metadata) if metadata.len() > MAX_FILE_BYTES => ToolResult::failure(format!(
+                "file is too large to read: limit is {MAX_FILE_BYTES} bytes"
+            )),
             Ok(_) => match fs::read(&full_path) {
                 Ok(bytes) => match String::from_utf8(bytes) {
                     Ok(text) => ToolResult::success(text),
@@ -144,14 +144,19 @@ mod tests {
     #[test]
     fn execute_rejects_file_exceeding_size_limit() {
         let ws = fresh_workspace("large");
-        let large_content = "x".repeat(MAX_FILE_BYTES + 1);
-        fs::write(ws.join("large.txt"), large_content).unwrap();
+        let file_path = ws.join("large.txt");
+        let file = fs::File::create(&file_path).unwrap();
+        file.set_len(MAX_FILE_BYTES + 1).unwrap();
 
         let tool = ReadFileTool::new(ws);
         let result = tool.execute(json!({"path": "large.txt"}));
 
         assert!(result.is_error);
-        assert!(result.text_output().contains("exceeds 100KB limit"));
+        assert!(
+            result
+                .text_output()
+                .contains(&format!("limit is {} bytes", MAX_FILE_BYTES))
+        );
     }
 
     #[test]

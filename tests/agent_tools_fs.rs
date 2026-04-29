@@ -35,29 +35,33 @@ fn read_file_reads_workspace_relative_path() {
 }
 
 #[test]
-fn read_file_reads_utf8_up_to_100kb() {
+fn read_file_reads_utf8_above_100kb() {
     let workspace = fresh_workspace("read-limit");
-    let content = "a".repeat(100 * 1024);
+    let content = "a".repeat(200 * 1024);
     fs::write(workspace.join("limit.txt"), &content).unwrap();
 
     let tool = ReadFileTool::new(workspace.clone());
     let result = tool.execute(json!({ "path": "limit.txt" }));
 
     assert!(!result.is_error);
-    assert_eq!(result.text_output().len(), 100 * 1024);
+    assert_eq!(result.text_output().len(), 200 * 1024);
 }
 
 #[test]
-fn read_file_rejects_files_over_100kb() {
+fn read_file_rejects_files_over_512mb() {
     let workspace = fresh_workspace("read-too-large");
-    let content = "a".repeat(100 * 1024 + 1);
-    fs::write(workspace.join("too-large.txt"), &content).unwrap();
+    let file_path = workspace.join("too-large.txt");
+    let file = fs::File::create(&file_path).unwrap();
+    file.set_len(512 * 1024 * 1024 + 1).unwrap();
 
     let tool = ReadFileTool::new(workspace.clone());
     let result = tool.execute(json!({ "path": "too-large.txt" }));
 
     assert!(result.is_error);
-    assert_eq!(result.text_output(), "file exceeds 100KB limit");
+    assert_eq!(
+        result.text_output(),
+        "file is too large to read: limit is 536870912 bytes"
+    );
 }
 
 #[test]
