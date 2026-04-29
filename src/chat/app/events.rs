@@ -447,7 +447,7 @@ impl ChatApp {
         };
 
         let summary = contract.summary.trim();
-        let tool_summary = contract.tool_summary.trim();
+        let _tool_summary = contract.tool_summary.trim();
         let nextstep = contract.nextstep.trim();
         let question = contract.question.trim();
         let error = contract.error.trim();
@@ -457,12 +457,6 @@ impl ChatApp {
             Some(TurnKind::Plan) => {
                 if !summary.is_empty() {
                     entry.title = Some(summary.to_owned());
-                }
-                if !nextstep.is_empty() {
-                    sections.push(nextstep.to_owned());
-                }
-                if !tool_summary.is_empty() {
-                    sections.push(format!("Tool summary: {tool_summary}"));
                 }
                 if contract.needs_user_input && !question.is_empty() {
                     sections.push(format!("Question: {question}"));
@@ -478,22 +472,10 @@ impl ChatApp {
                     entry.title = Some(format!("📦 {summary}"));
                     sections.push(summary.to_owned());
                 }
-                if !tool_summary.is_empty() {
-                    sections.push(format!("Tool summary: {tool_summary}"));
-                }
-                if !nextstep.is_empty() {
-                    sections.push(format!("Next step: {nextstep}"));
-                }
             }
             _ => {
                 if !summary.is_empty() {
                     sections.push(summary.to_owned());
-                }
-                if !tool_summary.is_empty() {
-                    sections.push(format!("Tool summary: {tool_summary}"));
-                }
-                if !nextstep.is_empty() {
-                    sections.push(format!("Next step: {nextstep}"));
                 }
                 if contract.needs_user_input && !question.is_empty() {
                     sections.push(format!("Question: {question}"));
@@ -1093,16 +1075,44 @@ fn looks_like_contract_markup(text: &str) -> bool {
 fn strip_contract_markup(text: &str) -> String {
     let mut stripped = String::new();
     let mut inside_tag = false;
+    let mut tag_buffer = String::new();
+    let mut suppress_content_depth = 0usize;
+
+    fn should_suppress_contract_tag(tag_name: &str) -> bool {
+        matches!(tag_name, "tool_summary" | "nextstep")
+    }
+
     for ch in text.chars() {
         match ch {
-            '<' => inside_tag = true,
+            '<' => {
+                inside_tag = true;
+                tag_buffer.clear();
+            }
             '>' if inside_tag => {
                 inside_tag = false;
-                if !stripped.ends_with('\n') {
+                let token = tag_buffer.trim();
+                let is_closing = token.starts_with('/');
+                let token = token.trim_start_matches('/');
+                let is_self_closing = token.ends_with('/');
+                let token = token.trim_end_matches('/');
+                let tag_name = token
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or_default()
+                    .to_ascii_lowercase();
+                if should_suppress_contract_tag(&tag_name) {
+                    if is_closing {
+                        suppress_content_depth = suppress_content_depth.saturating_sub(1);
+                    } else if !is_self_closing {
+                        suppress_content_depth = suppress_content_depth.saturating_add(1);
+                    }
+                }
+                if suppress_content_depth == 0 && !stripped.ends_with('\n') {
                     stripped.push('\n');
                 }
             }
-            _ if !inside_tag => stripped.push(ch),
+            _ if inside_tag => tag_buffer.push(ch),
+            _ if suppress_content_depth == 0 => stripped.push(ch),
             _ => {}
         }
     }

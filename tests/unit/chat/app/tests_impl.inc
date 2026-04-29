@@ -2869,8 +2869,8 @@ fn turn_complete_unwraps_structured_response_for_chat_entries() {
     assert_eq!(last.kind, EntryKind::Message);
     assert!(!last.body.contains("<assistant_response>"));
     assert!(last.body.contains("Need one environment choice."));
-    assert!(last.body.contains("Tool summary: Read workspace config."));
-    assert!(last.body.contains("Next step: Confirm which provider model to use."));
+    assert!(!last.body.contains("Read workspace config."));
+    assert!(!last.body.contains("Confirm which provider model to use."));
     assert!(last.body.contains("Question: Use deepseek-v4-pro or qwen3-8b?"));
     assert!(last.body.contains("Blocked reason: Waiting for user confirmation."));
     assert!(last.details.contains("intent=clarify"));
@@ -2900,10 +2900,7 @@ fn turn_complete_unwraps_structured_response_for_plan_entries() {
 
     let last = app.timeline.last().expect("assistant entry should exist");
     assert_eq!(last.title.as_deref(), Some("Plan command simplification"));
-    assert_eq!(
-        last.body,
-        "1. Add parser tests\n2. Handle structured response rendering"
-    );
+    assert_eq!(last.body, "Plan command simplification");
     assert!(!last.body.contains("<assistant_response>"));
 }
 
@@ -2941,8 +2938,8 @@ fn turn_complete_unwraps_latest_structured_response_when_retries_are_concatenate
     let last = app.timeline.last().expect("assistant entry should exist");
     assert!(!last.body.contains("<assistant_response>"));
     assert!(last.body.contains("Applied maintainability refactor."));
-    assert!(last.body.contains("Tool summary: Updated events parser and tests."));
-    assert!(last.body.contains("Next step: Run full validation and continue implementation."));
+    assert!(!last.body.contains("Updated events parser and tests."));
+    assert!(!last.body.contains("Run full validation and continue implementation."));
     assert!(!last.body.contains("Bad contract summary"));
     assert!(last.details.contains("intent=execute"));
     assert!(last.details.contains("status=ok"));
@@ -2981,8 +2978,8 @@ fn turn_complete_unwraps_structured_response_split_across_assistant_chunks() {
     let last = assistant_messages.last().expect("assistant entry should exist");
     assert!(!last.body.contains("<assistant_response>"));
     assert!(last.body.contains("Split response normalized."));
-    assert!(last.body.contains("Tool summary: Updated parser."));
-    assert!(last.body.contains("Next step: Run full validation."));
+    assert!(!last.body.contains("Updated parser."));
+    assert!(!last.body.contains("Run full validation."));
 }
 
 #[test]
@@ -3041,7 +3038,7 @@ fn text_delta_structured_stream_keeps_single_assistant_entry_across_thinking_chu
     );
     let last = assistant_messages.last().expect("assistant entry should exist");
     assert!(last.body.contains("Stable stream."));
-    assert!(last.body.contains("Tool summary: Updated parser."));
+    assert!(!last.body.contains("Updated parser."));
 }
 
 #[test]
@@ -3122,8 +3119,8 @@ fn turn_complete_prefers_side_channel_contract_over_conflicting_raw_markup() {
 
     let last = app.timeline.last().expect("assistant entry should exist");
     assert!(last.body.contains("Summary from side channel."));
-    assert!(last.body.contains("Tool summary: Tool summary from side channel."));
-    assert!(last.body.contains("Next step: Next step from side channel."));
+    assert!(!last.body.contains("Tool summary from side channel."));
+    assert!(!last.body.contains("Next step from side channel."));
     assert!(!last.body.contains("Conflicting raw summary"));
     assert!(!last.body.contains("Conflicting raw tool summary"));
     assert!(!last.body.contains("Conflicting raw step"));
@@ -3147,8 +3144,8 @@ fn non_echo_raw_markup_uses_safety_strip_not_legacy_contract_parse() {
     let last = app.timeline.last().expect("assistant entry should exist");
     assert!(!last.body.contains("<assistant_response>"));
     assert!(last.body.contains("Raw summary"));
-    assert!(last.body.contains("Raw tool"));
-    assert!(last.body.contains("Raw next"));
+    assert!(!last.body.contains("Raw tool"));
+    assert!(!last.body.contains("Raw next"));
     assert!(!last.body.contains("Tool summary: Raw tool"));
     assert!(!last.body.contains("Next step: Raw next"));
 }
@@ -3177,7 +3174,7 @@ fn non_echo_mixed_markup_and_plain_text_preserves_plain_text_on_turn_complete() 
     let last = app.timeline.last().expect("assistant entry should exist");
     assert!(last.body.contains("Hello"));
     assert!(last.body.contains("plain world"));
-    assert!(last.body.contains("Next"));
+    assert!(!last.body.contains("Next"));
     assert!(!last.body.contains('<'));
 }
 
@@ -3205,8 +3202,8 @@ fn turn_complete_unwraps_lenient_structured_response_when_error_tag_missing() {
     assert_eq!(last.kind, EntryKind::Message);
     assert!(!last.body.contains("<assistant_response>"));
     assert!(last.body.contains("Need narrower maintainability scope."));
-    assert!(last.body.contains("Tool summary: Checked modified files list."));
-    assert!(last.body.contains("Next step: Focus on chat/app and agent/runtime first."));
+    assert!(!last.body.contains("Checked modified files list."));
+    assert!(!last.body.contains("Focus on chat/app and agent/runtime first."));
     assert!(last.body.contains("Question: Should we only fix current modified files?"));
     assert!(last.details.contains("status=blocked"));
 }
