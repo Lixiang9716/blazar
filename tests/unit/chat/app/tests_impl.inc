@@ -3154,6 +3154,34 @@ fn non_echo_raw_markup_uses_safety_strip_not_legacy_contract_parse() {
 }
 
 #[test]
+fn non_echo_mixed_markup_and_plain_text_preserves_plain_text_on_turn_complete() {
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+    app.model_name = "gpt-5".to_owned();
+    app.apply_agent_event_for_test(AgentEvent::TurnStarted {
+        turn_id: "turn-non-echo-mixed-stream".into(),
+    });
+    app.active_turn_kind = Some(TurnKind::Chat);
+
+    app.apply_agent_event_for_test(AgentEvent::TextDelta {
+        text: "<assistant_response><summary>Hello</summary>".into(),
+    });
+    app.apply_agent_event_for_test(AgentEvent::TextDelta {
+        text: " plain world ".into(),
+    });
+    app.apply_agent_event_for_test(AgentEvent::TextDelta {
+        text: "<nextstep>Next</nextstep></assistant_response>".into(),
+    });
+    app.apply_agent_event_for_test(AgentEvent::TurnComplete);
+
+    let last = app.timeline.last().expect("assistant entry should exist");
+    assert!(last.body.contains("Hello"));
+    assert!(last.body.contains("plain world"));
+    assert!(last.body.contains("Next"));
+    assert!(!last.body.contains('<'));
+}
+
+#[test]
 fn turn_complete_unwraps_lenient_structured_response_when_error_tag_missing() {
     let repo_path = env!("CARGO_MANIFEST_DIR");
     let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");

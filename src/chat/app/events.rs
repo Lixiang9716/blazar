@@ -97,11 +97,6 @@ impl ChatApp {
                 }
 
                 if self.contract_side_channel_expected() && looks_like_contract_markup(&text) {
-                    let raw = self
-                        .current_turn_structured_response_raw
-                        .get_or_insert_with(String::new);
-                    raw.push_str(&text);
-
                     let stripped = strip_contract_markup(&text);
                     if !stripped.trim().is_empty() {
                         self.append_assistant_text_delta(&stripped);
