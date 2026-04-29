@@ -45,6 +45,11 @@ impl ChatApp {
                 debug!("tick: TurnStarted");
                 self.thinking_action_name = None;
                 self.current_turn_has_thinking_entry = false;
+                self.current_turn_timeline_start = Some(self.timeline.len());
+                self.current_turn_structured_response_raw = None;
+                self.current_turn_structured_entry_index = None;
+                self.current_turn_contract_delta = None;
+                self.current_turn_contract_delta_seen = false;
                 self.debug_recorder.start_turn(
                     &turn_id,
                     self.active_turn_kind_label(),
@@ -86,6 +91,36 @@ impl ChatApp {
             }
             AgentEvent::TextDelta { text } => {
                 trace!("tick: TextDelta len={}", text.len());
+                if self.current_turn_contract_delta_seen && looks_like_contract_markup(&text) {
+                    self.scroll_offset = u16::MAX;
+                    return;
+                }
+                let structured_stream = self.current_turn_structured_response_raw.is_some()
+                    || looks_like_contract_markup(&text);
+                if structured_stream {
+                    let entry_index = self.ensure_structured_stream_entry();
+
+                    let parsed_contract = {
+                        let raw = self
+                            .current_turn_structured_response_raw
+                            .get_or_insert_with(String::new);
+                        raw.push_str(&text);
+                        parse_assistant_response_contract(raw)
+                            .or_else(|| parse_partial_assistant_response_contract(raw))
+                    };
+                    if let Some(contract) = parsed_contract {
+                        let _ = self.apply_structured_contract(contract);
+                    } else if let Some(entry) = self.timeline.get_mut(entry_index)
+                        && entry.actor == Actor::Assistant
+                        && entry.kind == EntryKind::Message
+                        && entry.body.trim().is_empty()
+                    {
+                        entry.body = "…".to_owned();
+                    }
+                    self.scroll_offset = u16::MAX;
+                    return;
+                }
+
                 let needs_new = self.timeline.last().is_none_or(|entry| {
                     !(entry.actor == Actor::Assistant && entry.kind == EntryKind::Message)
                 });
@@ -94,6 +129,28 @@ impl ChatApp {
                 }
                 if let Some(last) = self.timeline.last_mut() {
                     last.body.push_str(&text);
+                }
+                self.scroll_offset = u16::MAX;
+            }
+            AgentEvent::AssistantContractDelta { delta } => {
+                self.current_turn_contract_delta_seen = true;
+                let _ = self.ensure_structured_stream_entry();
+                merge_assistant_contract_delta(&mut self.current_turn_contract_delta, delta);
+                if let Some(contract) = self
+                    .current_turn_contract_delta
+                    .as_ref()
+                    .map(contract_from_structured_delta)
+                {
+                    let _ = self.apply_structured_contract(contract);
+                } else {
+                    let entry_index = self.ensure_structured_stream_entry();
+                    if let Some(entry) = self.timeline.get_mut(entry_index)
+                        && entry.actor == Actor::Assistant
+                        && entry.kind == EntryKind::Message
+                        && entry.body.trim().is_empty()
+                    {
+                        entry.body = "…".to_owned();
+                    }
                 }
                 self.scroll_offset = u16::MAX;
             }
@@ -253,13 +310,24 @@ impl ChatApp {
                     "chat turn complete",
                 );
                 self.debug_recorder.finish_turn("completed", None, None);
-                if self.active_turn_kind == Some(TurnKind::Plan) {
-                    self.finalize_plan_response();
-                } else if self.active_turn_kind == Some(TurnKind::Compact) {
-                    self.finalize_compact_response();
+                let normalized_structured_response = self
+                    .finalize_side_channel_structured_response()
+                    || self.finalize_structured_response();
+                if !normalized_structured_response {
+                    self.sanitize_internal_contract_markup();
+                    if self.active_turn_kind == Some(TurnKind::Plan) {
+                        self.finalize_plan_response();
+                    } else if self.active_turn_kind == Some(TurnKind::Compact) {
+                        self.finalize_compact_response();
+                    }
                 }
                 self.thinking_action_name = None;
                 self.current_turn_has_thinking_entry = false;
+                self.current_turn_timeline_start = None;
+                self.current_turn_structured_response_raw = None;
+                self.current_turn_structured_entry_index = None;
+                self.current_turn_contract_delta = None;
+                self.current_turn_contract_delta_seen = false;
                 self.active_turn_kind = None;
                 self.active_turn_title = None;
                 self.dispatch_next_queued();
@@ -300,12 +368,139 @@ impl ChatApp {
                 }
                 self.thinking_action_name = None;
                 self.current_turn_has_thinking_entry = false;
+                self.current_turn_timeline_start = None;
+                self.current_turn_structured_response_raw = None;
+                self.current_turn_structured_entry_index = None;
+                self.current_turn_contract_delta = None;
+                self.current_turn_contract_delta_seen = false;
                 self.active_turn_kind = None;
                 self.active_turn_title = None;
                 self.dispatch_next_queued();
                 self.scroll_offset = u16::MAX;
             }
         }
+    }
+
+    fn finalize_structured_response(&mut self) -> bool {
+        let contract = self
+            .current_turn_structured_response_raw
+            .as_deref()
+            .and_then(parse_assistant_response_contract)
+            .or_else(|| {
+                let assistant_indices = self.current_turn_assistant_message_indices();
+                if assistant_indices.is_empty() {
+                    return None;
+                }
+                let combined_response = assistant_indices
+                    .iter()
+                    .filter_map(|index| self.timeline.get(*index))
+                    .map(|entry| entry.body.as_str())
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                parse_assistant_response_contract(&combined_response)
+            });
+
+        match contract {
+            Some(contract) => self.apply_structured_contract(contract),
+            None => false,
+        }
+    }
+
+    fn finalize_side_channel_structured_response(&mut self) -> bool {
+        let Some(contract_delta) = self.current_turn_contract_delta.as_ref() else {
+            return false;
+        };
+        self.apply_structured_contract(contract_from_structured_delta(contract_delta))
+    }
+
+    fn apply_structured_contract(&mut self, contract: AssistantResponseContract) -> bool {
+        let assistant_indices = self.current_turn_assistant_message_indices();
+        if assistant_indices.is_empty() {
+            return false;
+        }
+        let target_index = *assistant_indices
+            .last()
+            .expect("assistant_indices must be non-empty");
+        let Some(entry) = self.timeline.get_mut(target_index) else {
+            return false;
+        };
+
+        let summary = contract.summary.trim();
+        let tool_summary = contract.tool_summary.trim();
+        let nextstep = contract.nextstep.trim();
+        let question = contract.question.trim();
+        let error = contract.error.trim();
+        let mut sections = Vec::new();
+
+        match self.active_turn_kind {
+            Some(TurnKind::Plan) => {
+                if !summary.is_empty() {
+                    entry.title = Some(summary.to_owned());
+                }
+                if !nextstep.is_empty() {
+                    sections.push(nextstep.to_owned());
+                }
+                if !tool_summary.is_empty() {
+                    sections.push(format!("Tool summary: {tool_summary}"));
+                }
+                if contract.needs_user_input && !question.is_empty() {
+                    sections.push(format!("Question: {question}"));
+                }
+                if sections.is_empty() && !summary.is_empty() {
+                    sections.push(summary.to_owned());
+                }
+                self.thinking_action_name = short_action_name_from_text(nextstep)
+                    .or_else(|| short_action_name_from_text(summary));
+            }
+            Some(TurnKind::Compact) => {
+                if !summary.is_empty() {
+                    entry.title = Some(format!("📦 {summary}"));
+                    sections.push(summary.to_owned());
+                }
+                if !tool_summary.is_empty() {
+                    sections.push(format!("Tool summary: {tool_summary}"));
+                }
+                if !nextstep.is_empty() {
+                    sections.push(format!("Next step: {nextstep}"));
+                }
+            }
+            _ => {
+                if !summary.is_empty() {
+                    sections.push(summary.to_owned());
+                }
+                if !tool_summary.is_empty() {
+                    sections.push(format!("Tool summary: {tool_summary}"));
+                }
+                if !nextstep.is_empty() {
+                    sections.push(format!("Next step: {nextstep}"));
+                }
+                if contract.needs_user_input && !question.is_empty() {
+                    sections.push(format!("Question: {question}"));
+                }
+                if contract.status == "blocked" && !error.is_empty() {
+                    sections.push(format!("Blocked reason: {error}"));
+                } else if contract.status == "failed" && !error.is_empty() {
+                    sections.push(format!("Error: {error}"));
+                }
+            }
+        }
+
+        if sections.is_empty() {
+            sections.push("…".to_owned());
+        }
+
+        entry.body = sections.join("\n\n");
+        entry.details = format_structured_response_details(&contract);
+        for index in assistant_indices.into_iter().rev() {
+            if index != target_index {
+                self.timeline.remove(index);
+            }
+        }
+        self.current_turn_structured_entry_index = self
+            .current_turn_assistant_message_indices()
+            .last()
+            .copied();
+        true
     }
 
     fn finalize_plan_response(&mut self) {
@@ -366,6 +561,90 @@ impl ChatApp {
             crate::agent::state::TurnState::Streaming { turn_id } => Some(turn_id.as_str()),
             _ => None,
         }
+    }
+
+    fn current_turn_assistant_message_indices(&self) -> Vec<usize> {
+        if let Some(start) = self.current_turn_timeline_start {
+            return self
+                .timeline
+                .iter()
+                .enumerate()
+                .skip(start.min(self.timeline.len()))
+                .filter_map(|(index, entry)| {
+                    (entry.actor == Actor::Assistant && entry.kind == EntryKind::Message)
+                        .then_some(index)
+                })
+                .collect();
+        }
+
+        self.timeline
+            .iter()
+            .enumerate()
+            .rev()
+            .find_map(|(index, entry)| {
+                (entry.actor == Actor::Assistant && entry.kind == EntryKind::Message)
+                    .then_some(vec![index])
+            })
+            .unwrap_or_default()
+    }
+
+    fn ensure_structured_stream_entry(&mut self) -> usize {
+        let existing = self.current_turn_structured_entry_index.and_then(|index| {
+            self.timeline.get(index).and_then(|entry| {
+                (entry.actor == Actor::Assistant && entry.kind == EntryKind::Message)
+                    .then_some(index)
+            })
+        });
+        if let Some(index) = existing {
+            return index;
+        }
+
+        self.timeline.push(TimelineEntry::response(""));
+        let index = self.timeline.len().saturating_sub(1);
+        self.current_turn_structured_entry_index = Some(index);
+        index
+    }
+
+    fn sanitize_internal_contract_markup(&mut self) {
+        let assistant_indices = self.current_turn_assistant_message_indices();
+        if assistant_indices.is_empty() {
+            return;
+        }
+
+        let fallback_from_raw = self
+            .current_turn_structured_response_raw
+            .as_deref()
+            .map(strip_contract_markup)
+            .filter(|text| !text.trim().is_empty());
+        let fallback_from_entries = assistant_indices
+            .iter()
+            .filter_map(|index| self.timeline.get(*index))
+            .map(|entry| strip_contract_markup(&entry.body))
+            .filter(|text| !text.trim().is_empty())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let sanitized = fallback_from_raw.or_else(|| {
+            (!fallback_from_entries.trim().is_empty()).then_some(fallback_from_entries)
+        });
+        let Some(sanitized) = sanitized else {
+            return;
+        };
+
+        let target_index = *assistant_indices
+            .last()
+            .expect("assistant_indices must be non-empty");
+        if let Some(entry) = self.timeline.get_mut(target_index) {
+            entry.body = sanitized;
+        }
+        for index in assistant_indices.into_iter().rev() {
+            if index != target_index {
+                self.timeline.remove(index);
+            }
+        }
+        self.current_turn_structured_entry_index = self
+            .current_turn_assistant_message_indices()
+            .last()
+            .copied();
     }
 }
 
@@ -472,4 +751,345 @@ fn append_tool_debug_details(details: String, event: &DebugEventSnapshot) -> Str
         lines.push(format!("debug.event_seq={event_seq}"));
     }
     lines.join("\n")
+}
+
+fn merge_assistant_contract_delta(
+    aggregate: &mut Option<crate::agent::protocol::AssistantContractDelta>,
+    delta: crate::agent::protocol::AssistantContractDelta,
+) {
+    if let Some(current) = aggregate.as_mut() {
+        if delta.intent.is_some() {
+            current.intent = delta.intent;
+        }
+        if delta.summary.is_some() {
+            current.summary = delta.summary;
+        }
+        if delta.tool_summary.is_some() {
+            current.tool_summary = delta.tool_summary;
+        }
+        if delta.nextstep.is_some() {
+            current.nextstep = delta.nextstep;
+        }
+        if delta.needs_user_input.is_some() {
+            current.needs_user_input = delta.needs_user_input;
+        }
+        if delta.question.is_some() {
+            current.question = delta.question;
+        }
+        if delta.status.is_some() {
+            current.status = delta.status;
+        }
+        if delta.error.is_some() {
+            current.error = delta.error;
+        }
+        current.complete = current.complete || delta.complete;
+    } else {
+        *aggregate = Some(delta);
+    }
+}
+
+fn contract_from_structured_delta(
+    delta: &crate::agent::protocol::AssistantContractDelta,
+) -> AssistantResponseContract {
+    AssistantResponseContract {
+        intent: delta.intent.clone().unwrap_or_else(|| "execute".to_owned()),
+        summary: delta.summary.clone().unwrap_or_default(),
+        tool_summary: delta.tool_summary.clone().unwrap_or_default(),
+        nextstep: delta.nextstep.clone().unwrap_or_default(),
+        needs_user_input: delta.needs_user_input.unwrap_or(false),
+        question: delta.question.clone().unwrap_or_default(),
+        status: delta.status.clone().unwrap_or_else(|| "ok".to_owned()),
+        error: delta.error.clone().unwrap_or_default(),
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AssistantResponseContract {
+    intent: String,
+    summary: String,
+    tool_summary: String,
+    nextstep: String,
+    needs_user_input: bool,
+    question: String,
+    status: String,
+    error: String,
+}
+
+fn parse_assistant_response_contract(payload: &str) -> Option<AssistantResponseContract> {
+    if let Some(contract) = parse_assistant_response_contract_block(payload.trim()) {
+        return Some(contract);
+    }
+    if let Some(contract) = parse_assistant_response_contract_block_lenient(payload.trim()) {
+        return Some(contract);
+    }
+
+    const OPEN: &str = "<assistant_response>";
+    const CLOSE: &str = "</assistant_response>";
+    let starts = payload
+        .match_indices(OPEN)
+        .map(|(start, _)| start)
+        .collect::<Vec<_>>();
+    for start in starts.into_iter().rev() {
+        let candidate_start = &payload[start..];
+        let Some(close_index) = candidate_start.find(CLOSE) else {
+            if let Some(contract) = parse_assistant_response_contract_block_lenient(candidate_start)
+            {
+                return Some(contract);
+            }
+            continue;
+        };
+        let candidate = &candidate_start[..close_index + CLOSE.len()];
+        if let Some(contract) = parse_assistant_response_contract_block(candidate.trim()) {
+            return Some(contract);
+        }
+        if let Some(contract) = parse_assistant_response_contract_block_lenient(candidate.trim()) {
+            return Some(contract);
+        }
+    }
+
+    None
+}
+
+fn parse_assistant_response_contract_block(payload: &str) -> Option<AssistantResponseContract> {
+    let trimmed = payload.trim();
+    let inner = trimmed
+        .strip_prefix("<assistant_response>")?
+        .strip_suffix("</assistant_response>")?;
+
+    let (intent, rest) = consume_contract_tag(inner, "intent")?;
+    let (summary, rest) = consume_contract_tag(rest, "summary")?;
+    let (tool_summary, rest) = consume_contract_tag(rest, "tool_summary")?;
+    let (nextstep, rest) = consume_contract_tag(rest, "nextstep")?;
+    let (needs_user_input_raw, rest) = consume_contract_tag(rest, "needs_user_input")?;
+    let (question, rest) = consume_contract_tag(rest, "question")?;
+    let (status, rest) = consume_contract_tag(rest, "status")?;
+    let (error, rest) = consume_contract_tag(rest, "error")?;
+
+    if !rest.trim().is_empty() {
+        return None;
+    }
+
+    let needs_user_input = match needs_user_input_raw.trim() {
+        "true" => true,
+        "false" => false,
+        _ => return None,
+    };
+
+    let status = status.trim();
+    if !matches!(status, "ok" | "blocked" | "failed") {
+        return None;
+    }
+
+    Some(AssistantResponseContract {
+        intent: intent.trim().to_owned(),
+        summary,
+        tool_summary,
+        nextstep,
+        needs_user_input,
+        question,
+        status: status.to_owned(),
+        error,
+    })
+}
+
+fn parse_partial_assistant_response_contract(payload: &str) -> Option<AssistantResponseContract> {
+    let candidate = latest_contract_candidate(payload)?;
+
+    let intent =
+        extract_streaming_tag_value(candidate, "intent").unwrap_or_else(|| "report".to_owned());
+    let summary = extract_streaming_tag_value(candidate, "summary").unwrap_or_default();
+    let tool_summary = extract_streaming_tag_value(candidate, "tool_summary").unwrap_or_default();
+    let nextstep = extract_streaming_tag_value(candidate, "nextstep").unwrap_or_default();
+    let question = extract_streaming_tag_value(candidate, "question").unwrap_or_default();
+    let error = extract_streaming_tag_value(candidate, "error").unwrap_or_default();
+
+    if summary.trim().is_empty()
+        && tool_summary.trim().is_empty()
+        && nextstep.trim().is_empty()
+        && question.trim().is_empty()
+        && error.trim().is_empty()
+    {
+        return None;
+    }
+
+    let needs_user_input = extract_streaming_tag_value(candidate, "needs_user_input")
+        .map(|value| value.trim_start().starts_with("true"))
+        .unwrap_or(false);
+
+    let status = extract_streaming_tag_value(candidate, "status")
+        .map(|value| {
+            let lowered = value.trim().to_ascii_lowercase();
+            if lowered.starts_with("blocked") {
+                "blocked".to_owned()
+            } else if lowered.starts_with("failed") {
+                "failed".to_owned()
+            } else if lowered.starts_with("ok") {
+                "ok".to_owned()
+            } else if needs_user_input {
+                "blocked".to_owned()
+            } else {
+                "ok".to_owned()
+            }
+        })
+        .unwrap_or_else(|| {
+            if needs_user_input {
+                "blocked".to_owned()
+            } else {
+                "ok".to_owned()
+            }
+        });
+
+    Some(AssistantResponseContract {
+        intent: intent.trim().to_owned(),
+        summary,
+        tool_summary,
+        nextstep,
+        needs_user_input,
+        question,
+        status,
+        error,
+    })
+}
+
+fn parse_assistant_response_contract_block_lenient(
+    payload: &str,
+) -> Option<AssistantResponseContract> {
+    let trimmed = payload.trim();
+    let inner = trimmed.strip_prefix("<assistant_response>")?;
+    let inner = inner
+        .strip_suffix("</assistant_response>")
+        .unwrap_or(inner)
+        .trim();
+
+    let intent = find_contract_tag(inner, "intent").unwrap_or_else(|| "report".to_owned());
+    let summary = find_contract_tag(inner, "summary").unwrap_or_default();
+    let tool_summary = find_contract_tag(inner, "tool_summary").unwrap_or_default();
+    let nextstep = find_contract_tag(inner, "nextstep").unwrap_or_default();
+    let needs_user_input_raw =
+        find_contract_tag(inner, "needs_user_input").unwrap_or_else(|| "false".to_owned());
+    let question = find_contract_tag(inner, "question").unwrap_or_default();
+    let status_raw = find_contract_tag(inner, "status").unwrap_or_default();
+    let error = find_contract_tag(inner, "error").unwrap_or_default();
+
+    if summary.trim().is_empty()
+        && tool_summary.trim().is_empty()
+        && nextstep.trim().is_empty()
+        && question.trim().is_empty()
+        && error.trim().is_empty()
+    {
+        return None;
+    }
+
+    let needs_user_input = needs_user_input_raw.trim().eq_ignore_ascii_case("true");
+    let status = match status_raw.trim() {
+        "ok" | "blocked" | "failed" => status_raw.trim().to_owned(),
+        _ if needs_user_input => "blocked".to_owned(),
+        _ => "ok".to_owned(),
+    };
+
+    Some(AssistantResponseContract {
+        intent: intent.trim().to_owned(),
+        summary,
+        tool_summary,
+        nextstep,
+        needs_user_input,
+        question,
+        status,
+        error,
+    })
+}
+
+fn consume_contract_tag<'a>(rest: &'a str, tag: &str) -> Option<(String, &'a str)> {
+    let working = rest.trim_start();
+    let open = format!("<{tag}>");
+    let close = format!("</{tag}>");
+    let after_open = working.strip_prefix(&open)?;
+    let close_index = after_open.find(&close)?;
+    let value = after_open[..close_index].to_owned();
+    let remaining = &after_open[close_index + close.len()..];
+    Some((value, remaining))
+}
+
+fn latest_contract_candidate(payload: &str) -> Option<&str> {
+    let start = payload.rfind("<assistant_response")?;
+    let candidate = &payload[start..];
+    if let Some(pos) = candidate.find("<assistant_response>") {
+        return Some(&candidate[pos..]);
+    }
+    Some(candidate)
+}
+
+fn extract_streaming_tag_value(payload: &str, tag: &str) -> Option<String> {
+    let open = format!("<{tag}>");
+    let close = format!("</{tag}>");
+    let start = payload.find(&open)? + open.len();
+    let remaining = &payload[start..];
+    let value = match remaining.find(&close) {
+        Some(end) => &remaining[..end],
+        None => remaining,
+    };
+    Some(value.trim().to_owned())
+}
+
+fn find_contract_tag(payload: &str, tag: &str) -> Option<String> {
+    let open = format!("<{tag}>");
+    let close = format!("</{tag}>");
+    let start = payload.find(&open)? + open.len();
+    let end = payload[start..].find(&close)? + start;
+    Some(payload[start..end].to_owned())
+}
+
+fn format_structured_response_details(contract: &AssistantResponseContract) -> String {
+    let mut lines = vec![
+        format!("intent={}", contract.intent.trim()),
+        format!("status={}", contract.status.trim()),
+        format!("needs_user_input={}", contract.needs_user_input),
+    ];
+    if !contract.error.trim().is_empty() {
+        lines.push(format!("error={}", contract.error.trim()));
+    }
+    lines.join("\n")
+}
+
+fn looks_like_contract_markup(text: &str) -> bool {
+    let lowered = text.to_ascii_lowercase();
+    [
+        "<assistant_",
+        "</assistant_",
+        "<intent",
+        "<summary",
+        "<tool_summary",
+        "<nextstep",
+        "<needs_user_input",
+        "<question",
+        "<status",
+        "<error",
+    ]
+    .iter()
+    .any(|needle| lowered.contains(needle))
+}
+
+fn strip_contract_markup(text: &str) -> String {
+    let mut stripped = String::new();
+    let mut inside_tag = false;
+    for ch in text.chars() {
+        match ch {
+            '<' => inside_tag = true,
+            '>' if inside_tag => {
+                inside_tag = false;
+                if !stripped.ends_with('\n') {
+                    stripped.push('\n');
+                }
+            }
+            _ if !inside_tag => stripped.push(ch),
+            _ => {}
+        }
+    }
+
+    stripped
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
 }

@@ -245,8 +245,13 @@ fn build_plan_prompt(request: &str) -> String {
         "You are in planning mode.\n\
          Generate a concise implementation plan only.\n\
          If requirements are ambiguous, ask concise clarifying questions first.\n\
-         First line must be a short plain-text title with no markdown, no numbering, and no label.\n\
-         After a blank line, write the plan body as concise ordered steps.\n\
+         Output must follow the structured response contract:\n\
+         - intent: use 'plan' for actionable plan, or 'clarify' when waiting on user answers.\n\
+         - summary: short plan title.\n\
+         - tool_summary: what you inspected or validated.\n\
+         - nextstep: ordered actionable plan steps.\n\
+         - needs_user_input/question: set true with a concise question when clarification is required.\n\
+         - status: use 'blocked' when waiting for user input, otherwise 'ok'.\n\
          Keep the answer focused on planning.\n\n\
          User request:\n{request}"
     )
@@ -278,12 +283,16 @@ fn build_plan_execution_prompt(approval: &str, plan_context: Option<&str>) -> St
             "Execute the approved plan.\n\
              The user approved execution with: {approval}\n\
              Plan context:\n{plan_context}\n\n\
-             Continue with concrete implementation steps and report progress with actionable updates."
+             Continue with concrete implementation steps and report progress with actionable updates.\n\
+             Output must follow the structured response contract.\n\
+             Use intent='execute' while implementing and intent='report' for pure progress updates."
         ),
         None => format!(
             "Execute the approved plan.\n\
              The user approved execution with: {approval}\n\
-             There is no explicit prior plan context in history, so infer the best next implementation steps and proceed."
+             There is no explicit prior plan context in history, so infer the best next implementation steps and proceed.\n\
+             Output must follow the structured response contract.\n\
+             Use intent='execute' while implementing and intent='report' for pure progress updates."
         ),
     }
 }
@@ -291,9 +300,10 @@ fn build_plan_execution_prompt(approval: &str, plan_context: Option<&str>) -> St
 fn build_compact_prompt() -> String {
     "You are in compaction mode.\n\
      Your task is to create a concise summary of the conversation so far.\n\
-     First line must be a short plain-text title summarizing what has been accomplished.\n\
-     After a blank line, write a compact summary of key decisions, actions taken, and outcomes.\n\
-     Focus on information that would be valuable for continuing this conversation later.\n\
+     Output must follow the structured response contract.\n\
+     Use intent='report'. Put the compact title in summary.\n\
+     Put key decisions, actions, and outcomes in tool_summary.\n\
+     Put continuation guidance in nextstep.\n\
      Keep the summary focused and under 200 words."
         .to_owned()
 }

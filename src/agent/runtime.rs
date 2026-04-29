@@ -29,7 +29,10 @@ pub(crate) mod turn;
 mod tests;
 
 pub use errors::RuntimeErrorKind;
-use turn::{ChannelObserver, TurnOutcome, execute_turn};
+use turn::{
+    ChannelObserver, TurnOutcome, execute_turn, response_contract_enforced,
+    response_contract_schema_prompt,
+};
 
 #[cfg(test)]
 use crate::provider::ProviderEvent;
@@ -368,8 +371,10 @@ fn run_turn_with_retry(
         }
 
         let mut messages = history.to_vec();
+        let runtime_prompt = format_runtime_prompt(prompt, model);
+        let inserted_user_index = messages.len();
         messages.push(ProviderMessage::User {
-            content: prompt.to_string(),
+            content: runtime_prompt,
         });
         let observer = ChannelObserver { tx: event_tx };
         let result = execute_turn(
@@ -380,6 +385,7 @@ fn run_turn_with_retry(
             &observer,
             cancel_flag,
         );
+        restore_original_prompt_for_history(&mut messages, inserted_user_index, prompt);
 
         match result {
             TurnOutcome::Complete => {
@@ -450,6 +456,29 @@ fn run_turn_with_retry(
     }
 
     None
+}
+
+fn format_runtime_prompt(prompt: &str, model: &str) -> String {
+    if !response_contract_enforced(model) {
+        return prompt.to_owned();
+    }
+
+    format!(
+        "{prompt}\n\n[OUTPUT FORMAT]\n{}",
+        response_contract_schema_prompt()
+    )
+}
+
+fn restore_original_prompt_for_history(
+    messages: &mut [ProviderMessage],
+    user_index: usize,
+    original_prompt: &str,
+) {
+    if let Some(ProviderMessage::User { content }) = messages.get_mut(user_index)
+        && content.contains("[OUTPUT FORMAT]")
+    {
+        *content = original_prompt.to_owned();
+    }
 }
 
 fn build_tool_registry(

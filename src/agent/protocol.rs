@@ -37,6 +37,22 @@ pub struct AgentUsage {
     pub total_tokens: u32,
 }
 
+/// Parsed assistant response contract fields emitted as a side-channel event.
+///
+/// This keeps control/protocol data separate from user-visible text streaming.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AssistantContractDelta {
+    pub intent: Option<String>,
+    pub summary: Option<String>,
+    pub tool_summary: Option<String>,
+    pub nextstep: Option<String>,
+    pub needs_user_input: Option<bool>,
+    pub question: Option<String>,
+    pub status: Option<String>,
+    pub error: Option<String>,
+    pub complete: bool,
+}
+
 /// Events sent from the agent runtime back to the UI thread.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AgentEvent {
@@ -44,6 +60,8 @@ pub enum AgentEvent {
     TurnStarted { turn_id: String },
     /// A chunk of assistant text was generated (streaming).
     TextDelta { text: String },
+    /// Parsed structured response contract update for the current turn.
+    AssistantContractDelta { delta: AssistantContractDelta },
     /// A chunk of chain-of-thought reasoning (thinking mode).
     ThinkingDelta { text: String },
     /// Updated provider token usage for the current turn.

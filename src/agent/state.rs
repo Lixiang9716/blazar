@@ -70,6 +70,7 @@ impl AgentRuntimeState {
                 self.streaming_text.push_str(text);
                 false
             }
+            AgentEvent::AssistantContractDelta { .. } => false,
             AgentEvent::ThinkingDelta { .. } => {
                 // Thinking deltas don't accumulate in state — only in timeline.
                 false

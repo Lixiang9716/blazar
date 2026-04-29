@@ -6,6 +6,7 @@ use std::sync::mpsc;
 use log::{debug, info, warn};
 
 use crate::agent::capability::{CapabilityContentPart, CapabilityResult};
+use crate::agent::protocol::AssistantContractDelta;
 use crate::agent::tools::ToolRegistry;
 use crate::provider::{LlmProvider, ProviderEvent, ProviderMessage};
 
@@ -225,6 +226,21 @@ pub(crate) fn response_contract_enforced(model: &str) -> bool {
     !model.eq_ignore_ascii_case("echo")
 }
 
+pub(crate) fn response_contract_schema_prompt() -> &'static str {
+    "Return your final response using EXACTLY this XML schema and no text outside tags:\n\
+     <assistant_response>\n\
+       <intent>plan|clarify|execute|report</intent>\n\
+       <summary>...</summary>\n\
+       <tool_summary>...</tool_summary>\n\
+       <nextstep>...</nextstep>\n\
+       <needs_user_input>true|false</needs_user_input>\n\
+       <question>...</question>\n\
+       <status>ok|blocked|failed</status>\n\
+       <error>...</error>\n\
+     </assistant_response>\n\
+     Rules: summary/nextstep must be non-empty; if needs_user_input=true then question must be non-empty; if status=failed then error must be non-empty."
+}
+
 fn format_response_contract_retry_prompt(violations: &[String]) -> String {
     let mut listed = String::new();
     for violation in violations {
@@ -237,18 +253,9 @@ fn format_response_contract_retry_prompt(violations: &[String]) -> String {
         "Your previous response violated the required XML response contract.\n\
          Violations:\n\
          {listed}\n\
-         Re-send a full response using EXACTLY this schema with no text outside tags:\n\
-         <assistant_response>\n\
-           <intent>plan|clarify|execute|report</intent>\n\
-           <summary>...</summary>\n\
-           <tool_summary>...</tool_summary>\n\
-           <nextstep>...</nextstep>\n\
-           <needs_user_input>true|false</needs_user_input>\n\
-           <question>...</question>\n\
-           <status>ok|blocked|failed</status>\n\
-           <error>...</error>\n\
-         </assistant_response>\n\
-         Rule reminders: summary/nextstep must be non-empty; if needs_user_input=true then question must be non-empty; if status=failed then error must be non-empty."
+         Re-send a full response.\n\
+         {}",
+        response_contract_schema_prompt()
     )
 }
 
@@ -394,11 +401,16 @@ pub(super) fn stream_provider_pass(
     cancel_flag: &Arc<AtomicBool>,
 ) -> ProviderPass {
     let (chunk_tx, chunk_rx) = mpsc::channel::<ProviderEvent>();
+    let contract_side_channel_enabled = response_contract_enforced(model);
     let mut pass = ProviderPass {
         outcome: TurnOutcome::Complete,
         assistant_text: String::new(),
         tool_calls: Vec::new(),
     };
+    let mut contract_stream_started = false;
+    let mut contract_stream_raw = String::new();
+    let mut contract_probe_tail = String::new();
+    let mut last_contract_delta: Option<AssistantContractDelta> = None;
 
     std::thread::scope(|scope| {
         scope.spawn(|| provider.stream_turn(model, messages, tool_specs, chunk_tx));
@@ -414,7 +426,45 @@ pub(super) fn stream_provider_pass(
             match event {
                 ProviderEvent::TextDelta(text) => {
                     pass.assistant_text.push_str(&text);
-                    observer.on_text_delta(&text);
+                    if !contract_side_channel_enabled {
+                        observer.on_text_delta(&text);
+                        continue;
+                    }
+
+                    let mut forward_text_delta = true;
+                    if contract_stream_started {
+                        contract_stream_raw.push_str(&text);
+                        forward_text_delta = false;
+                    } else {
+                        let mut probe = contract_probe_tail.clone();
+                        probe.push_str(&text);
+                        if let Some(open_start) = find_contract_open_marker_start(&probe) {
+                            contract_stream_started = true;
+                            contract_stream_raw.clear();
+                            contract_stream_raw.push_str(&probe[open_start..]);
+                            contract_probe_tail.clear();
+                            forward_text_delta = false;
+                        } else {
+                            contract_probe_tail = contract_open_probe_tail(&probe);
+                            if !contract_probe_tail.is_empty() {
+                                // Hold potential split opening-tag fragments until we can disambiguate
+                                // on subsequent chunks to avoid leaking protocol markup to UI.
+                                forward_text_delta = false;
+                            }
+                        }
+                    }
+
+                    if contract_stream_started
+                        && let Some(delta) = parse_assistant_contract_delta(&contract_stream_raw)
+                        && last_contract_delta.as_ref() != Some(&delta)
+                    {
+                        observer.on_assistant_contract_delta(delta.clone());
+                        last_contract_delta = Some(delta);
+                    }
+
+                    if forward_text_delta {
+                        observer.on_text_delta(&text);
+                    }
                 }
                 ProviderEvent::ThinkingDelta(text) => {
                     observer.on_thinking_delta(&text);
@@ -434,6 +484,14 @@ pub(super) fn stream_provider_pass(
                     });
                 }
                 ProviderEvent::TurnComplete => {
+                    if contract_side_channel_enabled
+                        && contract_stream_started
+                        && let Some(delta) = parse_assistant_contract_delta(&contract_stream_raw)
+                        && last_contract_delta.as_ref() != Some(&delta)
+                    {
+                        observer.on_assistant_contract_delta(delta.clone());
+                        last_contract_delta = Some(delta);
+                    }
                     debug!("stream_provider_pass: provider sent TurnComplete");
                     break;
                 }
@@ -454,4 +512,94 @@ pub(super) fn stream_provider_pass(
     });
 
     pass
+}
+
+fn find_contract_open_marker_start(text: &str) -> Option<usize> {
+    text.rfind("<assistant_response>")
+        .or_else(|| text.rfind("<assistant_response"))
+}
+
+fn contract_open_probe_tail(text: &str) -> String {
+    const MARKER: &str = "<assistant_response";
+    let max_len = MARKER.len().saturating_sub(1).min(text.len());
+    for len in (1..=max_len).rev() {
+        let suffix = &text[text.len() - len..];
+        if MARKER.starts_with(suffix) {
+            return suffix.to_owned();
+        }
+    }
+    String::new()
+}
+
+fn parse_assistant_contract_delta(payload: &str) -> Option<AssistantContractDelta> {
+    const OPEN: &str = "<assistant_response>";
+    const CLOSE: &str = "</assistant_response>";
+    let start = payload.rfind(OPEN)?;
+    let candidate = &payload[start..];
+    let (inner, complete) = match candidate.find(CLOSE) {
+        Some(close_index) => (&candidate[OPEN.len()..close_index], true),
+        None => (&candidate[OPEN.len()..], false),
+    };
+
+    let intent = extract_contract_tag_value(inner, "intent").and_then(normalized_non_empty);
+    let summary = extract_contract_tag_value(inner, "summary").and_then(normalized_non_empty);
+    let tool_summary =
+        extract_contract_tag_value(inner, "tool_summary").and_then(normalized_non_empty);
+    let nextstep = extract_contract_tag_value(inner, "nextstep").and_then(normalized_non_empty);
+    let question = extract_contract_tag_value(inner, "question").and_then(normalized_non_empty);
+    let status = extract_contract_tag_value(inner, "status").and_then(normalized_non_empty);
+    let error = extract_contract_tag_value(inner, "error").and_then(normalized_non_empty);
+    let needs_user_input =
+        extract_contract_tag_value(inner, "needs_user_input").and_then(parse_bool_field);
+
+    if intent.is_none()
+        && summary.is_none()
+        && tool_summary.is_none()
+        && nextstep.is_none()
+        && needs_user_input.is_none()
+        && question.is_none()
+        && status.is_none()
+        && error.is_none()
+    {
+        return None;
+    }
+
+    Some(AssistantContractDelta {
+        intent,
+        summary,
+        tool_summary,
+        nextstep,
+        needs_user_input,
+        question,
+        status,
+        error,
+        complete,
+    })
+}
+
+fn extract_contract_tag_value(inner: &str, tag: &str) -> Option<String> {
+    let open = format!("<{tag}>");
+    let close = format!("</{tag}>");
+    let start = inner.find(&open)?;
+    let after_open = &inner[start + open.len()..];
+    if let Some(end) = after_open.find(&close) {
+        return Some(after_open[..end].to_owned());
+    }
+    // Partial streaming value: keep current plain-text fragment before the next tag starts.
+    let partial_end = after_open.find('<').unwrap_or(after_open.len());
+    let partial = &after_open[..partial_end];
+    (!partial.is_empty()).then_some(partial.to_owned())
+}
+
+fn normalized_non_empty(value: String) -> Option<String> {
+    let trimmed = value.trim();
+    (!trimmed.is_empty()).then_some(trimmed.to_owned())
+}
+
+fn parse_bool_field(value: String) -> Option<bool> {
+    match value.trim() {
+        "true" => Some(true),
+        "false" => Some(false),
+        _ => None,
+    }
 }

@@ -1,7 +1,7 @@
 use std::sync::mpsc::Sender;
 
 use super::RuntimeErrorKind;
-use crate::agent::protocol::{AgentEvent, AgentUsage};
+use crate::agent::protocol::{AgentEvent, AgentUsage, AssistantContractDelta};
 use crate::agent::tools::ToolKind;
 
 pub(crate) struct ToolCallStartMetadata {
@@ -13,6 +13,7 @@ pub(crate) struct ToolCallStartMetadata {
 /// Observer that receives lifecycle events during a turn.
 pub(crate) trait TurnObserver {
     fn on_text_delta(&self, text: &str);
+    fn on_assistant_contract_delta(&self, delta: AssistantContractDelta);
     fn on_thinking_delta(&self, text: &str);
     fn on_usage(&self, usage: crate::provider::ProviderUsage);
     fn on_tool_call_started(
@@ -37,6 +38,10 @@ impl TurnObserver for ChannelObserver<'_> {
         let _ = self.tx.send(AgentEvent::TextDelta {
             text: text.to_owned(),
         });
+    }
+
+    fn on_assistant_contract_delta(&self, delta: AssistantContractDelta) {
+        let _ = self.tx.send(AgentEvent::AssistantContractDelta { delta });
     }
 
     fn on_thinking_delta(&self, text: &str) {
@@ -95,6 +100,7 @@ pub(crate) struct SilentObserver;
 
 impl TurnObserver for SilentObserver {
     fn on_text_delta(&self, _text: &str) {}
+    fn on_assistant_contract_delta(&self, _delta: AssistantContractDelta) {}
     fn on_thinking_delta(&self, _text: &str) {}
     fn on_usage(&self, _usage: crate::provider::ProviderUsage) {}
 
@@ -121,6 +127,7 @@ mod tests {
     fn silent_observer_compiles_and_runs_all_methods() {
         let observer = SilentObserver;
         observer.on_text_delta("hello");
+        observer.on_assistant_contract_delta(AssistantContractDelta::default());
         observer.on_thinking_delta("hmm");
         observer.on_usage(ProviderUsage {
             prompt_tokens: 1,

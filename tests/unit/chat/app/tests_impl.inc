@@ -1729,7 +1729,8 @@ fn submit_in_plan_mode_uses_plan_prompt_path() {
         .expect("provider should capture a prompt");
 
     assert!(prompt.contains("planning mode"));
-    assert!(prompt.contains("short plain-text title"));
+    assert!(prompt.contains("structured response contract"));
+    assert!(prompt.contains("intent: use 'plan'"));
     assert!(prompt.contains("ask concise clarifying questions first"));
     assert!(prompt.contains("User request:"));
     assert!(prompt.contains("optimize parser"));
@@ -1773,6 +1774,7 @@ fn slash_query_submit_in_plan_mode_keeps_plan_runtime_path() {
         .clone()
         .expect("provider should capture a prompt");
     assert!(prompt.contains("planning mode"));
+    assert!(prompt.contains("structured response contract"));
     assert!(prompt.contains("User request:\n/"));
 }
 
@@ -1822,6 +1824,10 @@ fn execute_keyword_in_plan_mode_switches_to_chat_execution_prompt() {
     assert!(
         prompt.contains("Execute the approved plan"),
         "execution prompt should include explicit execution instruction"
+    );
+    assert!(
+        prompt.contains("Output must follow the structured response contract"),
+        "execution prompt should include structured response contract requirement"
     );
     assert!(
         prompt.contains("Plan command simplification"),
@@ -2836,6 +2842,340 @@ fn turn_complete_plan_with_non_extractable_body_leaves_entry_untitled() {
     assert_eq!(last.body, "###");
     assert!(app.active_turn_kind.is_none());
     assert!(app.active_turn_title.is_none());
+}
+
+#[test]
+fn turn_complete_unwraps_structured_response_for_chat_entries() {
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+    app.timeline.push(TimelineEntry::response(
+        r#"<assistant_response>
+<intent>clarify</intent>
+<summary>Need one environment choice.</summary>
+<tool_summary>Read workspace config.</tool_summary>
+<nextstep>Confirm which provider model to use.</nextstep>
+<needs_user_input>true</needs_user_input>
+<question>Use deepseek-v4-pro or qwen3-8b?</question>
+<status>blocked</status>
+<error>Waiting for user confirmation.</error>
+</assistant_response>"#,
+    ));
+    app.active_turn_kind = Some(TurnKind::Chat);
+
+    app.apply_agent_event_for_test(AgentEvent::TurnComplete);
+
+    let last = app.timeline.last().expect("assistant entry should exist");
+    assert_eq!(last.actor, Actor::Assistant);
+    assert_eq!(last.kind, EntryKind::Message);
+    assert!(!last.body.contains("<assistant_response>"));
+    assert!(last.body.contains("Need one environment choice."));
+    assert!(last.body.contains("Tool summary: Read workspace config."));
+    assert!(last.body.contains("Next step: Confirm which provider model to use."));
+    assert!(last.body.contains("Question: Use deepseek-v4-pro or qwen3-8b?"));
+    assert!(last.body.contains("Blocked reason: Waiting for user confirmation."));
+    assert!(last.details.contains("intent=clarify"));
+    assert!(last.details.contains("status=blocked"));
+}
+
+#[test]
+fn turn_complete_unwraps_structured_response_for_plan_entries() {
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+    app.timeline.push(TimelineEntry::response(
+        r#"<assistant_response>
+<intent>plan</intent>
+<summary>Plan command simplification</summary>
+<tool_summary></tool_summary>
+<nextstep>1. Add parser tests
+2. Handle structured response rendering</nextstep>
+<needs_user_input>false</needs_user_input>
+<question></question>
+<status>ok</status>
+<error></error>
+</assistant_response>"#,
+    ));
+    app.active_turn_kind = Some(TurnKind::Plan);
+
+    app.apply_agent_event_for_test(AgentEvent::TurnComplete);
+
+    let last = app.timeline.last().expect("assistant entry should exist");
+    assert_eq!(last.title.as_deref(), Some("Plan command simplification"));
+    assert_eq!(
+        last.body,
+        "1. Add parser tests\n2. Handle structured response rendering"
+    );
+    assert!(!last.body.contains("<assistant_response>"));
+}
+
+#[test]
+fn turn_complete_unwraps_latest_structured_response_when_retries_are_concatenated() {
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+    app.timeline.push(TimelineEntry::response(
+        r#"Interim stream text that should be discarded.
+<assistant_response>
+<intent>clarify</intent>
+<summary>Bad contract summary</summary>
+<tool_summary>bad</tool_summary>
+<nextstep>bad</nextstep>
+<needs_user_input>maybe</needs_user_input>
+<question></question>
+<status>ok</status>
+<error></error>
+</assistant_response>
+<assistant_response>
+<intent>execute</intent>
+<summary>Applied maintainability refactor.</summary>
+<tool_summary>Updated events parser and tests.</tool_summary>
+<nextstep>Run full validation and continue implementation.</nextstep>
+<needs_user_input>false</needs_user_input>
+<question></question>
+<status>ok</status>
+<error></error>
+</assistant_response>"#,
+    ));
+    app.active_turn_kind = Some(TurnKind::Chat);
+
+    app.apply_agent_event_for_test(AgentEvent::TurnComplete);
+
+    let last = app.timeline.last().expect("assistant entry should exist");
+    assert!(!last.body.contains("<assistant_response>"));
+    assert!(last.body.contains("Applied maintainability refactor."));
+    assert!(last.body.contains("Tool summary: Updated events parser and tests."));
+    assert!(last.body.contains("Next step: Run full validation and continue implementation."));
+    assert!(!last.body.contains("Bad contract summary"));
+    assert!(last.details.contains("intent=execute"));
+    assert!(last.details.contains("status=ok"));
+}
+
+#[test]
+fn turn_complete_unwraps_structured_response_split_across_assistant_chunks() {
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+    app.apply_agent_event_for_test(AgentEvent::TurnStarted {
+        turn_id: "turn-1".into(),
+    });
+    app.apply_agent_event_for_test(AgentEvent::TextDelta {
+        text: "<assistant_response>\n<intent>execute</intent>\n<summary>Split response normalized.</summary>\n<tool_summary>Updated parser.</tool_summary>\n<nextstep>Run full validation.</nextstep>\n".into(),
+    });
+    app.apply_agent_event_for_test(AgentEvent::ThinkingDelta {
+        text: "thinking...".into(),
+    });
+    app.apply_agent_event_for_test(AgentEvent::TextDelta {
+        text: "<needs_user_input>false</needs_user_input>\n<question></question>\n<status>ok</status>\n<error></error>\n</assistant_response>".into(),
+    });
+
+    app.apply_agent_event_for_test(AgentEvent::TurnComplete);
+
+    let assistant_messages = app
+        .timeline
+        .iter()
+        .filter(|entry| entry.actor == Actor::Assistant && entry.kind == EntryKind::Message)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        assistant_messages.len(),
+        1,
+        "turn should collapse split assistant chunks into one message entry"
+    );
+
+    let last = assistant_messages.last().expect("assistant entry should exist");
+    assert!(!last.body.contains("<assistant_response>"));
+    assert!(last.body.contains("Split response normalized."));
+    assert!(last.body.contains("Tool summary: Updated parser."));
+    assert!(last.body.contains("Next step: Run full validation."));
+}
+
+#[test]
+fn text_delta_streaming_parses_structured_response_before_turn_complete() {
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+    app.apply_agent_event_for_test(AgentEvent::TurnStarted {
+        turn_id: "turn-stream-xml".into(),
+    });
+    app.active_turn_kind = Some(TurnKind::Chat);
+
+    app.apply_agent_event_for_test(AgentEvent::TextDelta {
+        text: "<assistant_response><intent>execute</intent><summary>Streaming summary.</summary>"
+            .into(),
+    });
+
+    let last = app.timeline.last().expect("assistant entry should exist");
+    assert_eq!(last.actor, Actor::Assistant);
+    assert_eq!(last.kind, EntryKind::Message);
+    assert!(!last.body.contains("<assistant_response>"));
+    assert!(
+        last.body.contains("Streaming summary."),
+        "summary should be rendered before TurnComplete"
+    );
+}
+
+#[test]
+fn text_delta_structured_stream_keeps_single_assistant_entry_across_thinking_chunks() {
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+    app.apply_agent_event_for_test(AgentEvent::TurnStarted {
+        turn_id: "turn-stream-stable".into(),
+    });
+    app.active_turn_kind = Some(TurnKind::Chat);
+
+    app.apply_agent_event_for_test(AgentEvent::TextDelta {
+        text: "<assistant_response><intent>execute</intent><summary>Stable stream.</summary>"
+            .into(),
+    });
+    app.apply_agent_event_for_test(AgentEvent::ThinkingDelta {
+        text: "thinking...".into(),
+    });
+    app.apply_agent_event_for_test(AgentEvent::TextDelta {
+        text: "<tool_summary>Updated parser.</tool_summary><nextstep>Continue.</nextstep><needs_user_input>false</needs_user_input><question></question><status>ok</status><error></error></assistant_response>".into(),
+    });
+
+    let assistant_messages = app
+        .timeline
+        .iter()
+        .filter(|entry| entry.actor == Actor::Assistant && entry.kind == EntryKind::Message)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        assistant_messages.len(),
+        1,
+        "structured streaming should keep a single assistant message entry while chunks arrive"
+    );
+    let last = assistant_messages.last().expect("assistant entry should exist");
+    assert!(last.body.contains("Stable stream."));
+    assert!(last.body.contains("Tool summary: Updated parser."));
+}
+
+#[test]
+fn text_delta_structured_stream_renders_partial_summary_without_closing_tag() {
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+    app.apply_agent_event_for_test(AgentEvent::TurnStarted {
+        turn_id: "turn-partial-summary".into(),
+    });
+    app.active_turn_kind = Some(TurnKind::Chat);
+
+    app.apply_agent_event_for_test(AgentEvent::TextDelta {
+        text: "<assistant_response><intent>execute</intent><summary>Streaming summary in progress"
+            .into(),
+    });
+
+    let last = app.timeline.last().expect("assistant entry should exist");
+    assert_eq!(last.actor, Actor::Assistant);
+    assert_eq!(last.kind, EntryKind::Message);
+    assert!(last.body.contains("Streaming summary in progress"));
+    assert!(!last.body.contains('<'));
+}
+
+#[test]
+fn contract_delta_side_channel_suppresses_markup_text_deltas() {
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+    app.apply_agent_event_for_test(AgentEvent::TurnStarted {
+        turn_id: "turn-contract-side-channel".into(),
+    });
+    app.active_turn_kind = Some(TurnKind::Chat);
+
+    app.apply_agent_event_for_test(AgentEvent::AssistantContractDelta {
+        delta: crate::agent::protocol::AssistantContractDelta {
+            intent: Some("execute".into()),
+            summary: Some("Contract side-channel summary.".into()),
+            ..Default::default()
+        },
+    });
+    app.apply_agent_event_for_test(AgentEvent::TextDelta {
+        text: "<assistant_response><summary>leaked markup</summary></assistant_response>".into(),
+    });
+
+    let last = app.timeline.last().expect("assistant entry should exist");
+    assert_eq!(last.actor, Actor::Assistant);
+    assert_eq!(last.kind, EntryKind::Message);
+    assert!(last.body.contains("Contract side-channel summary."));
+    assert!(!last.body.contains("<assistant_response>"));
+    assert!(!last.body.contains("leaked markup"));
+}
+
+#[test]
+fn turn_complete_prefers_side_channel_contract_over_conflicting_raw_markup() {
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+    app.apply_agent_event_for_test(AgentEvent::TurnStarted {
+        turn_id: "turn-side-channel-precedence".into(),
+    });
+    app.active_turn_kind = Some(TurnKind::Chat);
+
+    app.apply_agent_event_for_test(AgentEvent::AssistantContractDelta {
+        delta: crate::agent::protocol::AssistantContractDelta {
+            intent: Some("execute".into()),
+            summary: Some("Summary from side channel.".into()),
+            tool_summary: Some("Tool summary from side channel.".into()),
+            nextstep: Some("Next step from side channel.".into()),
+            needs_user_input: Some(false),
+            status: Some("ok".into()),
+            complete: true,
+            ..Default::default()
+        },
+    });
+    app.apply_agent_event_for_test(AgentEvent::TextDelta {
+        text: "<assistant_response><intent>execute</intent><summary>Conflicting raw summary</summary><tool_summary>Conflicting raw tool summary</tool_summary><nextstep>Conflicting raw step</nextstep><needs_user_input>false</needs_user_input><question></question><status>ok</status><error></error></assistant_response>".into(),
+    });
+
+    app.apply_agent_event_for_test(AgentEvent::TurnComplete);
+
+    let last = app.timeline.last().expect("assistant entry should exist");
+    assert!(last.body.contains("Summary from side channel."));
+    assert!(last.body.contains("Tool summary: Tool summary from side channel."));
+    assert!(last.body.contains("Next step: Next step from side channel."));
+    assert!(!last.body.contains("Conflicting raw summary"));
+    assert!(!last.body.contains("Conflicting raw tool summary"));
+    assert!(!last.body.contains("Conflicting raw step"));
+}
+
+#[test]
+fn turn_complete_unwraps_lenient_structured_response_when_error_tag_missing() {
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+    app.timeline.push(TimelineEntry::response(
+        r#"<assistant_response>
+<intent>clarify</intent>
+<summary>Need narrower maintainability scope.</summary>
+<tool_summary>Checked modified files list.</tool_summary>
+<nextstep>Focus on chat/app and agent/runtime first.</nextstep>
+<needs_user_input>true</needs_user_input>
+<question>Should we only fix current modified files?</question>
+<status>blocked</status>
+</assistant_response>"#,
+    ));
+    app.active_turn_kind = Some(TurnKind::Chat);
+
+    app.apply_agent_event_for_test(AgentEvent::TurnComplete);
+
+    let last = app.timeline.last().expect("assistant entry should exist");
+    assert_eq!(last.actor, Actor::Assistant);
+    assert_eq!(last.kind, EntryKind::Message);
+    assert!(!last.body.contains("<assistant_response>"));
+    assert!(last.body.contains("Need narrower maintainability scope."));
+    assert!(last.body.contains("Tool summary: Checked modified files list."));
+    assert!(last.body.contains("Next step: Focus on chat/app and agent/runtime first."));
+    assert!(last.body.contains("Question: Should we only fix current modified files?"));
+    assert!(last.details.contains("status=blocked"));
+}
+
+#[test]
+fn turn_complete_sanitizes_internal_contract_tags_when_contract_is_unparseable() {
+    let repo_path = env!("CARGO_MANIFEST_DIR");
+    let mut app = ChatApp::new_for_test(repo_path).expect("test app should initialize");
+    app.timeline.push(TimelineEntry::response(
+        "<assistant_response><bogus>internal note</bogus></assistant_response>",
+    ));
+    app.active_turn_kind = Some(TurnKind::Chat);
+
+    app.apply_agent_event_for_test(AgentEvent::TurnComplete);
+
+    let last = app.timeline.last().expect("assistant entry should exist");
+    assert_eq!(last.actor, Actor::Assistant);
+    assert_eq!(last.kind, EntryKind::Message);
+    assert!(!last.body.contains('<'));
+    assert!(!last.body.contains('>'));
+    assert!(last.body.contains("internal note"));
 }
 
 #[test]

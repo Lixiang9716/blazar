@@ -276,6 +276,82 @@ fn user_messages(prompt: &str) -> Vec<ProviderMessage> {
     }]
 }
 
+#[test]
+fn format_runtime_prompt_adds_output_contract_for_non_echo_models() {
+    let formatted = format_runtime_prompt("implement this change", "gpt-5");
+    assert!(
+        formatted.contains("[OUTPUT FORMAT]"),
+        "non-echo models should receive output format guidance"
+    );
+    assert!(formatted.contains("<assistant_response>"));
+}
+
+#[test]
+fn run_turn_with_retry_restores_original_user_prompt_in_history() {
+    struct CapturePromptProvider {
+        seen_prompt: Arc<Mutex<Option<String>>>,
+    }
+
+    impl LlmProvider for CapturePromptProvider {
+        fn stream_turn(
+            &self,
+            _model: &str,
+            messages: &[ProviderMessage],
+            _tools: &[ToolSpec],
+            tx: Sender<ProviderEvent>,
+        ) {
+            let latest_user = messages.iter().rev().find_map(|message| match message {
+                ProviderMessage::User { content } => Some(content.clone()),
+                _ => None,
+            });
+            *self
+                .seen_prompt
+                .lock()
+                .expect("seen_prompt mutex should not be poisoned") = latest_user;
+            let _ = tx.send(ProviderEvent::TextDelta(
+                "<assistant_response><intent>execute</intent><summary>ok</summary><tool_summary></tool_summary><nextstep>next</nextstep><needs_user_input>false</needs_user_input><question></question><status>ok</status><error></error></assistant_response>".into(),
+            ));
+            let _ = tx.send(ProviderEvent::TurnComplete);
+        }
+    }
+
+    let seen_prompt = Arc::new(Mutex::new(None));
+    let provider = CapturePromptProvider {
+        seen_prompt: Arc::clone(&seen_prompt),
+    };
+    let (event_tx, _event_rx) = mpsc::channel();
+    let cancel = Arc::new(AtomicBool::new(false));
+
+    let history = run_turn_with_retry(
+        "turn-contract-format",
+        "original prompt",
+        &[],
+        &provider,
+        "gpt-5",
+        &empty_registry(),
+        &event_tx,
+        &cancel,
+    )
+    .expect("turn should complete");
+
+    let observed_prompt = seen_prompt
+        .lock()
+        .expect("seen_prompt mutex should not be poisoned")
+        .clone()
+        .expect("provider should see user prompt");
+    assert!(
+        observed_prompt.contains("[OUTPUT FORMAT]"),
+        "provider should receive the output format reminder"
+    );
+
+    assert!(
+        history
+            .iter()
+            .any(|message| matches!(message, ProviderMessage::User { content } if content == "original prompt")),
+        "conversation history should retain original prompt text without injected instructions"
+    );
+}
+
 struct CountingTool {
     calls: Arc<AtomicU32>,
 }
@@ -2475,6 +2551,8 @@ struct CancellingObserver {
 impl crate::agent::runtime::turn::TurnObserver for CancellingObserver {
     fn on_text_delta(&self, _text: &str) {}
 
+    fn on_assistant_contract_delta(&self, _delta: crate::agent::protocol::AssistantContractDelta) {}
+
     fn on_thinking_delta(&self, _text: &str) {}
 
     fn on_usage(&self, _usage: crate::provider::ProviderUsage) {}
@@ -2654,6 +2732,132 @@ fn provider_that_sends_no_terminal_event_gets_auto_complete() {
         .iter()
         .any(|event| matches!(event, AgentEvent::TextDelta { text } if text == "partial"));
     assert!(has_text, "should relay text even without terminal event");
+}
+
+#[test]
+fn stream_provider_pass_emits_structured_contract_delta_side_channel() {
+    struct StructuredDeltaProvider;
+
+    impl LlmProvider for StructuredDeltaProvider {
+        fn stream_turn(
+            &self,
+            _model: &str,
+            _messages: &[ProviderMessage],
+            _tools: &[ToolSpec],
+            tx: Sender<ProviderEvent>,
+        ) {
+            let _ = tx.send(ProviderEvent::TextDelta(
+                "<assistant_response><intent>execute</intent><summary>Streaming summary.</summary>"
+                    .into(),
+            ));
+            let _ = tx.send(ProviderEvent::TextDelta(
+                "<tool_summary>Updated parser.</tool_summary><nextstep>Run tests.</nextstep><needs_user_input>false</needs_user_input><question></question><status>ok</status><error></error></assistant_response>".into(),
+            ));
+            let _ = tx.send(ProviderEvent::TurnComplete);
+        }
+    }
+
+    let (event_tx, event_rx) = mpsc::channel();
+    let cancel = Arc::new(AtomicBool::new(false));
+
+    let pass = stream_provider_pass(
+        &StructuredDeltaProvider,
+        "gpt-5",
+        &user_messages("hi"),
+        &[],
+        &ChannelObserver { tx: &event_tx },
+        &cancel,
+    );
+    assert!(matches!(pass.outcome, TurnOutcome::Complete));
+
+    let events: Vec<_> = event_rx.try_iter().collect();
+    let first_is_contract_delta = matches!(
+        events.first(),
+        Some(AgentEvent::AssistantContractDelta { .. })
+    );
+    assert!(
+        first_is_contract_delta,
+        "structured side-channel delta should be emitted before raw text delta"
+    );
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event, AgentEvent::TextDelta { .. })),
+        "structured contract streams should not forward raw text deltas"
+    );
+
+    let final_delta = events.iter().rev().find_map(|event| match event {
+        AgentEvent::AssistantContractDelta { delta } => Some(delta),
+        _ => None,
+    });
+    let Some(final_delta) = final_delta else {
+        panic!("expected at least one assistant contract delta event");
+    };
+    assert_eq!(final_delta.summary.as_deref(), Some("Streaming summary."));
+    assert_eq!(final_delta.nextstep.as_deref(), Some("Run tests."));
+    assert_eq!(final_delta.needs_user_input, Some(false));
+    assert_eq!(final_delta.status.as_deref(), Some("ok"));
+    assert!(final_delta.complete);
+}
+
+#[test]
+fn stream_provider_pass_detects_split_contract_opening_tag_across_chunks() {
+    struct SplitOpeningTagProvider;
+
+    impl LlmProvider for SplitOpeningTagProvider {
+        fn stream_turn(
+            &self,
+            _model: &str,
+            _messages: &[ProviderMessage],
+            _tools: &[ToolSpec],
+            tx: Sender<ProviderEvent>,
+        ) {
+            let _ = tx.send(ProviderEvent::TextDelta("<assistant_res".into()));
+            let _ = tx.send(ProviderEvent::TextDelta(
+                "ponse><intent>execute</intent><summary>Split summary.</summary>".into(),
+            ));
+            let _ = tx.send(ProviderEvent::TextDelta(
+                "<tool_summary>Split tool summary.</tool_summary><nextstep>Split next step.</nextstep><needs_user_input>false</needs_user_input><question></question><status>ok</status><error></error></assistant_response>".into(),
+            ));
+            let _ = tx.send(ProviderEvent::TurnComplete);
+        }
+    }
+
+    let (event_tx, event_rx) = mpsc::channel();
+    let cancel = Arc::new(AtomicBool::new(false));
+
+    let pass = stream_provider_pass(
+        &SplitOpeningTagProvider,
+        "gpt-5",
+        &user_messages("split open tag"),
+        &[],
+        &ChannelObserver { tx: &event_tx },
+        &cancel,
+    );
+    assert!(matches!(pass.outcome, TurnOutcome::Complete));
+
+    let events: Vec<_> = event_rx.try_iter().collect();
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event, AgentEvent::TextDelta { .. })),
+        "split contract opening tags should still be consumed via side-channel without leaking text deltas"
+    );
+
+    let final_delta = events.iter().rev().find_map(|event| match event {
+        AgentEvent::AssistantContractDelta { delta } => Some(delta),
+        _ => None,
+    });
+    let Some(final_delta) = final_delta else {
+        panic!("expected assistant contract delta for split opening tag stream");
+    };
+    assert_eq!(final_delta.summary.as_deref(), Some("Split summary."));
+    assert_eq!(
+        final_delta.tool_summary.as_deref(),
+        Some("Split tool summary.")
+    );
+    assert_eq!(final_delta.nextstep.as_deref(), Some("Split next step."));
+    assert!(final_delta.complete);
 }
 
 #[test]
