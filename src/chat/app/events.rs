@@ -95,8 +95,24 @@ impl ChatApp {
                     self.scroll_offset = u16::MAX;
                     return;
                 }
-                let structured_stream = self.current_turn_structured_response_raw.is_some()
-                    || looks_like_contract_markup(&text);
+
+                if self.contract_side_channel_expected() && looks_like_contract_markup(&text) {
+                    let raw = self
+                        .current_turn_structured_response_raw
+                        .get_or_insert_with(String::new);
+                    raw.push_str(&text);
+
+                    let stripped = strip_contract_markup(&text);
+                    if !stripped.trim().is_empty() {
+                        self.append_assistant_text_delta(&stripped);
+                    }
+                    self.scroll_offset = u16::MAX;
+                    return;
+                }
+
+                let structured_stream = !self.contract_side_channel_expected()
+                    && (self.current_turn_structured_response_raw.is_some()
+                        || looks_like_contract_markup(&text));
                 if structured_stream {
                     let entry_index = self.ensure_structured_stream_entry();
 
@@ -121,15 +137,7 @@ impl ChatApp {
                     return;
                 }
 
-                let needs_new = self.timeline.last().is_none_or(|entry| {
-                    !(entry.actor == Actor::Assistant && entry.kind == EntryKind::Message)
-                });
-                if needs_new {
-                    self.timeline.push(TimelineEntry::response(""));
-                }
-                if let Some(last) = self.timeline.last_mut() {
-                    last.body.push_str(&text);
-                }
+                self.append_assistant_text_delta(&text);
                 self.scroll_offset = u16::MAX;
             }
             AgentEvent::AssistantContractDelta { delta } => {
@@ -310,9 +318,11 @@ impl ChatApp {
                     "chat turn complete",
                 );
                 self.debug_recorder.finish_turn("completed", None, None);
-                let normalized_structured_response = self
-                    .finalize_side_channel_structured_response()
-                    || self.finalize_structured_response();
+                let normalized_structured_response = if self.contract_side_channel_expected() {
+                    self.finalize_side_channel_structured_response()
+                } else {
+                    self.finalize_structured_response()
+                };
                 if !normalized_structured_response {
                     self.sanitize_internal_contract_markup();
                     if self.active_turn_kind == Some(TurnKind::Plan) {
@@ -411,6 +421,22 @@ impl ChatApp {
             return false;
         };
         self.apply_structured_contract(contract_from_structured_delta(contract_delta))
+    }
+
+    fn contract_side_channel_expected(&self) -> bool {
+        !self.model_name.eq_ignore_ascii_case("echo")
+    }
+
+    fn append_assistant_text_delta(&mut self, text: &str) {
+        let needs_new = self.timeline.last().is_none_or(|entry| {
+            !(entry.actor == Actor::Assistant && entry.kind == EntryKind::Message)
+        });
+        if needs_new {
+            self.timeline.push(TimelineEntry::response(""));
+        }
+        if let Some(last) = self.timeline.last_mut() {
+            last.body.push_str(text);
+        }
     }
 
     fn apply_structured_contract(&mut self, contract: AssistantResponseContract) -> bool {
